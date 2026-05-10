@@ -1,0 +1,17 @@
+services:
+  netmap:
+    build: .
+    image: netmap:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data   # persists DB and config.yaml
+    restart: unless-stopped
+
+    # Optional: configure AI via environment variables instead of the UI.
+    # These override data/config.yaml when set.
+    # environment:
+    #   LLM_PROVIDER: ollama          # none | ollama | openai | anthropic
+    #   LLM_BASE_URL: http://my-ollama-host:11434
+    #   LLM_MODEL: llama3.2
+    #   LLM_API_KEY: ""               # only needed for openai / anthropic

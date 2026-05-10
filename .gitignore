@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+*.egg-info/
+
+# Runtime data — never commit personal network data
+data/netmap.db
+data/netmap.db-wal
+data/netmap.db-shm
+data/config.yaml
+
+# Keep the example
+!data/config.yaml.example
+
+.env
+.DS_Store

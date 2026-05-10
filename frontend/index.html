@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>NetMap</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">◈ NetMap</div>
+
+    <nav class="sidebar-nav">
+      <button class="sidebar-nav-item active" data-tab="topology" onclick="setTab('topology')">
+        <span class="nav-icon">⬡</span> Topology
+      </button>
+      <button class="sidebar-nav-item" data-tab="hierarchy" onclick="setTab('hierarchy')">
+        <span class="nav-icon">⊟</span> Hierarchy
+      </button>
+      <button class="sidebar-nav-item" data-tab="services" onclick="setTab('services')">
+        <span class="nav-icon">◈</span> Services
+      </button>
+      <button class="sidebar-nav-item" data-tab="hosts" onclick="setTab('hosts')">
+        <span class="nav-icon">▤</span> Hosts
+      </button>
+      <button class="sidebar-nav-item" data-tab="scans" onclick="setTab('scans')">
+        <span class="nav-icon">◷</span> Scans
+      </button>
+    </nav>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="sidebar-section-header">
+      Subnets
+      <button class="btn-icon" onclick="openAddSubnet()" title="Add subnet">+</button>
+    </div>
+
+    <div class="sidebar-section" id="subnetList">
+      <div style="padding:12px 16px;font-size:11px;color:var(--text-3)">No subnets yet</div>
+    </div>
+
+    <div class="sidebar-footer">
+      <button class="ai-settings-btn" id="aiSettingsBtn" onclick="openSettings()">
+        <span id="aiStatusDot" class="ai-status-dot ai-status-none"></span>
+        ⚙ AI Settings
+      </button>
+      <label style="margin-top:6px">Model override</label>
+      <select id="globalModel" title="Leave empty to use the default from settings"></select>
+    </div>
+  </aside>
+
+  <!-- ── Top bar ────────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <button class="btn-menu" id="menuBtn" onclick="toggleSidebar()">☰</button>
+    <span class="topbar-title" id="topbarTitle">Topology</span>
+    <div class="topbar-spacer"></div>
+    <button class="btn" onclick="toggleChat()" title="Network assistant">💬 Chat</button>
+  </header>
+
+  <!-- ── Content ────────────────────────────────────────────────────────────── -->
+  <div class="content-area">
+    <div class="content">
+
+      <!-- Topology tab -->
+      <div class="tab-panel active" id="panel-topology">
+        <div id="cy" oncontextmenu="return false"></div>
+
+        <div class="graph-toolbar">
+          <button class="btn" onclick="openNetworkAnalysis()">⬡ Analyze Network</button>
+          <button class="btn" id="vlanBtn" onclick="openVlanPanel()">◈ VLANs</button>
+          <button class="btn" id="connectBtn" onclick="toggleConnectMode()">◎ Link</button>
+          <button class="btn" id="multiConnBtn" onclick="toggleMultiConnectMode()">⊕ Multi-Link</button>
+          <button class="btn btn-primary" id="multiConfirmBtn" onclick="openMultiConnModal()" style="display:none">Link (0)</button>
+          <button class="btn" id="saveLayoutBtn" onclick="saveLayoutToDb()">⊙ Save Layout</button>
+          <span class="connect-hint" id="connectHint"></span>
+        </div>
+
+        <div class="graph-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:oklch(65% 0.19 42)"></div>Router/GW</div>
+          <div class="legend-item"><div class="legend-dot" style="background:oklch(67% 0.15 240)"></div>Server</div>
+          <div class="legend-item"><div class="legend-dot" style="background:oklch(70% 0.16 145)"></div>Workstation</div>
+          <div class="legend-item"><div class="legend-dot" style="background:oklch(75% 0.16 80)"></div>IoT</div>
+          <div class="legend-item"><div class="legend-dot" style="background:oklch(50% 0.005 55)"></div>Unknown</div>
+          <div class="legend-item"><div class="legend-line-sample" style="background:oklch(67% 0.15 240)"></div>Wired</div>
+          <div class="legend-item"><div class="legend-line-sample" style="background:oklch(70% 0.16 145);background:repeating-linear-gradient(90deg,oklch(70% 0.16 145) 0,oklch(70% 0.16 145) 5px,transparent 5px,transparent 8px)"></div>WiFi</div>
+        </div>
+
+        <div class="scan-progress-overlay" id="scanProgress">
+          <div class="progress-bar-wrap">
+            <div class="progress-bar" id="progressBar" style="width:0%"></div>
+          </div>
+          <span id="progressLabel" style="color:var(--text-2);font-size:11px">Starting…</span>
+        </div>
+      </div>
+
+      <!-- Hosts tab -->
+      <div class="tab-panel" id="panel-hosts">
+        <div class="table-toolbar">
+          <input type="text" class="search-input" id="tableFilter" placeholder="Filter by IP, hostname, service…">
+          <span class="host-count" id="hostCount"></span>
+          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;margin-left:auto" onclick="openAddHost()">+ Add Host</button>
+        </div>
+        <div class="table-wrap">
+          <table id="hostsTable">
+            <thead>
+              <tr>
+                <th class="td-ip" onclick="sortTable('ip')">IP</th>
+                <th class="td-host" onclick="sortTable('hostname')">Hostname</th>
+                <th class="td-mac col-mac" onclick="sortTable('mac')">MAC</th>
+                <th class="col-vendor" onclick="sortTable('vendor')">Vendor</th>
+                <th class="td-type" onclick="sortTable('device_type')">Type</th>
+                <th class="col-os">OS</th>
+                <th onclick="sortTable('open_ports')">Ports</th>
+                <th class="td-seen" onclick="sortTable('last_seen')">Last Seen</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Scans tab -->
+      <div class="tab-panel" id="panel-scans">
+        <div class="scans-wrap" id="scansWrap"></div>
+      </div>
+
+      <!-- Services tab -->
+      <div class="tab-panel" id="panel-services">
+        <div class="svc-toolbar">
+          <input type="text" class="search-input" id="serviceFilter" placeholder="Filter by name, host, port…" style="flex:1;max-width:340px">
+          <span class="host-count" id="serviceCount"></span>
+          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;margin-left:auto" onclick="openAddService()">+ Service</button>
+        </div>
+        <div class="table-wrap">
+          <table id="servicesTable">
+            <thead>
+              <tr>
+                <th style="width:44px"></th>
+                <th onclick="sortServices('name')">Service</th>
+                <th onclick="sortServices('ip')">Host</th>
+                <th onclick="sortServices('port')">Port</th>
+                <th onclick="sortServices('status')">Status</th>
+                <th style="width:36px"></th>
+                <th style="width:60px"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Hierarchy tab -->
+      <div class="tab-panel" id="panel-hierarchy">
+        <div class="hierarchy-wrap">
+          <div class="hierarchy-toolbar">
+            <button class="btn" onclick="loadHierarchy()">↻ Recalculate</button>
+            <button class="btn" onclick="window.print()">⎙ Print / PDF</button>
+            <span style="font-size:11px;color:var(--text-3);margin-left:4px">
+              L1 = manual (set in Edit Host). L2+ derived from connections.
+            </span>
+          </div>
+          <div id="hierarchyWrap"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Chat panel (inside content-area so it sits beside content) -->
+    <div class="chat-panel" id="chatPanel">
+      <div class="chat-header">
+        <span>Network Assistant</span>
+        <div style="display:flex;gap:6px;align-items:center">
+          <select id="chatModel" style="font-size:11px;padding:4px 7px;max-width:120px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
+          <button class="btn-ghost" onclick="toggleChat()" style="font-size:16px;padding:2px 6px">×</button>
+        </div>
+      </div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg msg-assistant">Hi. I have full context on your network. Ask me about devices, services, topology, or security posture.</div>
+      </div>
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" placeholder="Ask about your network…">
+        <button class="btn btn-primary" onclick="sendChat()" style="padding:6px 12px;font-size:12px">Send</button>
+      </div>
+    </div>
+
+    <!-- Host detail panel — inside content-area so it respects the sidebar boundary -->
+    <div class="detail-panel" id="hostDetail"></div>
+
+  </div><!-- .content-area -->
+
+</div><!-- .shell -->
+
+<!-- Mobile sidebar overlay -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- Mobile bottom nav -->
+<nav class="bottom-nav">
+  <div class="bottom-nav-inner">
+    <button class="bottom-nav-btn active" data-tab="topology" onclick="setTab('topology')">
+      <span class="bottom-nav-icon">⬡</span>Graph
+    </button>
+    <button class="bottom-nav-btn" data-tab="services" onclick="setTab('services')">
+      <span class="bottom-nav-icon">◈</span>Svcs
+    </button>
+    <button class="bottom-nav-btn" data-tab="hierarchy" onclick="setTab('hierarchy')">
+      <span class="bottom-nav-icon">⊟</span>Hier.
+    </button>
+    <button class="bottom-nav-btn" data-tab="hosts" onclick="setTab('hosts')">
+      <span class="bottom-nav-icon">▤</span>Hosts
+    </button>
+    <button class="bottom-nav-btn" data-tab="scans" onclick="setTab('scans')">
+      <span class="bottom-nav-icon">◷</span>Scans
+    </button>
+  </div>
+</nav>
+
+<!-- ── Modals ──────────────────────────────────────────────────────────────── -->
+
+<!-- Add subnet -->
+<div class="modal-overlay" id="subnetModal">
+  <div class="modal">
+    <div class="modal-title">Add Subnet</div>
+    <div class="form-row">
+      <label>Name</label>
+      <input type="text" id="subnetName" placeholder="e.g. Home LAN">
+    </div>
+    <div class="form-row">
+      <label>CIDR</label>
+      <input type="text" id="subnetCidr" placeholder="e.g. 192.168.1.0/24" class="mono">
+    </div>
+    <div class="form-row">
+      <label>Description <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <input type="text" id="subnetDesc" placeholder="e.g. Main home network">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddSubnet()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSubnet()">Add Subnet</button>
+    </div>
+  </div>
+</div>
+
+<!-- Merge Host -->
+<div class="modal-overlay" id="mergeModal">
+  <div class="modal" style="width:420px">
+    <div class="modal-title">Merge Hosts</div>
+    <input type="hidden" id="mergePrimaryIp">
+    <p style="font-size:12px;color:var(--text-2);margin:0 0 14px">
+      The selected host will be <strong>deleted</strong>. Its connections, ports, services,
+      and any aliases will transfer to the primary host.
+    </p>
+    <div class="form-row">
+      <label>Primary (keep)</label>
+      <div class="mono" id="mergePrimaryLabel" style="padding:6px 0;color:var(--accent);font-size:13px"></div>
+    </div>
+    <div class="form-row">
+      <label>Merge into it (delete)</label>
+      <select id="mergeTargetIp"></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeMergeHost()">Cancel</button>
+      <button class="btn btn-danger" onclick="saveMergeHost()">Merge &amp; Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit host -->
+<!-- Add Host -->
+<div class="modal-overlay" id="addHostModal">
+  <div class="modal">
+    <div class="modal-title">Add Host</div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>IP Address <span style="color:var(--text-3);font-weight:400;text-transform:none">(leave blank if no IP)</span></label>
+        <input type="text" id="addHostIp" placeholder="192.168.1.x or blank" class="mono">
+      </div>
+      <div class="form-row">
+        <label>Hostname / Label</label>
+        <input type="text" id="addHostHostname" placeholder="e.g. rb5009-sw1">
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Device Type</label>
+        <select id="addHostDeviceType"></select>
+      </div>
+      <div class="form-row">
+        <label>Vendor</label>
+        <input type="text" id="addHostVendor" placeholder="e.g. MikroTik">
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>MAC Address</label>
+        <input type="text" id="addHostMac" placeholder="aa:bb:cc:dd:ee:ff" class="mono">
+      </div>
+      <div class="form-row">
+        <label>OS / Firmware</label>
+        <input type="text" id="addHostOs" placeholder="e.g. RouterOS 7.x">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Notes</label>
+      <textarea id="addHostNotes" placeholder="Anything useful about this device…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeAddHost()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAddHost()">Add Host</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <div class="modal-title">Edit Host</div>
+    <input type="hidden" id="editIp">
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Hostname / Label</label>
+        <input type="text" id="editHostname" placeholder="e.g. main-router">
+      </div>
+      <div class="form-row">
+        <label>Device Type</label>
+        <select id="editDeviceType"></select>
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Vendor</label>
+        <input type="text" id="editVendor" placeholder="e.g. MikroTik">
+      </div>
+      <div class="form-row">
+        <label>OS / Firmware</label>
+        <input type="text" id="editOs" placeholder="e.g. RouterOS 7.x">
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Notes</label>
+      <textarea id="editNotes" placeholder="Anything useful about this device…"></textarea>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Port Count</label>
+        <input type="number" id="editPortCount" min="1" value="1" placeholder="1">
+      </div>
+      <div class="form-row" style="justify-content:flex-end">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400;padding-top:18px">
+          <input type="checkbox" id="editHasWifi" style="accent-color:var(--accent);width:14px;height:14px">
+          <span style="color:var(--text-2)">Has WiFi</span>
+        </label>
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400;padding-top:18px">
+          <input type="checkbox" id="editIsDns" style="accent-color:#4a9ae0;width:14px;height:14px">
+          <span style="color:var(--text-2)">DNS Server</span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400;padding-top:18px">
+          <input type="checkbox" id="editIsDhcp" style="accent-color:#e07820;width:14px;height:14px" onchange="document.getElementById('editDhcpPoolRow').style.display=this.checked?'':'none'">
+          <span style="color:var(--text-2)">DHCP Server</span>
+        </label>
+      </div>
+    </div>
+    <div class="form-row" id="editDhcpPoolRow" style="display:none">
+      <label>DHCP Pool <span style="color:var(--text-3);font-weight:400;text-transform:none">(e.g. 192.168.1.100-192.168.1.254)</span></label>
+      <input type="text" id="editDhcpPool" placeholder="192.168.1.100-192.168.1.254" class="mono">
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="editTierL1" style="accent-color:var(--accent);width:14px;height:14px">
+        <span><strong style="color:var(--text)">Gateway (Level 1)</strong> — root of network hierarchy</span>
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeEditHost()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveHostEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add connection -->
+<div class="modal-overlay" id="connModal">
+  <div class="modal" style="width:380px">
+    <div class="modal-title">Link Devices</div>
+    <div class="conn-endpoints">
+      <span id="connSrc" style="color:var(--accent)"></span>
+      <span class="conn-arrow">→</span>
+      <span id="connDst" style="color:var(--accent)"></span>
+    </div>
+    <input type="hidden" id="connDstHidden">
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Link type</label>
+        <select id="connType">
+          <option value="wired">Wired — Ethernet</option>
+          <option value="fiber">Wired — Fiber</option>
+          <option value="dac">Wired — DAC</option>
+          <option value="wifi">Wireless — WiFi</option>
+          <option value="virtual">Virtual</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Port mode</label>
+        <select id="connPortMode" onchange="updateConnVlans('connVlanSection', this.value)">
+          <option value="">— none —</option>
+          <option value="access">Access</option>
+          <option value="trunk">Trunk</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Speed <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <select id="connSpeed">
+          <option value="">— not set —</option>
+          <option>10Mbps</option>
+          <option>100Mbps</option>
+          <option>1Gbps</option>
+          <option>2.5Gbps</option>
+          <option>5Gbps</option>
+          <option>10Gbps</option>
+          <option>25Gbps</option>
+          <option>40Gbps</option>
+          <option>100Gbps</option>
+          <option>400Gbps</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Label <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <input type="text" id="connLabel" placeholder="e.g. uplink, mgmt">
+      </div>
+    </div>
+    <div id="connVlanSection" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeConnModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveConnection()">Link</button>
+    </div>
+  </div>
+</div>
+
+<!-- Service modal (add + edit) -->
+<div class="modal-overlay" id="serviceModal">
+  <div class="modal">
+    <div class="modal-title" id="svcModalTitle">Add Service</div>
+    <input type="hidden" id="svcEditId">
+    <div class="form-row" id="svcHostRow">
+      <label>Host</label>
+      <select id="svcHostIp" onchange="autoFillSvcUrlModal()"></select>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Service Name</label>
+        <input type="text" id="svcName" placeholder="e.g. Plex, OpenWebUI">
+      </div>
+      <div class="form-row">
+        <label>Status</label>
+        <select id="svcStatus">
+          <option value="unknown">Unknown</option>
+          <option value="running">Running</option>
+          <option value="stopped">Stopped</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Port <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <input type="number" id="svcPort" placeholder="8080" class="mono" oninput="autoFillSvcUrlModal()">
+      </div>
+      <div class="form-row">
+        <label>Protocol</label>
+        <select id="svcProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <label>URL <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <input type="text" id="svcUrl" placeholder="http://192.168.1.10:8080" oninput="if(this.value!==this.dataset.auto)this.dataset.auto=''">
+    </div>
+    <div class="form-row">
+      <label>Description <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <input type="text" id="svcDesc" placeholder="Brief description">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="svcDeleteBtn" onclick="deleteServiceFromModal()" style="display:none">Delete</button>
+      <button class="btn" onclick="closeServiceModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveServiceModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit connection -->
+<div class="modal-overlay" id="editConnModal">
+  <div class="modal" style="width:380px">
+    <div class="modal-title">Edit Link</div>
+    <div class="conn-endpoints" style="margin-bottom:12px">
+      <span id="editConnSrc" style="color:var(--accent)"></span>
+      <span class="conn-arrow">→</span>
+      <span id="editConnDst" style="color:var(--accent)"></span>
+    </div>
+    <input type="hidden" id="editConnId">
+    <input type="hidden" id="editConnEdgeId">
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Link type</label>
+        <select id="editConnType">
+          <option value="wired">Wired — Ethernet</option>
+          <option value="fiber">Wired — Fiber</option>
+          <option value="dac">Wired — DAC</option>
+          <option value="wifi">Wireless — WiFi</option>
+          <option value="virtual">Virtual</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Port mode</label>
+        <select id="editConnPortMode" onchange="updateConnVlans('editConnVlanSection', this.value)">
+          <option value="">— none —</option>
+          <option value="access">Access</option>
+          <option value="trunk">Trunk</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Speed <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <select id="editConnSpeed">
+          <option value="">— not set —</option>
+          <option>10Mbps</option>
+          <option>100Mbps</option>
+          <option>1Gbps</option>
+          <option>2.5Gbps</option>
+          <option>5Gbps</option>
+          <option>10Gbps</option>
+          <option>25Gbps</option>
+          <option>40Gbps</option>
+          <option>100Gbps</option>
+          <option>400Gbps</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Label <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <input type="text" id="editConnLabel" placeholder="e.g. uplink, mgmt">
+      </div>
+    </div>
+    <div id="editConnVlanSection" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn btn-danger" onclick="deleteConnFromEdit()">Delete</button>
+      <button class="btn" onclick="closeEditConn()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveConnEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Multi-connect -->
+<div class="modal-overlay" id="multiConnModal">
+  <div class="modal" style="width:400px">
+    <div class="modal-title">Multi-Link Devices</div>
+    <div style="margin-bottom:10px">
+      <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Source</div>
+      <span id="multiConnSrc" style="color:var(--accent);font-family:var(--font-mono);font-size:12px"></span>
+    </div>
+    <div style="margin-bottom:14px">
+      <div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Targets</div>
+      <div id="multiConnTargetList" style="display:flex;flex-wrap:wrap;gap:4px"></div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Link type</label>
+        <select id="multiConnType">
+          <option value="wired">Wired — Ethernet</option>
+          <option value="fiber">Wired — Fiber</option>
+          <option value="dac">Wired — DAC</option>
+          <option value="wifi">Wireless — WiFi</option>
+          <option value="virtual">Virtual</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Port mode</label>
+        <select id="multiConnPortMode" onchange="updateConnVlans('multiConnVlanSection', this.value)">
+          <option value="">— none —</option>
+          <option value="access">Access</option>
+          <option value="trunk">Trunk</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Speed <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <select id="multiConnSpeed">
+          <option value="">— not set —</option>
+          <option>10Mbps</option>
+          <option>100Mbps</option>
+          <option>1Gbps</option>
+          <option>2.5Gbps</option>
+          <option>5Gbps</option>
+          <option>10Gbps</option>
+          <option>25Gbps</option>
+          <option>40Gbps</option>
+          <option>100Gbps</option>
+          <option>400Gbps</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Label <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+        <input type="text" id="multiConnLabel" placeholder="e.g. uplink, mgmt">
+      </div>
+    </div>
+    <div id="multiConnVlanSection" style="display:none"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeMultiConnModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMultiConnections()">Link All</button>
+    </div>
+  </div>
+</div>
+
+<!-- VLAN manager -->
+<div class="modal-overlay" id="vlanModal">
+  <div class="modal" style="width:420px">
+    <div class="modal-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>VLAN Manager</span>
+      <button class="btn-ghost" onclick="closeVlanPanel()" style="font-size:18px;padding:2px 7px">×</button>
+    </div>
+
+    <!-- VLAN list -->
+    <div id="vlanList" style="margin-bottom:16px;min-height:32px"></div>
+
+    <!-- Edit section (hidden until a VLAN is clicked for edit) -->
+    <div id="vlanEditSection" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:14px">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:10px">Edit VLAN</div>
+      <input type="hidden" id="editVlanId">
+      <div class="form-2col">
+        <div class="form-row">
+          <label>Tag (1–4094)</label>
+          <input type="number" id="editVlanTag" placeholder="10" class="mono">
+        </div>
+        <div class="form-row">
+          <label>Name</label>
+          <input type="text" id="editVlanName" placeholder="e.g. Management">
+        </div>
+      </div>
+      <div class="form-row" style="display:flex;align-items:center;gap:10px">
+        <label style="margin:0;white-space:nowrap">Color</label>
+        <input type="color" id="editVlanColor" value="#888888" style="flex:none;width:44px;height:30px;padding:1px 2px;cursor:pointer">
+        <div class="modal-actions" style="margin:0;flex:1;justify-content:flex-end">
+          <button class="btn" onclick="cancelEditVlan()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveEditVlan()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add section -->
+    <div id="vlanAddSection">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3);margin-bottom:10px">Add VLAN</div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>Tag (1–4094)</label>
+          <input type="number" id="newVlanTag" placeholder="10" class="mono">
+        </div>
+        <div class="form-row">
+          <label>Name</label>
+          <input type="text" id="newVlanName" placeholder="e.g. Management">
+        </div>
+      </div>
+      <div class="form-row" style="display:flex;align-items:center;gap:10px">
+        <label style="margin:0;white-space:nowrap">Color</label>
+        <input type="color" id="newVlanColor" value="#888888" style="flex:none;width:44px;height:30px;padding:1px 2px;cursor:pointer">
+        <button class="btn btn-primary" style="margin-left:auto" onclick="addVlan()">+ Add VLAN</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Network Analysis Modal -->
+<div class="modal-overlay" id="networkAnalysisModal">
+  <div class="modal" style="width:680px;max-width:96vw">
+    <div class="modal-title" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Network Analysis</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="netAnalyzeModel" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
+        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="runNetworkAnalysis()">↻ Run Analysis</button>
+        <button class="btn-ghost" onclick="closeNetworkAnalysis()" style="font-size:18px;padding:2px 7px">×</button>
+      </div>
+    </div>
+    <div id="networkAnalysisResult" style="min-height:120px;max-height:65vh;overflow-y:auto;margin-top:4px">
+      <div style="padding:20px 0;font-size:12px;color:var(--text-3);text-align:center">Click "Run Analysis" to analyze the full network with AI.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── AI Settings Modal ─────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal" style="width:500px;max-width:95%">
+    <div class="modal-header">
+      <span>⚙ AI Settings</span>
+      <button class="icon-btn" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
+      <p class="text-3" style="font-size:11px;line-height:1.6">
+        Settings are saved to <code>data/config.yaml</code>.<br>
+        Environment variables (<code>LLM_PROVIDER</code>, <code>LLM_BASE_URL</code>,
+        <code>LLM_API_KEY</code>, <code>LLM_MODEL</code>) override this file when set.
+      </p>
+      <div class="form-row">
+        <label>Provider</label>
+        <select id="setProvider" onchange="onSettingsProviderChange()">
+          <option value="none">None — AI features disabled</option>
+          <option value="ollama">Ollama (local / self-hosted)</option>
+          <option value="openai">OpenAI-compatible API (OpenAI, LM Studio, Groq, Together…)</option>
+          <option value="anthropic">Anthropic (Claude API)</option>
+        </select>
+      </div>
+      <div id="setUrlRow" class="form-row" style="display:none">
+        <label>Base URL</label>
+        <input id="setBaseUrl" type="text" placeholder="http://localhost:11434">
+      </div>
+      <div id="setKeyRow" class="form-row" style="display:none">
+        <label>API Key</label>
+        <input id="setApiKey" type="password" placeholder="sk-…">
+      </div>
+      <div class="form-row">
+        <label>Default Model</label>
+        <input id="setModel" type="text" placeholder="llama3.2 · gpt-4o · claude-haiku-4-5-20251001">
+      </div>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Timeout&nbsp;(s)</label>
+        <input id="setTimeout" type="number" style="width:70px" min="10" value="120">
+        <label style="margin-left:12px">Long timeout&nbsp;(s)</label>
+        <input id="setLongTimeout" type="number" style="width:80px" min="30" value="600">
+      </div>
+      <div id="setTestResult" class="settings-test-result" style="display:none"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="testLLMConnection()">⚡ Test</button>
+      <span style="flex:1"></span>
+      <button class="btn" onclick="closeSettings()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/graph.js"></script>
+<script src="/js/chat.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>

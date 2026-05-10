@@ -1,0 +1,31 @@
+# NetMap AI configuration
+# Copy this file to config.yaml and edit to enable AI features.
+# Environment variables (LLM_PROVIDER, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
+# override this file when set — useful for Docker / CI environments.
+
+llm:
+  # Provider options: none | ollama | openai | anthropic
+  provider: none
+
+  # Base URL — required for ollama and openai providers
+  # ollama example:          http://localhost:11434
+  # OpenAI example:          https://api.openai.com/v1
+  # LM Studio example:       http://localhost:1234/v1
+  # Groq example:            https://api.groq.com/openai/v1
+  # Together AI example:     https://api.together.xyz/v1
+  base_url: ""
+
+  # API key — required for openai and anthropic providers
+  api_key: ""
+
+  # Default model name (can also be overridden per-request in the UI)
+  # ollama examples:    llama3.2, mistral, gemma2
+  # openai examples:    gpt-4o, gpt-4o-mini
+  # anthropic examples: claude-haiku-4-5-20251001, claude-sonnet-4-6
+  model: ""
+
+  # Request timeout in seconds for normal requests (analyze host, chat)
+  timeout: 120
+
+  # Timeout for long-running requests (analyze entire network)
+  long_timeout: 600

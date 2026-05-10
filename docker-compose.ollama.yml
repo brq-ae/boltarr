@@ -1,0 +1,41 @@
+# Starts NetMap alongside a bundled Ollama instance.
+# Usage: docker compose -f docker-compose.ollama.yml up -d
+#
+# After first start, pull a model:
+#   docker exec netmap-ollama-1 ollama pull llama3.2
+# Then set the model in NetMap's ⚙ AI Settings (or via LLM_MODEL env var).
+
+services:
+  netmap:
+    build: .
+    image: netmap:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      LLM_PROVIDER: ollama
+      LLM_BASE_URL: http://ollama:11434
+      LLM_MODEL: llama3.2
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Uncomment for GPU support (NVIDIA):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+volumes:
+  ollama_data:
