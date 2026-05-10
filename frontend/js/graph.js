@@ -1,25 +1,25 @@
 // Cytoscape topology graph + connection drawing
 
 const NODE_COLORS = {
-  router:             "#e0721c",   // warm orange
-  gateway:            "#e0721c",
-  switch:             "#d45a20",   // red-orange
-  "unmanaged-switch": "#b04018",   // darker red-orange
-  firewall:           "#d45a20",
+  router:             "#1a6fa8",   // dark blue
+  gateway:            "#1a6fa8",
+  switch:             "#155a8a",   // deeper blue
+  "unmanaged-switch": "#0e4870",   // darkest blue
+  firewall:           "#155a8a",
   server:             "#4a9ae0",   // steel blue
   nas:                "#4a9ae0",
   workstation:        "#42b86a",   // green
   pc:                 "#42b86a",
   laptop:             "#42b86a",
-  iot:                "#d4a020",   // amber-yellow
-  camera:             "#d4a020",
-  printer:            "#d4a020",
+  iot:                "#e8c517",   // yellow
+  camera:             "#e8c517",
+  printer:            "#e8c517",
   phone:              "#8855cc",   // purple
   tablet:             "#8855cc",
   container:          "#20a8c0",   // cyan
   vm:                 "#7068cc",   // indigo-violet
   ap:                 "#2ab8a0",   // teal
-  unknown:            "#524c48",   // warm dark gray
+  unknown:            "#374e63",   // cool blue-gray
 };
 
 const NODE_SIZES = {
@@ -78,7 +78,7 @@ function initGraph() {
       },
       {
         selector: "node.connect-src",
-        style: { "border-color": "#d47c12", "border-width": 3, "border-opacity": 1 },
+        style: { "border-color": "#e8c517", "border-width": 3, "border-opacity": 1 },
       },
       {
         selector: "node.connect-dst",
@@ -86,7 +86,7 @@ function initGraph() {
       },
       {
         selector: "node:selected",
-        style: { "border-color": "#d47c12", "border-width": 3, "border-opacity": 1 },
+        style: { "border-color": "#e8c517", "border-width": 3, "border-opacity": 1 },
       },
       // Base edge — white/neutral; VLAN colors applied via applyEdgeVlanStyle()
       {

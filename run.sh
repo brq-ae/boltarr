@@ -9,7 +9,5 @@ if [ ! -d venv ]; then
   ./venv/bin/pip install -q -r requirements.txt
 fi
 
-mkdir -p data
-
-echo "Starting Boltarr on http://0.0.0.0:8000"
+echo "Starting NetMap on http://0.0.0.0:8000"
 ./venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload

@@ -2,32 +2,32 @@
 
 /* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
-  /* Warm dark backgrounds */
-  --bg:       oklch(10% 0.006 55);
-  --surface:  oklch(14% 0.007 55);
-  --surface2: oklch(19% 0.008 55);
-  --surface3: oklch(24% 0.008 55);
+  /* Cool dark navy backgrounds */
+  --bg:       oklch(9%  0.025 250);
+  --surface:  oklch(13% 0.028 250);
+  --surface2: oklch(17% 0.028 250);
+  --surface3: oklch(22% 0.028 250);
 
-  /* Borders */
-  --border:  oklch(27% 0.007 55);
-  --border2: oklch(36% 0.007 55);
+  /* Borders — blue-tinted */
+  --border:  oklch(26% 0.022 250);
+  --border2: oklch(35% 0.020 250);
 
-  /* Text */
-  --text:   oklch(91% 0.005 55);
-  --text-2: oklch(70% 0.005 55);
-  --text-3: oklch(48% 0.005 55);
+  /* Text — cool white */
+  --text:   oklch(92% 0.006 240);
+  --text-2: oklch(68% 0.007 240);
+  --text-3: oklch(46% 0.007 240);
 
-  /* Amber accent */
-  --accent:      oklch(72% 0.18 52);
-  --accent-dim:  oklch(72% 0.18 52 / 0.13);
-  --accent-glow: oklch(72% 0.18 52 / 0.28);
-  --on-accent:   oklch(11% 0.01 55);
+  /* Yellow accent */
+  --accent:      oklch(82% 0.17 85);
+  --accent-dim:  oklch(82% 0.17 85 / 0.13);
+  --accent-glow: oklch(82% 0.17 85 / 0.28);
+  --on-accent:   oklch(16% 0.03 85);
 
   /* Semantic */
   --green:  oklch(70% 0.165 145);
   --red:    oklch(58% 0.21 25);
-  --yellow: oklch(76% 0.16 82);
-  --blue:   oklch(67% 0.15 240);
+  --yellow: oklch(82% 0.17 85);
+  --blue:   oklch(68% 0.17 225);
 
   /* Layout */
   --sidebar-w: 224px;
@@ -514,7 +514,7 @@ select { cursor: pointer; }
   position: absolute;
   bottom: 14px;
   left: 14px;
-  background: oklch(14% 0.007 55 / 0.9);
+  background: oklch(13% 0.025 250 / 0.92);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
@@ -590,7 +590,7 @@ tbody tr {
   transition: background 0.08s;
 }
 tbody tr:hover { background: var(--surface2); }
-tbody tr:nth-child(even) { background: oklch(12% 0.006 55 / 0.5); }
+tbody tr:nth-child(even) { background: oklch(11% 0.025 250 / 0.5); }
 tbody tr:nth-child(even):hover { background: var(--surface2); }
 
 tbody td {
@@ -617,16 +617,16 @@ tbody td {
   text-transform: capitalize;
   white-space: nowrap;
 }
-.tag-router,.tag-gateway  { background: oklch(65% 0.19 42 / 0.14); color: oklch(65% 0.19 42); }
+.tag-router,.tag-gateway  { background: oklch(60% 0.18 240 / 0.14); color: oklch(60% 0.18 240); }
 .tag-server,.tag-nas      { background: oklch(67% 0.15 240 / 0.14); color: oklch(67% 0.15 240); }
 .tag-workstation,.tag-pc,.tag-laptop { background: oklch(70% 0.16 145 / 0.14); color: oklch(70% 0.16 145); }
 .tag-iot,.tag-camera,.tag-printer { background: oklch(75% 0.16 80 / 0.14); color: oklch(75% 0.16 80); }
-.tag-switch,.tag-firewall { background: oklch(65% 0.18 30 / 0.14); color: oklch(65% 0.18 30); }
+.tag-switch,.tag-firewall { background: oklch(55% 0.18 250 / 0.14); color: oklch(55% 0.18 250); }
 .tag-phone,.tag-tablet    { background: oklch(67% 0.16 300 / 0.14); color: oklch(67% 0.16 300); }
 .tag-container            { background: oklch(68% 0.15 195 / 0.14); color: oklch(68% 0.15 195); }
 .tag-vm                   { background: oklch(65% 0.14 275 / 0.14); color: oklch(65% 0.14 275); }
 .tag-ap                   { background: oklch(68% 0.14 180 / 0.14); color: oklch(68% 0.14 180); }
-.tag-unknown              { background: oklch(50% 0.005 55 / 0.18); color: var(--text-3); }
+.tag-unknown              { background: oklch(40% 0.018 250 / 0.18); color: var(--text-3); }
 .tag-completed            { background: oklch(70% 0.165 145 / 0.14); color: var(--green); }
 .tag-running              { background: oklch(76% 0.16 82 / 0.14); color: var(--yellow); }
 .tag-error                { background: oklch(58% 0.21 25 / 0.14); color: var(--red); }
@@ -919,7 +919,7 @@ tbody td {
   display: none;
   position: fixed;
   inset: 0;
-  background: oklch(5% 0.005 55 / 0.75);
+  background: oklch(6% 0.02 250 / 0.75);
   z-index: 100;
   align-items: center;
   justify-content: center;
@@ -968,7 +968,7 @@ tbody td {
   display: none;
   position: fixed;
   inset: 0;
-  background: oklch(5% 0.005 55 / 0.6);
+  background: oklch(6% 0.02 250 / 0.6);
   z-index: 35;
 }
 .sidebar-overlay.visible { display: block; }
