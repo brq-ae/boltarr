@@ -1443,13 +1443,25 @@ async function testLLMConnection() {
   const resultEl = document.getElementById("setTestResult");
   resultEl.style.display = "";
   resultEl.className = "settings-test-result";
-  resultEl.textContent = "Testing…";
+  resultEl.textContent = "Saving and testing…";
   try {
+    // Save current form values first so the test uses what the user typed
+    const payload = {
+      provider:     document.getElementById("setProvider").value,
+      base_url:     document.getElementById("setBaseUrl").value.trim(),
+      api_key:      document.getElementById("setApiKey").value,
+      model:        document.getElementById("setModel").value.trim(),
+      timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
+      long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
+    };
+    await api("PUT", "/api/settings", payload);
     const result = await api("POST", "/api/settings/test");
     if (result.ok) {
       resultEl.classList.add("test-ok");
       const mList = result.models?.length ? result.models.slice(0,5).join(", ") : "no models listed";
       resultEl.textContent = `✓ Connected. Models: ${mList}`;
+      await loadModels();
+      updateAiStatusDot(true);
     } else {
       resultEl.classList.add("test-fail");
       resultEl.textContent = `✗ ${result.error}`;
