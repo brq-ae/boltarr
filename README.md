@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/img/BoltarrLogo.svg" width="120" alt="Boltarr">
+</p>
+
 # Boltarr
 
 A self-hosted network dashboard for mapping, monitoring, and analyzing your local network. Scan subnets, visualize topology, track devices, manage VLANs, and chat with an AI assistant that knows your network.
