@@ -970,6 +970,102 @@ def get_graph():
     return {"nodes": nodes, "edges": edges}
 
 
+# ── SSH Key Management ────────────────────────────────────────────────────────
+
+import base64, hashlib
+
+def _ssh_fingerprint(public_key: str) -> str:
+    try:
+        key_data = base64.b64decode(public_key.strip().split()[1])
+        digest = hashlib.sha256(key_data).digest()
+        return "SHA256:" + base64.b64encode(digest).decode().rstrip("=")
+    except Exception:
+        return ""
+
+class SshKeyIn(BaseModel):
+    name: str
+    public_key: str
+
+class SshAccessIn(BaseModel):
+    ssh_key_id: int
+    username: str = "root"
+
+@app.get("/api/ssh-keys")
+def list_ssh_keys():
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, public_key, fingerprint, created_at FROM ssh_keys ORDER BY name"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/api/ssh-keys", status_code=201)
+def add_ssh_key(data: SshKeyIn):
+    key = data.public_key.strip()
+    if not key.startswith("ssh-"):
+        raise HTTPException(400, "Invalid public key format")
+    fp = _ssh_fingerprint(key)
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO ssh_keys (name, public_key, fingerprint) VALUES (?,?,?)",
+            (data.name.strip(), key, fp)
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM ssh_keys WHERE id=?", (cur.lastrowid,)).fetchone()
+    return dict(row)
+
+@app.delete("/api/ssh-keys/{key_id}", status_code=204)
+def delete_ssh_key(key_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM ssh_keys WHERE id=?", (key_id,))
+        conn.commit()
+
+@app.get("/api/hosts/{ip}/ssh-access")
+def get_host_ssh_access(ip: str):
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT a.id, a.ssh_key_id, a.username, k.name, k.fingerprint
+            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id
+            WHERE a.host_ip = ? ORDER BY a.username, k.name
+        """, (ip,)).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/api/hosts/{ip}/ssh-access", status_code=201)
+def add_host_ssh_access(ip: str, data: SshAccessIn):
+    with get_conn() as conn:
+        try:
+            cur = conn.execute(
+                "INSERT INTO ssh_access (ssh_key_id, host_ip, username) VALUES (?,?,?)",
+                (data.ssh_key_id, ip, data.username.strip())
+            )
+            conn.commit()
+        except Exception:
+            raise HTTPException(409, "Access entry already exists")
+        row = conn.execute("""
+            SELECT a.id, a.ssh_key_id, a.username, k.name, k.fingerprint
+            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id WHERE a.id=?
+        """, (cur.lastrowid,)).fetchone()
+    return dict(row)
+
+@app.delete("/api/ssh-access/{access_id}", status_code=204)
+def delete_ssh_access(access_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM ssh_access WHERE id=?", (access_id,))
+        conn.commit()
+
+@app.get("/api/hosts/{ip}/authorized-keys")
+def get_authorized_keys(ip: str, user: str = "root"):
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT k.public_key, k.name
+            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id
+            WHERE a.host_ip = ? AND a.username = ?
+            ORDER BY k.name
+        """, (ip, user)).fetchall()
+    lines = [f"{r['public_key']} {r['name']}" for r in rows]
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
+
+
 # ── Static files (must be last) ───────────────────────────────────────────────
 
 app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

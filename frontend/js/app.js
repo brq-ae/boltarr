@@ -361,6 +361,7 @@ async function showHostDetail(ip) {
       <button class="detail-tab" data-tab="ports" onclick="switchDetailTab('ports')">Ports (${(host.ports||[]).length})</button>
       <button class="detail-tab" data-tab="services" onclick="switchDetailTab('services')">Services (${(host.services||[]).length})</button>
       <button class="detail-tab" data-tab="analysis" onclick="switchDetailTab('analysis')">Analysis</button>
+      <button class="detail-tab" data-tab="ssh" onclick="switchDetailTab('ssh');loadHostSshSection('${ip}')">SSH</button>
     </div>
 
     <div class="detail-body">
@@ -439,6 +440,9 @@ async function showHostDetail(ip) {
           <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addServiceToHost('${ip}')">+ Add</button>
         </div>
       </div>
+
+      <!-- SSH tab -->
+      <div class="detail-tab-panel" id="dtab-ssh" style="padding:10px 0"></div>
 
       <!-- Analysis tab -->
       <div class="detail-tab-panel" id="dtab-analysis">
@@ -750,7 +754,7 @@ async function loadModels() {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Hierarchy", services: "Services" };
+const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Hierarchy", services: "Services", sshkeys: "SSH Keys" };
 
 function setTab(name) {
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
@@ -769,6 +773,7 @@ function setTab(name) {
   if (name === "scans")     loadScans();
   if (name === "hierarchy") loadHierarchy();
   if (name === "services")  loadServicesTab();
+  if (name === "sshkeys")   loadSshKeys();
 }
 
 // ── Chat toggle ───────────────────────────────────────────────────────────────
@@ -1472,6 +1477,146 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add("toast-show");
   setTimeout(() => t.classList.remove("toast-show"), 2500);
+}
+
+// ── SSH Key Management ────────────────────────────────────────────────────────
+
+let sshKeys = [];
+
+async function loadSshKeys() {
+  sshKeys = await api("GET", "/api/ssh-keys");
+  renderSshKeys();
+}
+
+function renderSshKeys() {
+  const el = document.getElementById("sshKeysList");
+  if (!el) return;
+  if (!sshKeys.length) {
+    el.innerHTML = `<div style="font-size:12px;color:var(--text-3);padding:8px 0">No keys registered yet.</div>`;
+    return;
+  }
+  el.innerHTML = sshKeys.map(k => `
+    <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${k.name}</div>
+        <div style="font-size:10px;font-family:monospace;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k.fingerprint || k.public_key.substring(0,40) + "…"}</div>
+      </div>
+      <button class="btn btn-danger" style="font-size:11px;padding:3px 8px;flex-shrink:0" onclick="deleteSshKey(${k.id})">Remove</button>
+    </div>
+  `).join("");
+}
+
+async function addSshKey() {
+  const name = document.getElementById("sshKeyName").value.trim();
+  const public_key = document.getElementById("sshKeyValue").value.trim();
+  if (!name || !public_key) return showToast("Name and public key are required");
+  try {
+    await api("POST", "/api/ssh-keys", { name, public_key });
+    document.getElementById("sshKeyName").value = "";
+    document.getElementById("sshKeyValue").value = "";
+    await loadSshKeys();
+    showToast("Key added");
+  } catch (e) {
+    showToast("Failed to add key: " + (e.message || "invalid format"));
+  }
+}
+
+async function deleteSshKey(id) {
+  if (!confirm("Remove this key? It will also remove all host access assignments for it.")) return;
+  await api("DELETE", `/api/ssh-keys/${id}`);
+  await loadSshKeys();
+  showToast("Key removed");
+}
+
+// ── SSH Access section inside host detail panel ───────────────────────────────
+
+async function loadHostSshSection(ip) {
+  const [access, keys] = await Promise.all([
+    api("GET", `/api/hosts/${ip}/ssh-access`),
+    api("GET", `/api/ssh-keys`),
+  ]);
+
+  const el = document.getElementById("dtab-ssh");
+  if (!el) return;
+
+  // Group existing access by username
+  const byUser = {};
+  for (const a of access) {
+    if (!byUser[a.username]) byUser[a.username] = [];
+    byUser[a.username].push(a);
+  }
+
+  const usersHTML = Object.entries(byUser).map(([user, entries]) => {
+    const rows = entries.map(a => `
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;font-size:12px;color:var(--text)">${a.name}</div>
+        <div style="font-size:10px;font-family:monospace;color:var(--text-3);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.fingerprint || ""}</div>
+        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeHostSshAccess(${a.id},'${ip}')">✕</button>
+      </div>`).join("");
+
+    const curlCmd = `curl -s http://${location.hostname}:${location.port}/api/hosts/${ip}/authorized-keys?user=${user} | tee -a ~/.ssh/authorized_keys`;
+    return `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:11px;font-weight:600;color:var(--accent);font-family:monospace">${user}</span>
+          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="copySshCurl('${ip}','${user}')">Copy curl</button>
+          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="downloadAuthorizedKeys('${ip}','${user}')">Download</button>
+        </div>
+        ${rows}
+      </div>`;
+  }).join("");
+
+  const keyOptions = keys.map(k => `<option value="${k.id}">${k.name}</option>`).join("");
+
+  el.innerHTML = `
+    ${usersHTML || `<div style="font-size:12px;color:var(--text-3);padding:8px 0;margin-bottom:12px">No SSH access configured for this host yet.</div>`}
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <div class="field" style="flex:2;min-width:120px">
+        <label style="font-size:10px">Key</label>
+        <select id="sshAccessKey" style="width:100%">
+          ${keyOptions || '<option value="">— no keys registered —</option>'}
+        </select>
+      </div>
+      <div class="field" style="flex:1;min-width:80px">
+        <label style="font-size:10px">Username</label>
+        <input type="text" id="sshAccessUser" value="root" placeholder="root" style="width:100%">
+      </div>
+      <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;white-space:nowrap" onclick="addHostSshAccess('${ip}')">+ Grant Access</button>
+    </div>
+  `;
+}
+
+async function addHostSshAccess(ip) {
+  const keyEl = document.getElementById("sshAccessKey");
+  const userEl = document.getElementById("sshAccessUser");
+  const ssh_key_id = parseInt(keyEl?.value);
+  const username = userEl?.value.trim();
+  if (!ssh_key_id || !username) return showToast("Select a key and enter a username");
+  try {
+    await api("POST", `/api/hosts/${ip}/ssh-access`, { ssh_key_id, username });
+    await loadHostSshSection(ip);
+  } catch (e) {
+    showToast("Already assigned");
+  }
+}
+
+async function removeHostSshAccess(accessId, ip) {
+  await api("DELETE", `/api/ssh-access/${accessId}`);
+  await loadHostSshSection(ip);
+}
+
+async function copySshCurl(ip, user) {
+  const cmd = `curl -s http://${location.hostname}:${location.port}/api/hosts/${ip}/authorized-keys?user=${user} | tee -a ~/.ssh/authorized_keys`;
+  await navigator.clipboard.writeText(cmd);
+  showToast("Copied curl command");
+}
+
+async function downloadAuthorizedKeys(ip, user) {
+  const text = await fetch(`/api/hosts/${ip}/authorized-keys?user=${user}`).then(r => r.text());
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.download = "authorized_keys";
+  a.click();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

@@ -107,6 +107,23 @@ def init_db():
                 host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
                 ip      TEXT NOT NULL UNIQUE
             );
+
+            CREATE TABLE IF NOT EXISTS ssh_keys (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                public_key  TEXT NOT NULL,
+                fingerprint TEXT,
+                created_at  TEXT DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS ssh_access (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                ssh_key_id INTEGER NOT NULL REFERENCES ssh_keys(id) ON DELETE CASCADE,
+                host_ip    TEXT NOT NULL,
+                username   TEXT NOT NULL DEFAULT 'root',
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(ssh_key_id, host_ip, username)
+            );
         """)
 
         # Migrate existing DBs that predate new columns
