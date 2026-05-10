@@ -28,7 +28,7 @@ Open **http://localhost:8000**
 docker compose -f docker-compose.ollama.yml up -d
 
 # Pull a model after startup
-docker exec netmap-ollama-1 ollama pull llama3.2
+docker exec boltarr-ollama-1 ollama pull llama3.2
 ```
 
 Then open **⚙ AI Settings** in the app and set the model to `llama3.2`.
