@@ -1631,6 +1631,33 @@ async function downloadAuthorizedKeys(ip, user) {
   a.click();
 }
 
+// ── Backup & Restore ─────────────────────────────────────────────────────────
+
+function downloadBackup() {
+  const a = document.createElement("a");
+  a.href = "/api/backup";
+  a.download = "";
+  a.click();
+}
+
+async function restoreBackup(input) {
+  const file = input.files[0];
+  input.value = "";
+  if (!file) return;
+  if (!confirm(`Restore from "${file.name}"?\n\nThis will replace ALL current data. This cannot be undone.`)) return;
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/restore", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Restore failed");
+    showToast("Restore complete — reloading…");
+    setTimeout(() => location.reload(), 1200);
+  } catch (e) {
+    alert("Restore failed: " + e.message);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 async function initAiStatus() {

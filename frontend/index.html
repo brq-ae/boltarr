@@ -57,6 +57,11 @@
       </button>
       <label style="margin-top:6px">Model override</label>
       <select id="globalModel" title="Leave empty to use the default from settings"></select>
+      <div style="display:flex;gap:6px;margin-top:10px">
+        <button class="btn" style="flex:1;font-size:11px" onclick="downloadBackup()">⬇ Backup</button>
+        <button class="btn" style="flex:1;font-size:11px" onclick="document.getElementById('restoreInput').click()">⬆ Restore</button>
+        <input type="file" id="restoreInput" accept=".zip" style="display:none" onchange="restoreBackup(this)">
+      </div>
     </div>
   </aside>
 

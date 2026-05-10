@@ -1,8 +1,14 @@
 import uuid
+import io
+import zipfile
+import tempfile
+import sqlite3 as _sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -1064,6 +1070,82 @@ def get_authorized_keys(ip: str, user: str = "root"):
     lines = [f"{r['public_key']} {r['name']}" for r in rows]
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
+
+
+# ── Backup & Restore ─────────────────────────────────────────────────────────
+
+_DATA_DIR = Path(__file__).parent.parent / "data"
+
+@app.get("/api/backup")
+def backup():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        db_path = _DATA_DIR / "boltarr.db"
+        cfg_path = _DATA_DIR / "config.yaml"
+        if db_path.exists():
+            # Checkpoint WAL so the main file is up to date
+            try:
+                conn = _sqlite3.connect(str(db_path))
+                conn.execute("PRAGMA wal_checkpoint(FULL)")
+                conn.close()
+            except Exception:
+                pass
+            zf.write(db_path, "boltarr.db")
+        if cfg_path.exists():
+            zf.write(cfg_path, "config.yaml")
+    buf.seek(0)
+    date = datetime.now().strftime("%Y-%m-%d")
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=boltarr-backup-{date}.zip"},
+    )
+
+
+@app.post("/api/restore")
+async def restore(file: UploadFile = File(...)):
+    data = await file.read()
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Not a valid ZIP file")
+
+    names = zf.namelist()
+    if "boltarr.db" not in names:
+        raise HTTPException(400, "ZIP does not contain boltarr.db")
+
+    # Zip slip protection
+    for name in names:
+        if name.startswith("/") or ".." in name:
+            raise HTTPException(400, "Invalid file in ZIP")
+
+    # Validate the database before touching anything live
+    db_bytes = zf.read("boltarr.db")
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp.write(db_bytes)
+        tmp_path = tmp.name
+    try:
+        conn = _sqlite3.connect(tmp_path)
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        conn.close()
+        if not tables:
+            raise HTTPException(400, "Database appears empty or corrupt")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Database file is corrupt")
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    # All good — replace live files
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (_DATA_DIR / "boltarr.db").write_bytes(db_bytes)
+    for wal in ["boltarr.db-wal", "boltarr.db-shm"]:
+        (_DATA_DIR / wal).unlink(missing_ok=True)
+    if "config.yaml" in names:
+        (_DATA_DIR / "config.yaml").write_bytes(zf.read("config.yaml"))
+
+    return {"ok": True, "tables": [t[0] for t in tables]}
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────
