@@ -583,8 +583,8 @@ function hideCtxMenu() {
   if (_ctxMenu) _ctxMenu.style.display = "none";
 }
 
-const LAYOUT_KEY   = "netmap:layout";
-const VIEWPORT_KEY = "netmap:viewport";
+const LAYOUT_KEY   = "boltarr:layout";
+const VIEWPORT_KEY = "boltarr:viewport";
 
 let _vpTimer = null;
 function saveViewportLocally() {

@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "data" / "netmap.db"
+DB_PATH = Path(__file__).parent.parent / "data" / "boltarr.db"
 
 
 def get_conn():

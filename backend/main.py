@@ -14,7 +14,7 @@ from .llm import (
     build_host_prompt, build_network_prompt, infer_device_type, LLMError, LONG_TIMEOUT,
 )
 
-app = FastAPI(title="NetMap")
+app = FastAPI(title="Boltarr")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 

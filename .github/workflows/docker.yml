@@ -24,5 +24,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/netmap:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/netmap:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/boltarr:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/boltarr:${{ github.sha }}

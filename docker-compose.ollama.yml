@@ -1,14 +1,14 @@
-# Starts NetMap alongside a bundled Ollama instance.
+# Starts Boltarr alongside a bundled Ollama instance.
 # Usage: docker compose -f docker-compose.ollama.yml up -d
 #
 # After first start, pull a model:
-#   docker exec netmap-ollama-1 ollama pull llama3.2
-# Then set the model in NetMap's ⚙ AI Settings (or via LLM_MODEL env var).
+#   docker exec boltarr-ollama-1 ollama pull llama3.2
+# Then set the model in Boltarr's ⚙ AI Settings (or via LLM_MODEL env var).
 
 services:
-  netmap:
+  boltarr:
     build: .
-    image: netmap:latest
+    image: boltarr:latest
     ports:
       - "8000:8000"
     volumes:

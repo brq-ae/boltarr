@@ -1,4 +1,4 @@
-// NetMap — main application logic
+// Boltarr — main application logic
 
 let allHosts      = [];
 let graphEdges    = [];

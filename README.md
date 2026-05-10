@@ -1,4 +1,4 @@
-# NetMap
+# Boltarr
 
 A self-hosted network dashboard for mapping, monitoring, and analyzing your local network. Scan subnets, visualize topology, track devices, manage VLANs, and chat with an AI assistant that knows your network.
 
@@ -15,8 +15,8 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 ## Quick start (Docker)
 
 ```bash
-git clone https://github.com/your-username/netmap.git
-cd netmap
+git clone https://github.com/your-username/boltarr.git
+cd boltarr
 docker compose up -d
 ```
 
@@ -89,7 +89,7 @@ App starts at **http://localhost:8000**
 ## Data
 
 All data is stored in `data/`:
-- `netmap.db` — SQLite database (hosts, ports, connections, VLANs, scan history)
+- `boltarr.db` — SQLite database (hosts, ports, connections, VLANs, scan history)
 - `config.yaml` — AI settings (auto-created by the UI, or copy from `config.yaml.example`)
 
 Mount `./data` as a Docker volume to persist data across container restarts (done automatically in the provided compose files).

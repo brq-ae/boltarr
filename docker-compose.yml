@@ -1,7 +1,7 @@
 services:
-  netmap:
+  boltarr:
     build: .
-    image: netmap:latest
+    image: boltarr:latest
     ports:
       - "8000:8000"
     volumes:
