@@ -71,6 +71,34 @@ llm:
   model: gpt-4o
 ```
 
+## Proxmox / LXC
+
+Running Docker inside an unprivileged LXC container requires three settings before the container will start:
+
+**LXC configuration** (Proxmox UI → your LXC → Options):
+- Enable **Nesting** (`nesting=1`)
+- Enable **keyctl** (`keyctl=1`)
+
+**Docker run / compose** — add the AppArmor override:
+
+```yaml
+# docker-compose.yml
+services:
+  boltarr:
+    ...
+    security_opt:
+      - apparmor=unconfined
+```
+
+Or with `docker run`:
+```bash
+docker run --security-opt apparmor=unconfined ...
+```
+
+**Why `apparmor=unconfined`?** Unprivileged LXCs cannot load AppArmor profiles into the host kernel, so Docker's default profile fails. Disabling it is safe here because Proxmox applies its own AppArmor profile to the entire LXC, and user-namespace mapping ensures that root inside the container has no privileges on the Proxmox host.
+
+**Pre-requisite:** Ubuntu LXC templates often ship without `curl`. If the Docker install script fails immediately, run `apt install -y curl` first.
+
 ## Manual install (without Docker)
 
 Requires Python 3.11+ and nmap.
