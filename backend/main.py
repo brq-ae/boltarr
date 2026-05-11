@@ -132,6 +132,15 @@ def _get_aliases(conn, host_id: int) -> list[str]:
     ).fetchall()]
 
 
+class SshKeyIn(BaseModel):
+    name: str
+    public_key: str
+
+class SshAccessIn(BaseModel):
+    ssh_key_id: int
+    username: str = "root"
+
+
 @app.get("/api/hosts")
 def list_hosts():
     with get_conn() as conn:
@@ -146,6 +155,47 @@ def list_hosts():
             )]
             h["aliases"] = alias_map.get(h["id"], [])
         return hosts
+
+
+@app.get("/api/hosts/{ip}/ssh-access")
+def get_host_ssh_access(ip: str):
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT a.id, a.ssh_key_id, a.username, k.name, k.fingerprint
+            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id
+            WHERE a.host_ip = ? ORDER BY a.username, k.name
+        """, (ip,)).fetchall()
+    return [dict(r) for r in rows]
+
+@app.post("/api/hosts/{ip}/ssh-access", status_code=201)
+def add_host_ssh_access(ip: str, data: SshAccessIn):
+    with get_conn() as conn:
+        try:
+            cur = conn.execute(
+                "INSERT INTO ssh_access (ssh_key_id, host_ip, username) VALUES (?,?,?)",
+                (data.ssh_key_id, ip, data.username.strip())
+            )
+            conn.commit()
+        except Exception:
+            raise HTTPException(409, "Access entry already exists")
+        row = conn.execute("""
+            SELECT a.id, a.ssh_key_id, a.username, k.name, k.fingerprint
+            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id WHERE a.id=?
+        """, (cur.lastrowid,)).fetchone()
+    return dict(row)
+
+@app.get("/api/hosts/{ip}/authorized-keys")
+def get_authorized_keys(ip: str, user: str = "root"):
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT k.public_key, k.name
+            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id
+            WHERE a.host_ip = ? AND a.username = ?
+            ORDER BY k.name
+        """, (ip, user)).fetchall()
+    lines = [f"{r['public_key']} {r['name']}" for r in rows]
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
 
 
 @app.get("/api/hosts/{ip:path}")
@@ -994,14 +1044,6 @@ def _ssh_fingerprint(public_key: str) -> str:
     except Exception:
         return ""
 
-class SshKeyIn(BaseModel):
-    name: str
-    public_key: str
-
-class SshAccessIn(BaseModel):
-    ssh_key_id: int
-    username: str = "root"
-
 @app.get("/api/ssh-keys")
 def list_ssh_keys():
     with get_conn() as conn:
@@ -1030,53 +1072,6 @@ def delete_ssh_key(key_id: int):
     with get_conn() as conn:
         conn.execute("DELETE FROM ssh_keys WHERE id=?", (key_id,))
         conn.commit()
-
-@app.get("/api/hosts/{ip}/ssh-access")
-def get_host_ssh_access(ip: str):
-    with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT a.id, a.ssh_key_id, a.username, k.name, k.fingerprint
-            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id
-            WHERE a.host_ip = ? ORDER BY a.username, k.name
-        """, (ip,)).fetchall()
-    return [dict(r) for r in rows]
-
-@app.post("/api/hosts/{ip}/ssh-access", status_code=201)
-def add_host_ssh_access(ip: str, data: SshAccessIn):
-    with get_conn() as conn:
-        try:
-            cur = conn.execute(
-                "INSERT INTO ssh_access (ssh_key_id, host_ip, username) VALUES (?,?,?)",
-                (data.ssh_key_id, ip, data.username.strip())
-            )
-            conn.commit()
-        except Exception:
-            raise HTTPException(409, "Access entry already exists")
-        row = conn.execute("""
-            SELECT a.id, a.ssh_key_id, a.username, k.name, k.fingerprint
-            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id WHERE a.id=?
-        """, (cur.lastrowid,)).fetchone()
-    return dict(row)
-
-@app.delete("/api/ssh-access/{access_id}", status_code=204)
-def delete_ssh_access(access_id: int):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM ssh_access WHERE id=?", (access_id,))
-        conn.commit()
-
-@app.get("/api/hosts/{ip}/authorized-keys")
-def get_authorized_keys(ip: str, user: str = "root"):
-    with get_conn() as conn:
-        rows = conn.execute("""
-            SELECT k.public_key, k.name
-            FROM ssh_access a JOIN ssh_keys k ON k.id = a.ssh_key_id
-            WHERE a.host_ip = ? AND a.username = ?
-            ORDER BY k.name
-        """, (ip, user)).fetchall()
-    lines = [f"{r['public_key']} {r['name']}" for r in rows]
-    from fastapi.responses import PlainTextResponse
-    return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
-
 
 # ── Backup & Restore ─────────────────────────────────────────────────────────
 
