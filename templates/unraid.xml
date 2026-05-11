@@ -17,7 +17,7 @@
   <Category>Network:Management Tools:</Category>
   <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/brq-ae/boltarr/master/templates/unraid.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/brq-ae/boltarr/master/frontend/img/BoltarrLogo.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/brq-ae/boltarr/master/frontend/img/BoltarrLogo.png</Icon>
   <ExtraParams></ExtraParams>
   <PostArgs></PostArgs>
   <CPUset></CPUset>
