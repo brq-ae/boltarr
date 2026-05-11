@@ -83,31 +83,30 @@ llm:
 
 ## Proxmox / LXC
 
-Running Docker inside an unprivileged LXC container requires three settings before the container will start:
+A ready-made compose file is provided for unprivileged LXC containers:
 
-**LXC configuration** (Proxmox UI → your LXC → Options):
+```bash
+curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.lxc.yml
+docker compose -f docker-compose.lxc.yml up -d
+```
+
+### What's different from the standard compose?
+
+Unprivileged LXC containers cannot load AppArmor profiles into the host kernel, so Docker's default profile fails. The LXC compose file adds:
+
+```yaml
+security_opt:
+  - apparmor=unconfined
+```
+
+This is safe because Proxmox applies its own AppArmor profile to the entire LXC, and user-namespace mapping ensures root inside the container has no privileges on the Proxmox host.
+
+### LXC pre-requisites (Proxmox UI → your LXC → Options)
+
 - Enable **Nesting** (`nesting=1`)
 - Enable **keyctl** (`keyctl=1`)
 
-**Docker run / compose** — add the AppArmor override:
-
-```yaml
-# docker-compose.yml
-services:
-  boltarr:
-    ...
-    security_opt:
-      - apparmor=unconfined
-```
-
-Or with `docker run`:
-```bash
-docker run --security-opt apparmor=unconfined ...
-```
-
-**Why `apparmor=unconfined`?** Unprivileged LXCs cannot load AppArmor profiles into the host kernel, so Docker's default profile fails. Disabling it is safe here because Proxmox applies its own AppArmor profile to the entire LXC, and user-namespace mapping ensures that root inside the container has no privileges on the Proxmox host.
-
-**Pre-requisite:** Ubuntu LXC templates often ship without `curl`. If the Docker install script fails immediately, run `apt install -y curl` first.
+**Note:** Ubuntu LXC templates often ship without `curl`. If the Docker install script fails immediately, run `apt install -y curl` first.
 
 ## Manual install (without Docker)
 

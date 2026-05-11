@@ -1,0 +1,35 @@
+# Proxmox / LXC deployment
+#
+# Unprivileged LXC containers cannot load AppArmor profiles into the host
+# kernel, so Docker's default profile fails. The security_opt override below
+# is safe because Proxmox applies its own AppArmor profile to the entire LXC
+# and user-namespace mapping ensures root inside the container has no host
+# privileges.
+#
+# Pre-requisites (Proxmox UI → your LXC → Options):
+#   - Nesting: enabled  (nesting=1)
+#   - keyctl:  enabled  (keyctl=1)
+#
+# Usage:
+#   curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.lxc.yml
+#   docker compose -f docker-compose.lxc.yml up -d
+
+services:
+  boltarr:
+    image: brqae/boltarr:latest
+    container_name: boltarr
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data   # persists DB and config.yaml
+    restart: unless-stopped
+    security_opt:
+      - apparmor=unconfined
+
+    # Optional: configure AI via environment variables instead of the UI.
+    # These override data/config.yaml when set.
+    # environment:
+    #   LLM_PROVIDER: ollama          # none | ollama | openai | anthropic
+    #   LLM_BASE_URL: http://my-ollama-host:11434
+    #   LLM_MODEL: llama3.2
+    #   LLM_API_KEY: ""               # only needed for openai / anthropic

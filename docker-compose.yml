@@ -1,7 +1,7 @@
 services:
   boltarr:
-    build: .
-    image: boltarr:latest
+    image: brqae/boltarr:latest
+    container_name: boltarr
     ports:
       - "8000:8000"
     volumes:
