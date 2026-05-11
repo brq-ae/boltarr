@@ -108,6 +108,20 @@ This is safe because Proxmox applies its own AppArmor profile to the entire LXC,
 
 **Note:** Ubuntu LXC templates often ship without `curl`. If the Docker install script fails immediately, run `apt install -y curl` first.
 
+## Unraid
+
+Install via **Community Applications** (search `boltarr`) once the template is listed, or add it manually:
+
+1. In Unraid, go to **Docker → Add Container → Template URL**
+2. Paste:
+   ```
+   https://raw.githubusercontent.com/brq-ae/boltarr/master/templates/unraid.xml
+   ```
+3. Set your data path (default: `/mnt/user/appdata/boltarr`) and optionally fill in AI settings
+4. Click **Apply**
+
+Data persists in the mapped appdata folder. AI is optional — configure it from the ⚙ AI Settings button in the app.
+
 ## Manual install (without Docker)
 
 Requires Python 3.11+ and nmap.

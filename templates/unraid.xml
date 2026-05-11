@@ -1,0 +1,131 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>boltarr</Name>
+  <Repository>brqae/boltarr:latest</Repository>
+  <Registry>https://hub.docker.com/r/brqae/boltarr</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/brq-ae/boltarr/issues</Support>
+  <Project>https://github.com/brq-ae/boltarr</Project>
+  <Overview>
+    Boltarr is a self-hosted network dashboard for mapping, monitoring, and analyzing your local network.
+    Scan subnets with nmap, visualize your topology as an interactive graph, track devices, manage VLANs,
+    and chat with an optional AI assistant that has full context of your network.
+    AI is optional — works without it. Supports Ollama, OpenAI-compatible APIs, and Anthropic.
+  </Overview>
+  <Category>Network:Management Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/brq-ae/boltarr/master/templates/unraid.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/brq-ae/boltarr/master/frontend/img/BoltarrLogo.svg</Icon>
+  <ExtraParams></ExtraParams>
+  <PostArgs></PostArgs>
+  <CPUset></CPUset>
+  <DonateText></DonateText>
+  <DonateLink></DonateLink>
+  <Description>
+    Boltarr is a self-hosted network dashboard for mapping, monitoring, and analyzing your local network.[br][br]
+    [b]Features:[/b][br]
+    - Interactive topology graph with drag-and-drop layout and VLAN coloring[br]
+    - nmap-powered subnet scanning and host discovery[br]
+    - Device management — add, edit, merge hosts, annotate with notes[br]
+    - Services registry — track running services per host[br]
+    - VLAN management — define VLANs and visualize them on the topology[br]
+    - AI assistant — per-host and network-wide analysis (optional)[br][br]
+    [b]AI providers supported:[/b] Ollama (local), OpenAI-compatible APIs, Anthropic Claude.[br]
+    AI is fully optional — the app works without it.[br][br]
+    [b]Data[/b] is stored in the mapped /app/data directory (SQLite + config.yaml).
+  </Description>
+
+  <!-- Web UI port -->
+  <Config
+    Name="Web UI Port"
+    Target="8000"
+    Default="8000"
+    Mode="tcp"
+    Description="Port Boltarr listens on. Access the UI at http://[server-ip]:[port]/"
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">8000</Config>
+
+  <!-- Data volume -->
+  <Config
+    Name="Data"
+    Target="/app/data"
+    Default="/mnt/user/appdata/boltarr"
+    Mode="rw"
+    Description="Persistent storage for the database (boltarr.db) and AI config (config.yaml)."
+    Type="Path"
+    Display="always"
+    Required="true"
+    Mask="false">/mnt/user/appdata/boltarr</Config>
+
+  <!-- AI settings (all optional) -->
+  <Config
+    Name="AI Provider"
+    Target="LLM_PROVIDER"
+    Default=""
+    Mode=""
+    Description="AI provider to use. Leave blank to configure via the UI instead. Options: none | ollama | openai | anthropic"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"></Config>
+
+  <Config
+    Name="AI Base URL"
+    Target="LLM_BASE_URL"
+    Default=""
+    Mode=""
+    Description="Base URL for the AI API. Required for Ollama and OpenAI-compatible providers. Example: http://192.168.1.10:11434"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"></Config>
+
+  <Config
+    Name="AI Model"
+    Target="LLM_MODEL"
+    Default=""
+    Mode=""
+    Description="Default model to use. Example: llama3.2, gpt-4o, claude-haiku-4-5-20251001"
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="false"></Config>
+
+  <Config
+    Name="AI API Key"
+    Target="LLM_API_KEY"
+    Default=""
+    Mode=""
+    Description="API key for OpenAI-compatible or Anthropic providers. Not needed for Ollama."
+    Type="Variable"
+    Display="always"
+    Required="false"
+    Mask="true"></Config>
+
+  <Config
+    Name="AI Timeout (seconds)"
+    Target="LLM_TIMEOUT"
+    Default="120"
+    Mode=""
+    Description="Timeout in seconds for standard AI requests."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">120</Config>
+
+  <Config
+    Name="AI Long Timeout (seconds)"
+    Target="LLM_LONG_TIMEOUT"
+    Default="600"
+    Mode=""
+    Description="Timeout in seconds for long-running AI requests (e.g. full network analysis)."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
+    Mask="false">600</Config>
+
+</Container>
