@@ -1038,6 +1038,16 @@ tbody td {
     max-width: 400px;
     border-left: 1px solid var(--border);
     z-index: 45;
+    transform: translateX(100%);
+    transition: transform 0.22s ease;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .chat-panel.open {
+    width: 100%;
+    transform: translateX(0);
+    overflow: auto;
+    pointer-events: all;
   }
 
   .detail-panel { max-height: 72%; }
