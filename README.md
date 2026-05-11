@@ -19,12 +19,18 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 ## Quick start (Docker)
 
 ```bash
-git clone https://github.com/your-username/boltarr.git
-cd boltarr
+curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.yml
 docker compose up -d
 ```
 
 Open **http://localhost:8000**
+
+> Or if you prefer to clone the full repo:
+> ```bash
+> git clone https://github.com/brq-ae/boltarr.git
+> cd boltarr
+> docker compose up -d
+> ```
 
 ### With bundled Ollama (local AI)
 
