@@ -1,39 +1,103 @@
 import threading
+import subprocess
 import nmap
 from .database import get_conn
 
-# Keyed by run_id: {"status": str, "progress": int, "total": int, "error": str}
+# Keyed by run_id: {"status", "progress", "total", "error", "cancelled", "_proc"}
 scan_jobs: dict[int, dict] = {}
 _lock = threading.Lock()
+
+
+def _run_nmap(args: list[str], job: dict) -> str | None:
+    """Run nmap as a subprocess, storing the handle so it can be killed."""
+    proc = subprocess.Popen(
+        ["nmap"] + args + ["-oX", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    with _lock:
+        job["_proc"] = proc
+    stdout, _ = proc.communicate()
+    with _lock:
+        job["_proc"] = None
+    if job.get("cancelled"):
+        return None
+    return stdout.decode("utf-8", errors="replace") if proc.returncode in (0, 1) else None
+
+
+def cancel_scan(run_id: int) -> bool:
+    with _lock:
+        job = scan_jobs.get(run_id)
+        if not job or job["status"] in ("completed", "error", "cancelled"):
+            return False
+        job["cancelled"] = True
+        proc = job.get("_proc")
+    if proc:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    return True
 
 
 def _do_scan(run_id: int, cidr: str):
     def update(status=None, progress=None, total=None, error=None):
         with _lock:
             job = scan_jobs[run_id]
-            if status:
-                job["status"] = status
-            if progress is not None:
-                job["progress"] = progress
-            if total is not None:
-                job["total"] = total
-            if error:
-                job["error"] = error
+            if status:              job["status"] = status
+            if progress is not None: job["progress"] = progress
+            if total is not None:   job["total"] = total
+            if error:               job["error"] = error
+
+    def is_cancelled():
+        with _lock:
+            return scan_jobs[run_id].get("cancelled", False)
+
+    def mark_cancelled():
+        with _lock:
+            scan_jobs[run_id]["status"] = "cancelled"
+        try:
+            conn = get_conn()
+            conn.execute("UPDATE scan_runs SET status='cancelled', completed_at=datetime('now') WHERE id=?", (run_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
 
     try:
+        with _lock:
+            job = scan_jobs[run_id]
+
         update(status="discovering", progress=0)
 
+        xml = _run_nmap(["-sn", "-T4", "--min-parallelism", "10", cidr], job)
+        if xml is None or is_cancelled():
+            mark_cancelled()
+            return
+
         nm = nmap.PortScanner()
-        nm.scan(hosts=cidr, arguments="-sn -T4 --min-parallelism 10")
+        nm.analyse_nmap_xml_scan(xml)
         live_hosts = nm.all_hosts()
 
         update(total=len(live_hosts), status="scanning")
 
         conn = get_conn()
-        for i, ip in enumerate(live_hosts):
+        scanned = 0
+        for ip in live_hosts:
+            if is_cancelled():
+                break
+
             try:
+                xml2 = _run_nmap(["-sV", "-O", "--open", "-T4", "--version-intensity", "5", ip], job)
+                if xml2 is None or is_cancelled():
+                    break
+
                 nm2 = nmap.PortScanner()
-                nm2.scan(hosts=ip, arguments="-sV -O --open -T4 --version-intensity 5")
+                nm2.analyse_nmap_xml_scan(xml2)
+
+                if ip not in nm2.all_hosts():
+                    scanned += 1
+                    update(progress=int(scanned / max(len(live_hosts), 1) * 100))
+                    continue
 
                 addresses = nm2[ip].get("addresses", {})
                 mac = addresses.get("mac")
@@ -47,26 +111,23 @@ def _do_scan(run_id: int, cidr: str):
                 vendor_dict = nm2[ip].get("vendor", {})
                 vendor = list(vendor_dict.values())[0] if vendor_dict else None
 
-                # If this IP is a registered alias, update the primary host instead
                 alias_row = conn.execute(
                     "SELECT host_id FROM host_aliases WHERE ip=?", (ip,)
                 ).fetchone()
 
                 if alias_row:
                     host_id = alias_row["host_id"]
-                    conn.execute(
-                        "UPDATE hosts SET last_seen=datetime('now') WHERE id=?", (host_id,)
-                    )
+                    conn.execute("UPDATE hosts SET last_seen=datetime('now') WHERE id=?", (host_id,))
                 else:
                     conn.execute("""
                         INSERT INTO hosts (ip, mac, hostname, os_guess, vendor, last_seen)
                         VALUES (?, ?, ?, ?, ?, datetime('now'))
                         ON CONFLICT(ip) DO UPDATE SET
-                            mac        = COALESCE(excluded.mac, mac),
-                            hostname   = COALESCE(excluded.hostname, hostname),
-                            os_guess   = COALESCE(excluded.os_guess, os_guess),
-                            vendor     = COALESCE(excluded.vendor, vendor),
-                            last_seen  = excluded.last_seen
+                            mac       = COALESCE(excluded.mac, mac),
+                            hostname  = COALESCE(excluded.hostname, hostname),
+                            os_guess  = COALESCE(excluded.os_guess, os_guess),
+                            vendor    = COALESCE(excluded.vendor, vendor),
+                            last_seen = excluded.last_seen
                     """, (ip, mac, hostname, os_guess, vendor))
                     row = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
                     host_id = row["id"]
@@ -86,10 +147,18 @@ def _do_scan(run_id: int, cidr: str):
                 conn.commit()
 
             except Exception:
-                pass  # single host failure shouldn't kill the whole scan
+                pass
 
-            update(progress=int((i + 1) / max(len(live_hosts), 1) * 100))
+            scanned += 1
+            update(progress=int(scanned / max(len(live_hosts), 1) * 100))
 
+        conn.close()
+
+        if is_cancelled():
+            mark_cancelled()
+            return
+
+        conn = get_conn()
         conn.execute("""
             UPDATE scan_runs
             SET status='completed', completed_at=datetime('now'), hosts_found=?
@@ -114,6 +183,6 @@ def _do_scan(run_id: int, cidr: str):
 
 def start_scan(run_id: int, cidr: str):
     with _lock:
-        scan_jobs[run_id] = {"status": "starting", "progress": 0, "total": 0}
+        scan_jobs[run_id] = {"status": "starting", "progress": 0, "total": 0, "cancelled": False, "_proc": None}
     t = threading.Thread(target=_do_scan, args=(run_id, cidr), daemon=True)
     t.start()

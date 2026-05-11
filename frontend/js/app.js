@@ -124,6 +124,13 @@ async function triggerScan(subnetId) {
   }
 }
 
+async function stopScan() {
+  if (!activeRunId) return;
+  try {
+    await api("POST", `/api/scan/${activeRunId}/cancel`);
+  } catch (_) {}
+}
+
 function startPolling(subnetId) {
   const overlay = document.getElementById("scanProgress");
   overlay.classList.add("visible");
@@ -136,13 +143,14 @@ function startPolling(subnetId) {
       job.status === "discovering" ? "Discovering…" :
       job.status === "scanning"    ? `Scanning ${pct}%` :
       job.status === "completed"   ? `Done — ${job.total || 0} hosts` :
+      job.status === "cancelled"   ? "Scan stopped" :
       job.status === "error"       ? "Error: " + (job.error || "?") : job.status;
 
-    if (job.status === "completed" || job.status === "error") {
+    if (["completed", "error", "cancelled"].includes(job.status)) {
       clearInterval(pollTimer);
       const dot = document.getElementById(`subnet-dot-${subnetId}`);
       if (dot) dot.className = "subnet-dot " + (job.status === "completed" ? "scanned" : "");
-      setTimeout(() => overlay.classList.remove("visible"), 4000);
+      setTimeout(() => overlay.classList.remove("visible"), 3000);
       await loadHosts();
       renderHostsTable();
       await loadGraph();

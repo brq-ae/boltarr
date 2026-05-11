@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .database import init_db, get_conn
-from .scanner import start_scan, scan_jobs
+from .scanner import start_scan, scan_jobs, cancel_scan
 from .config import get_config, get_llm_config, save_config
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
@@ -91,6 +91,12 @@ def scan_status(run_id: int):
         if row:
             return dict(row)
     raise HTTPException(404, "Run not found")
+
+
+@app.post("/api/scan/{run_id}/cancel", status_code=204)
+def cancel_scan_endpoint(run_id: int):
+    if not cancel_scan(run_id):
+        raise HTTPException(404, "Scan not found or already finished")
 
 
 @app.get("/api/scans")
