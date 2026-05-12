@@ -162,6 +162,7 @@
           </select>
           <input type="text" class="search-input" id="serviceFilter" placeholder="Filter by name, port…" style="flex:1;max-width:260px">
           <span class="host-count" id="serviceCount"></span>
+          <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openBulkAddContainers()">⊕ Bulk</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openAddService()">+ Service</button>
         </div>
         <div id="svc-panel-list" class="table-wrap">
@@ -806,6 +807,27 @@
       <span style="flex:1"></span>
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk add containers modal -->
+<div class="modal-overlay" id="bulkAddModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">Bulk add container hosts</div>
+    <p style="font-size:11px;color:var(--text-3);margin:0 0 14px">Select containers and the host they run on. Name and URL are pre-filled — edit individually after.</p>
+    <div class="form-row" style="margin-bottom:14px">
+      <label>Runs on</label>
+      <select id="bulkHostIp"></select>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)">Container hosts</div>
+      <button class="btn-ghost" style="font-size:11px;padding:2px 8px" onclick="bulkSelectAll()">Select all</button>
+    </div>
+    <div id="bulkContainerGrid" class="container-pick-grid" style="margin-bottom:16px;max-height:220px;overflow-y:auto"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="document.getElementById('bulkAddModal').classList.remove('open')">Cancel</button>
+      <button class="btn btn-primary" id="bulkAddBtn" onclick="bulkAddContainers()" disabled>Add selected</button>
     </div>
   </div>
 </div>

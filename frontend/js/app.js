@@ -13,10 +13,11 @@ let sortCol         = "ip";
 let sortDir         = 1;
 let filterText      = "";
 let activeDetailTab = "info";
-let currentSvcTab    = "list";
-let svcHostFilterVal = "";
-let svcCy            = null;
+let currentSvcTab     = "list";
+let svcHostFilterVal  = "";
+let svcCy             = null;
 let pickedContainerIp = null;
+let bulkSelectedIps   = new Map();
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -1152,22 +1153,20 @@ function openAddService(presetIp) {
   // Host dropdown: exclude container-type hosts (they're in the pick list above)
   sel.innerHTML = allHosts
     .filter(h => h.device_type !== "container")
-    .map(h => `<option value="${h.ip}"${h.ip === presetIp ? " selected" : ""}>${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`)
+    .map(h => `<option value="${h.ip}">${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`)
     .join("");
+  // Pre-select: explicit preset → last used → first option
+  if (presetIp && sel.querySelector(`option[value="${presetIp}"]`)) {
+    sel.value = presetIp;
+  } else {
+    const last = localStorage.getItem("boltarr_last_svc_host");
+    if (last && sel.querySelector(`option[value="${last}"]`)) sel.value = last;
+  }
   document.getElementById("serviceModal").classList.add("open");
 }
 
 function renderContainerPick() {
-  // Three ways a container could already be imported:
-  // 1. Service ip = container ip (old-style manual add)
-  // 2. Service container_ip = container ip (new import via chip)
-  // 3. Service URL hostname = container ip (heuristic for pre-feature manual adds)
-  const usedIps = new Set([
-    ...allServices.map(s => s.ip),
-    ...allServices.map(s => s.container_ip).filter(Boolean),
-    ...allServices.map(s => { try { return new URL(s.url || "").hostname; } catch { return null; } }).filter(Boolean),
-  ]);
-  const containers = allHosts.filter(h => h.device_type === "container" && !usedIps.has(h.ip));
+  const containers = _unusedContainerIps();
   const list        = document.getElementById("containerPickList");
 
   if (containers.length === 0) {
@@ -1237,6 +1236,7 @@ async function saveServiceModal() {
       });
       allServices.push(svc);
       pickedContainerIp = null;
+      localStorage.setItem("boltarr_last_svc_host", hostIp);
     }
     renderServicesTable();
     closeServiceModal();
@@ -1556,6 +1556,85 @@ async function removeSvcDep(depId, svcId) {
   allDependencies = allDependencies.filter(d => d.id !== depId);
   renderDepsModal(svcId);
   if (currentSvcTab === "topology") renderSvcTopology();
+}
+
+// ── Bulk add containers ───────────────────────────────────────────────────────
+
+function _unusedContainerIps() {
+  const used = new Set([
+    ...allServices.map(s => s.ip),
+    ...allServices.map(s => s.container_ip).filter(Boolean),
+    ...allServices.map(s => { try { return new URL(s.url || "").hostname; } catch { return null; } }).filter(Boolean),
+  ]);
+  return allHosts.filter(h => h.device_type === "container" && !used.has(h.ip));
+}
+
+function openBulkAddContainers() {
+  const containers = _unusedContainerIps();
+  if (containers.length === 0) {
+    alert("No container hosts available to import.");
+    return;
+  }
+  bulkSelectedIps = new Map();
+  const grid = document.getElementById("bulkContainerGrid");
+  grid.innerHTML = containers.map(h => {
+    const label = h.hostname || h.ip;
+    const sub   = h.hostname ? h.ip : "";
+    return `<div class="container-chip" id="bulk-chip-${h.ip.replace(/\./g,'_')}" onclick="toggleBulkChip('${h.ip}','${label.replace(/'/g,"\\'")}')">
+      <span class="container-chip-name">${label}</span>
+      ${sub ? `<span class="container-chip-ip">${sub}</span>` : ""}
+    </div>`;
+  }).join("");
+  const sel = document.getElementById("bulkHostIp");
+  sel.innerHTML = allHosts
+    .filter(h => h.device_type !== "container")
+    .map(h => `<option value="${h.ip}">${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`)
+    .join("");
+  const last = localStorage.getItem("boltarr_last_svc_host");
+  if (last && sel.querySelector(`option[value="${last}"]`)) sel.value = last;
+  updateBulkAddBtn();
+  document.getElementById("bulkAddModal").classList.add("open");
+}
+
+function toggleBulkChip(ip, name) {
+  if (bulkSelectedIps.has(ip)) bulkSelectedIps.delete(ip);
+  else bulkSelectedIps.set(ip, name);
+  document.getElementById(`bulk-chip-${ip.replace(/\./g,'_')}`)?.classList.toggle("selected", bulkSelectedIps.has(ip));
+  updateBulkAddBtn();
+}
+
+function bulkSelectAll() {
+  _unusedContainerIps().forEach(h => {
+    bulkSelectedIps.set(h.ip, h.hostname || h.ip);
+    document.getElementById(`bulk-chip-${h.ip.replace(/\./g,'_')}`)?.classList.add("selected");
+  });
+  updateBulkAddBtn();
+}
+
+function updateBulkAddBtn() {
+  const n   = bulkSelectedIps.size;
+  const btn = document.getElementById("bulkAddBtn");
+  if (!btn) return;
+  btn.textContent = n === 0 ? "Add selected" : `Add ${n} container${n > 1 ? "s" : ""}`;
+  btn.disabled    = n === 0;
+}
+
+async function bulkAddContainers() {
+  const hostIp = document.getElementById("bulkHostIp").value;
+  if (!hostIp || bulkSelectedIps.size === 0) return;
+  localStorage.setItem("boltarr_last_svc_host", hostIp);
+  for (const [ip, name] of bulkSelectedIps) {
+    try {
+      const svc = await api("POST", `/api/hosts/${hostIp}/services`, {
+        name, url: `http://${ip}`, container_ip: ip, status: "unknown"
+      });
+      allServices.push(svc);
+    } catch { /* skip failed ones silently */ }
+  }
+  populateSvcHostFilter();
+  renderServicesTable();
+  if (currentSvcTab === "topology") renderSvcTopology();
+  document.getElementById("bulkAddModal").classList.remove("open");
 }
 
 // ── Edit connection ───────────────────────────────────────────────────────────
