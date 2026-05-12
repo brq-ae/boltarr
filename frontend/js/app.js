@@ -131,6 +131,39 @@ async function stopScan() {
   } catch (_) {}
 }
 
+async function probeHost(ip) {
+  try {
+    const { run_id } = await api("POST", `/api/hosts/${ip}/probe`);
+    activeRunId = run_id;
+    showToast(`Probing ${ip}…`);
+    startProbePolling(run_id, ip);
+  } catch (e) {
+    alert("Probe error: " + e.message);
+  }
+}
+
+function startProbePolling(run_id, ip) {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const job = await api("GET", `/api/scan/${run_id}/status`);
+    if (["completed", "error", "cancelled"].includes(job.status)) {
+      clearInterval(pollTimer);
+      activeRunId = null;
+      if (job.status === "completed") {
+        showToast(`Probe of ${ip} complete`);
+        await loadHosts();
+        renderHostsTable();
+        await loadGraph();
+        const detail = document.getElementById("hostDetail");
+        if (detail.classList.contains("open")) await showHostDetail(ip);
+        await loadScans();
+      } else if (job.status === "error") {
+        showToast("Probe failed: " + (job.error || "unknown error"));
+      }
+    }
+  }, 1500);
+}
+
 function startPolling(subnetId) {
   const overlay = document.getElementById("scanProgress");
   overlay.classList.add("visible");
@@ -211,7 +244,8 @@ function renderHostsTable() {
     const isSynthetic = h.ip.startsWith("node-");
     const aliasCount  = (h.aliases||[]).length;
     const aliasBadge  = aliasCount ? `<span class="port-badge" style="margin-left:4px" title="${(h.aliases||[]).join(', ')}">+${aliasCount} IP${aliasCount>1?'s':''}</span>` : "";
-    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip + aliasBadge;
+    const manualBadge = h.source === "manual" ? `<span class="port-badge" style="margin-left:4px;background:oklch(38% 0.1 280);color:oklch(78% 0.1 280)">manual</span>` : "";
+    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip + aliasBadge + manualBadge;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="td-ip mono" style="color:var(--accent)">${displayIp}</td>
@@ -358,6 +392,7 @@ async function showHostDetail(ip) {
         <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="analyzeHost('${ip}')">Analyze</button>
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openEditHost('${ip}')">Edit</button>
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openMergeHost('${ip}')">⇌ Merge</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="probeHost('${ip}')">⟳ Probe</button>
         <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" onclick="deleteHost('${ip}')">Delete</button>
         <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:18px;padding:2px 8px">×</button>
       </div>
@@ -729,16 +764,68 @@ async function loadScans() {
     wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-3);font-size:12px">No scans yet.</div>`;
     return;
   }
-  wrap.innerHTML = scans.map(s => `
-    <div class="scan-card">
-      <div class="scan-indicator ${s.status}"></div>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:500;font-size:12px">${s.subnet_name} <span class="mono" style="color:var(--text-3);font-weight:400">${s.cidr}</span></div>
-        <div class="mono" style="font-size:10px;color:var(--text-3);margin-top:2px">${(s.started_at||"").substring(0,16)} · ${s.hosts_found||0} hosts</div>
-      </div>
-      <span class="tag tag-${s.status}">${s.status}</span>
+  wrap.innerHTML = `
+    <div class="scans-toolbar">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);cursor:pointer">
+        <input type="checkbox" id="scansSelectAll" onchange="scansToggleAll(this.checked)" style="accent-color:var(--accent)">
+        Select all
+      </label>
+      <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="scansDeleteSelected()">Delete selected</button>
     </div>
-  `).join("");
+    ${scans.map(s => {
+      const isProbe = s.type === "probe";
+      const target = isProbe
+        ? `<span class="mono" style="color:var(--accent)">${s.host_ip || "?"}</span>`
+        : `${s.subnet_name || "?"} <span class="mono" style="color:var(--text-3);font-weight:400">${s.cidr || ""}</span>`;
+      const detail = isProbe
+        ? `probe · ${(s.started_at||"").substring(0,16)}`
+        : `${(s.started_at||"").substring(0,16)} · ${s.hosts_found||0} hosts`;
+      const typeBadge = isProbe
+        ? `<span class="tag" style="background:oklch(40% 0.1 280);color:oklch(80% 0.1 280);font-size:10px">probe</span>`
+        : `<span class="tag" style="background:var(--surface2);color:var(--text-3);font-size:10px">scan</span>`;
+      return `
+        <div class="scan-card" id="scan-card-${s.id}">
+          <input type="checkbox" class="scan-checkbox" data-id="${s.id}" style="accent-color:var(--accent);flex-shrink:0" onchange="scansUpdateBulkBtn()">
+          <div class="scan-indicator ${s.status}"></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:500;font-size:12px">${target}</div>
+            <div class="mono" style="font-size:10px;color:var(--text-3);margin-top:2px">${detail}</div>
+          </div>
+          ${typeBadge}
+          <span class="tag tag-${s.status}" style="font-size:10px">${s.status}</span>
+          <button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" onclick="deleteScanRun(${s.id})" title="Delete">✕</button>
+        </div>`;
+    }).join("")}`;
+}
+
+function scansToggleAll(checked) {
+  document.querySelectorAll(".scan-checkbox").forEach(cb => cb.checked = checked);
+  scansUpdateBulkBtn();
+}
+
+function scansUpdateBulkBtn() {
+  const allCbs = document.querySelectorAll(".scan-checkbox");
+  const allSelectAll = document.getElementById("scansSelectAll");
+  if (allSelectAll) {
+    const checkedCount = document.querySelectorAll(".scan-checkbox:checked").length;
+    allSelectAll.checked = checkedCount === allCbs.length && allCbs.length > 0;
+    allSelectAll.indeterminate = checkedCount > 0 && checkedCount < allCbs.length;
+  }
+}
+
+async function deleteScanRun(id) {
+  if (!confirm("Delete this scan/probe record?")) return;
+  await api("DELETE", `/api/scans/${id}`);
+  document.getElementById(`scan-card-${id}`)?.remove();
+  if (!document.querySelector(".scan-card")) await loadScans();
+}
+
+async function scansDeleteSelected() {
+  const ids = Array.from(document.querySelectorAll(".scan-checkbox:checked")).map(cb => parseInt(cb.dataset.id));
+  if (!ids.length) return showToast("Nothing selected");
+  if (!confirm(`Delete ${ids.length} record${ids.length > 1 ? "s" : ""}?`)) return;
+  await api("DELETE", "/api/scans", { ids });
+  await loadScans();
 }
 
 // ── Models ────────────────────────────────────────────────────────────────────
@@ -788,6 +875,15 @@ function setTab(name) {
 
 function toggleChat() {
   document.getElementById("chatPanel").classList.toggle("open");
+}
+
+// ── Legend toggle ─────────────────────────────────────────────────────────────
+
+function toggleLegend() {
+  const items    = document.getElementById("legendItems");
+  const chevron  = document.getElementById("legendChevron");
+  const collapsed = items.classList.toggle("collapsed");
+  chevron.textContent = collapsed ? "▾" : "▴";
 }
 
 // ── Services ──────────────────────────────────────────────────────────────────
@@ -1574,7 +1670,7 @@ async function loadHostSshSection(ip) {
         <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeHostSshAccess(${a.id},'${ip}')">✕</button>
       </div>`).join("");
 
-    const curlCmd = `curl -s http://${location.hostname}:${location.port}/api/hosts/${ip}/authorized-keys?user=${user} | tee -a ~/.ssh/authorized_keys`;
+    const curlCmd = `curl -sfL "${location.protocol}//${location.host}/api/hosts/${ip}/authorized-keys?user=${user}" | tee -a ~/.ssh/authorized_keys`;
     return `
       <div style="margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -1626,7 +1722,8 @@ async function removeHostSshAccess(accessId, ip) {
 }
 
 async function copySshCurl(ip, user) {
-  const cmd = `curl -s http://${location.hostname}:${location.port}/api/hosts/${ip}/authorized-keys?user=${user} | tee -a ~/.ssh/authorized_keys`;
+  const base = `${location.protocol}//${location.host}`;
+  const cmd = `curl -sfL "${base}/api/hosts/${ip}/authorized-keys?user=${user}" | tee -a ~/.ssh/authorized_keys`;
   await navigator.clipboard.writeText(cmd);
   showToast("Copied curl command");
 }

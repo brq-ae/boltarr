@@ -91,7 +91,9 @@
           <span class="connect-hint" id="connectHint"></span>
         </div>
 
-        <div class="graph-legend">
+        <div class="graph-legend" id="graphLegend">
+          <div class="legend-toggle" onclick="toggleLegend()">Legend <span id="legendChevron">▴</span></div>
+          <div id="legendItems" class="legend-items">
           <div class="legend-item"><div class="legend-dot" style="background:#1a6fa8"></div>Router / GW</div>
           <div class="legend-item"><div class="legend-dot" style="background:#155a8a"></div>Switch / Firewall</div>
           <div class="legend-item"><div class="legend-dot" style="background:#4a9ae0"></div>Server / NAS</div>
@@ -104,6 +106,7 @@
           <div class="legend-item"><div class="legend-dot" style="background:#374e63"></div>Unknown</div>
           <div class="legend-item"><div class="legend-line-sample" style="background:#4a9ae0"></div>Wired</div>
           <div class="legend-item"><div class="legend-line-sample" style="background:repeating-linear-gradient(90deg,#42b86a 0,#42b86a 5px,transparent 5px,transparent 8px)"></div>WiFi</div>
+          </div>
         </div>
 
         <div class="scan-progress-overlay" id="scanProgress">
