@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+COPY VERSION .
 
 # Runtime data (DB + config) is stored in /app/data — mount a volume here
 RUN mkdir -p /app/data
