@@ -144,6 +144,7 @@ def init_db():
             "ALTER TABLE hosts ADD COLUMN source TEXT NOT NULL DEFAULT 'scanned'",
             "ALTER TABLE scan_runs ADD COLUMN type TEXT NOT NULL DEFAULT 'scan'",
             "ALTER TABLE scan_runs ADD COLUMN host_ip TEXT",
+            "ALTER TABLE services ADD COLUMN container_ip TEXT",
             """CREATE TABLE IF NOT EXISTS service_dependencies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

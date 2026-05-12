@@ -491,13 +491,14 @@ def delete_port(port_id: int):
 # ── Services ──────────────────────────────────────────────────────────────────
 
 class ServiceIn(BaseModel):
-    name:        str
-    description: Optional[str] = None
-    port:        Optional[int] = None
-    protocol:    Optional[str] = "tcp"
-    status:      Optional[str] = "unknown"
-    url:         Optional[str] = None
-    icon:        Optional[str] = None
+    name:         str
+    description:  Optional[str] = None
+    port:         Optional[int] = None
+    protocol:     Optional[str] = "tcp"
+    status:       Optional[str] = "unknown"
+    url:          Optional[str] = None
+    icon:         Optional[str] = None
+    container_ip: Optional[str] = None
 
 
 class ServiceUpdate(BaseModel):
@@ -529,10 +530,10 @@ def add_service(ip: str, data: ServiceIn):
         if not host:
             raise HTTPException(404, "Host not found")
         conn.execute(
-            "INSERT INTO services (host_id, name, description, port, protocol, status, url, icon)"
-            " VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO services (host_id, name, description, port, protocol, status, url, icon, container_ip)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
             (host["id"], data.name, data.description, data.port, data.protocol,
-             data.status, data.url, data.icon),
+             data.status, data.url, data.icon, data.container_ip),
         )
         conn.commit()
         row = conn.execute("""

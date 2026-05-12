@@ -13,9 +13,10 @@ let sortCol         = "ip";
 let sortDir         = 1;
 let filterText      = "";
 let activeDetailTab = "info";
-let currentSvcTab   = "list";
+let currentSvcTab    = "list";
 let svcHostFilterVal = "";
-let svcCy           = null;
+let svcCy            = null;
+let pickedContainerIp = null;
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -1137,6 +1138,7 @@ function openAddService(presetIp) {
   svcUrlEl.dataset.auto = "";
   document.getElementById("svcDeleteBtn").style.display = "none";
 
+  pickedContainerIp = null;
   // Container quick-pick
   const containerRow = document.getElementById("containerPickRow");
   containerRow.style.display = "";
@@ -1156,8 +1158,16 @@ function openAddService(presetIp) {
 }
 
 function renderContainerPick() {
-  const existingIps = new Set(allServices.map(s => s.ip));
-  const containers  = allHosts.filter(h => h.device_type === "container" && !existingIps.has(h.ip));
+  // Three ways a container could already be imported:
+  // 1. Service ip = container ip (old-style manual add)
+  // 2. Service container_ip = container ip (new import via chip)
+  // 3. Service URL hostname = container ip (heuristic for pre-feature manual adds)
+  const usedIps = new Set([
+    ...allServices.map(s => s.ip),
+    ...allServices.map(s => s.container_ip).filter(Boolean),
+    ...allServices.map(s => { try { return new URL(s.url || "").hostname; } catch { return null; } }).filter(Boolean),
+  ]);
+  const containers = allHosts.filter(h => h.device_type === "container" && !usedIps.has(h.ip));
   const list        = document.getElementById("containerPickList");
 
   if (containers.length === 0) {
@@ -1185,7 +1195,7 @@ function toggleContainerPick() {
 }
 
 function pickContainer(ip, name) {
-  // Pre-fill service name and URL, leave host dropdown for user to choose parent
+  pickedContainerIp = ip;
   document.getElementById("svcName").value = name;
   const urlEl = document.getElementById("svcUrl");
   const port  = document.getElementById("svcPort").value;
@@ -1221,8 +1231,12 @@ async function saveServiceModal() {
       if (row) row.outerHTML = svcRowHTML(svc, svc.ip);
     } else {
       const hostIp = document.getElementById("svcHostIp").value;
-      const svc = await api("POST", `/api/hosts/${hostIp}/services`, { name, description: desc, port, protocol: proto, status, url });
+      const svc = await api("POST", `/api/hosts/${hostIp}/services`, {
+        name, description: desc, port, protocol: proto, status, url,
+        container_ip: pickedContainerIp || null
+      });
       allServices.push(svc);
+      pickedContainerIp = null;
     }
     renderServicesTable();
     closeServiceModal();
