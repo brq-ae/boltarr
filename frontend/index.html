@@ -507,8 +507,17 @@
   <div class="modal">
     <div class="modal-title" id="svcModalTitle">Add Service</div>
     <input type="hidden" id="svcEditId">
+
+    <!-- Container quick-pick (shown only when adding, hidden when editing) -->
+    <div id="containerPickRow" style="margin-bottom:14px">
+      <button class="container-pick-toggle" id="containerPickToggle" onclick="toggleContainerPick()">
+        <span id="containerPickChevron">▸</span> Import from container hosts
+      </button>
+      <div id="containerPickList" style="display:none;margin-top:8px;display:none"></div>
+    </div>
+
     <div class="form-row" id="svcHostRow">
-      <label>Host</label>
+      <label>Host (runs on)</label>
       <select id="svcHostIp" onchange="autoFillSvcUrlModal()"></select>
     </div>
     <div class="form-2col">

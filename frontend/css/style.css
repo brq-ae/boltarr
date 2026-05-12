@@ -1288,6 +1288,44 @@ tbody td {
   height: 100%;
 }
 
+/* Container quick-pick in Add Service modal */
+.container-pick-toggle {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: color 0.15s, border-color 0.15s;
+}
+.container-pick-toggle:hover { color: var(--text-1); border-color: var(--accent); }
+
+.container-pick-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.container-chip {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-2);
+  transition: background 0.15s, border-color 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.container-chip:hover  { background: var(--surface3, oklch(22% 0.02 240)); border-color: var(--accent); color: var(--text-1); }
+.container-chip.used   { opacity: 0.4; cursor: default; pointer-events: none; }
+.container-chip-name   { font-weight: 500; }
+.container-chip-ip     { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
+
 /* Stacked port/status cell */
 .svc-port-status {
   display: flex;

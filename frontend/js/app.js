@@ -1118,8 +1118,9 @@ function openEditService(id) {
   const urlEl = document.getElementById("svcUrl");
   urlEl.value = s.url || "";
   urlEl.dataset.auto = "";
-  document.getElementById("svcHostRow").style.display = "none";
-  document.getElementById("svcDeleteBtn").style.display = "";
+  document.getElementById("svcHostRow").style.display        = "none";
+  document.getElementById("containerPickRow").style.display  = "none";
+  document.getElementById("svcDeleteBtn").style.display      = "";
   document.getElementById("serviceModal").classList.add("open");
 }
 
@@ -1135,13 +1136,69 @@ function openAddService(presetIp) {
   svcUrlEl.value = "";
   svcUrlEl.dataset.auto = "";
   document.getElementById("svcDeleteBtn").style.display = "none";
+
+  // Container quick-pick
+  const containerRow = document.getElementById("containerPickRow");
+  containerRow.style.display = "";
+  document.getElementById("containerPickList").style.display = "none";
+  document.getElementById("containerPickChevron").textContent = "▸";
+  renderContainerPick();
+
   const hostRow = document.getElementById("svcHostRow");
   hostRow.style.display = "";
   const sel = document.getElementById("svcHostIp");
-  sel.innerHTML = allHosts.map(h =>
-    `<option value="${h.ip}"${h.ip === presetIp ? " selected" : ""}>${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`
-  ).join("");
+  // Host dropdown: exclude container-type hosts (they're in the pick list above)
+  sel.innerHTML = allHosts
+    .filter(h => h.device_type !== "container")
+    .map(h => `<option value="${h.ip}"${h.ip === presetIp ? " selected" : ""}>${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`)
+    .join("");
   document.getElementById("serviceModal").classList.add("open");
+}
+
+function renderContainerPick() {
+  const existingIps = new Set(allServices.map(s => s.ip));
+  const containers  = allHosts.filter(h => h.device_type === "container");
+  const list        = document.getElementById("containerPickList");
+
+  if (containers.length === 0) {
+    list.innerHTML = `<div style="font-size:11px;color:var(--text-3)">No hosts with device type "container" found.</div>`;
+    return;
+  }
+  list.innerHTML = `<div class="container-pick-grid">` +
+    containers.map(h => {
+      const used  = existingIps.has(h.ip);
+      const label = h.hostname || h.ip;
+      const sub   = h.hostname ? h.ip : "";
+      return `<div class="container-chip${used ? " used" : ""}" onclick="pickContainer('${h.ip}','${label}')" title="${used ? "Already added as a service" : ""}">
+        <span class="container-chip-name">${label}</span>
+        ${sub ? `<span class="container-chip-ip">${sub}</span>` : ""}
+        ${used ? `<span style="font-size:9px;color:var(--text-3)">already added</span>` : ""}
+      </div>`;
+    }).join("") +
+  `</div>`;
+}
+
+function toggleContainerPick() {
+  const list     = document.getElementById("containerPickList");
+  const chevron  = document.getElementById("containerPickChevron");
+  const isOpen   = list.style.display !== "none";
+  list.style.display  = isOpen ? "none" : "block";
+  chevron.textContent = isOpen ? "▸" : "▾";
+}
+
+function pickContainer(ip, name) {
+  // Pre-fill service name and URL, leave host dropdown for user to choose parent
+  document.getElementById("svcName").value = name;
+  const urlEl = document.getElementById("svcUrl");
+  const port  = document.getElementById("svcPort").value;
+  const auto  = port ? `http://${ip}:${port}` : `http://${ip}`;
+  urlEl.value = auto;
+  urlEl.dataset.auto = auto;
+  // Close the pick panel
+  document.getElementById("containerPickList").style.display = "none";
+  document.getElementById("containerPickChevron").textContent = "▸";
+  // Focus the host dropdown so user picks the parent
+  document.getElementById("svcHostIp").focus();
 }
 
 function closeServiceModal() {
