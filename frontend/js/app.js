@@ -1020,15 +1020,21 @@ function svcIconHTML(name, size = 26) {
 
 function svcRowHTML(s, hostIp) {
   const portBadge = s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : "";
-  const urlBtn    = s.url  ? `<a href="${s.url}" target="_blank" class="btn-ghost" style="font-size:11px;padding:2px 6px" title="${s.url}">↗</a>` : "";
   return `<div class="svc-row" id="svc-row-${s.id}">
     ${svcIconHTML(s.name)}
     <span class="svc-name">${s.name}${s.description ? `<br><span class="svc-desc">${s.description}</span>` : ""}</span>
-    ${portBadge}
-    <button class="svc-status ${s.status}" onclick="cycleServiceStatus(${s.id},'${s.status}','${hostIp}')">${s.status}</button>
-    ${urlBtn}
-    <button class="btn-ghost" onclick="openEditService(${s.id})" style="font-size:11px;padding:2px 6px" title="Edit">✎</button>
-    <button class="btn-ghost btn-danger" onclick="deleteSvc(${s.id},'${hostIp}')" style="font-size:12px;padding:2px 6px" title="Delete">✕</button>
+    <div class="svc-port-status" style="align-items:flex-end">
+      ${portBadge}
+      <button class="svc-status ${s.status}" onclick="cycleServiceStatus(${s.id},'${s.status}','${hostIp}')">${s.status}</button>
+    </div>
+    <div class="svc-actions">
+      <button class="svc-kebab" onclick="toggleSvcMenu('r${s.id}')" title="Actions">⋮</button>
+      <div class="svc-menu" id="svcmenu-r${s.id}">
+        ${s.url ? `<a href="${s.url}" target="_blank" class="svc-menu-item">↗ Open URL</a>` : ""}
+        <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
+        <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvc(${s.id},'${hostIp}')">✕ Delete</button>
+      </div>
+    </div>
   </div>`;
 }
 
@@ -1194,7 +1200,7 @@ function renderServicesTable() {
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
     return;
   }
 
@@ -1209,12 +1215,21 @@ function renderServicesTable() {
         <span class="svc-host-ip">${s.ip}</span>
         ${s.hostname ? `<span class="svc-host-name">${s.hostname}</span>` : ""}
       </td>
-      <td>${s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : `<span style="color:var(--text-3)">—</span>`}</td>
-      <td><button class="svc-status ${s.status}" onclick="cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button></td>
-      <td>${s.url ? `<a href="${s.url}" target="_blank" class="btn-ghost" style="font-size:11px;padding:2px 6px">↗</a>` : ""}</td>
-      <td style="white-space:nowrap">
-        <button class="btn-ghost" onclick="openEditService(${s.id})" style="font-size:11px;padding:2px 6px">✎</button>
-        <button class="btn-ghost btn-danger" onclick="deleteSvcFromTable(${s.id})" style="font-size:12px;padding:2px 6px">✕</button>
+      <td>
+        <div class="svc-port-status">
+          ${s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}
+          <button class="svc-status ${s.status}" onclick="cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button>
+        </div>
+      </td>
+      <td style="padding:4px 8px 4px 4px">
+        <div class="svc-actions">
+          <button class="svc-kebab" onclick="toggleSvcMenu('t${s.id}')" title="Actions">⋮</button>
+          <div class="svc-menu" id="svcmenu-t${s.id}">
+            ${s.url ? `<a href="${s.url}" target="_blank" class="svc-menu-item">↗ Open URL</a>` : ""}
+            <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
+            <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvcFromTable(${s.id})">✕ Delete</button>
+          </div>
+        </div>
       </td>
     </tr>
   `).join("");
@@ -1233,10 +1248,25 @@ function sortServices(col) {
   renderServicesTable();
 }
 
+function closeSvcMenus() {
+  document.querySelectorAll(".svc-menu.open").forEach(m => m.classList.remove("open"));
+}
+
+function toggleSvcMenu(key) {
+  const menu = document.getElementById(`svcmenu-${key}`);
+  if (!menu) return;
+  const wasOpen = menu.classList.contains("open");
+  closeSvcMenus();
+  if (!wasOpen) menu.classList.add("open");
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("serviceFilter")?.addEventListener("input", e => {
     svcFilterText = e.target.value;
     renderServicesTable();
+  });
+  document.addEventListener("click", e => {
+    if (!e.target.closest(".svc-actions")) closeSvcMenus();
   });
 });
 

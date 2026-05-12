@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .database import init_db, get_conn
-from .scanner import start_scan, scan_jobs, cancel_scan
+from .scanner import start_scan, scan_jobs, cancel_scan, start_probe
 from .config import get_config, get_llm_config, save_config
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
@@ -85,7 +85,9 @@ def trigger_scan(subnet_id: int):
 @app.get("/api/scan/{run_id}/status")
 def scan_status(run_id: int):
     if run_id in scan_jobs:
-        return scan_jobs[run_id]
+        job = dict(scan_jobs[run_id])
+        job.pop("_proc", None)
+        return job
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM scan_runs WHERE id=?", (run_id,)).fetchone()
         if row:
@@ -105,11 +107,34 @@ def list_scans():
         rows = conn.execute("""
             SELECT sr.*, s.name AS subnet_name, s.cidr
             FROM scan_runs sr
-            JOIN subnets s ON sr.subnet_id = s.id
+            LEFT JOIN subnets s ON sr.subnet_id = s.id
             ORDER BY sr.started_at DESC
-            LIMIT 30
+            LIMIT 100
         """).fetchall()
         return [dict(r) for r in rows]
+
+
+@app.delete("/api/scans/{run_id}")
+def delete_scan_run(run_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM scan_runs WHERE id=?", (run_id,))
+        conn.commit()
+    return {"ok": True}
+
+
+class ScanBulkDelete(BaseModel):
+    ids: list[int]
+
+
+@app.delete("/api/scans")
+def bulk_delete_scans(data: ScanBulkDelete):
+    if not data.ids:
+        return {"ok": True, "deleted": 0}
+    with get_conn() as conn:
+        placeholders = ",".join("?" * len(data.ids))
+        conn.execute(f"DELETE FROM scan_runs WHERE id IN ({placeholders})", data.ids)
+        conn.commit()
+    return {"ok": True, "deleted": len(data.ids)}
 
 
 # ── Hosts ─────────────────────────────────────────────────────────────────────
@@ -155,6 +180,22 @@ def list_hosts():
             )]
             h["aliases"] = alias_map.get(h["id"], [])
         return hosts
+
+
+@app.post("/api/hosts/{ip}/probe", status_code=201)
+def probe_host(ip: str):
+    with get_conn() as conn:
+        host = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
+        if not host:
+            raise HTTPException(404, "Host not found")
+        conn.execute(
+            "INSERT INTO scan_runs (type, host_ip, status) VALUES ('probe', ?, 'running')",
+            (ip,)
+        )
+        conn.commit()
+        run_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+    start_probe(run_id, ip)
+    return {"run_id": run_id, "status": "started"}
 
 
 @app.get("/api/hosts/{ip}/ssh-access")
@@ -246,8 +287,8 @@ def create_host(data: HostCreate):
         if existing:
             raise HTTPException(400, f"Host {ip} already exists")
         conn.execute(
-            "INSERT INTO hosts (ip, hostname, mac, vendor, os_guess, device_type, notes) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO hosts (ip, hostname, mac, vendor, os_guess, device_type, notes, source) "
+            "VALUES (?,?,?,?,?,?,?,'manual')",
             (ip, data.hostname or None, data.mac or None, data.vendor or None,
              data.os_guess or None, data.device_type or "unknown", data.notes or None),
         )

@@ -186,3 +186,103 @@ def start_scan(run_id: int, cidr: str):
         scan_jobs[run_id] = {"status": "starting", "progress": 0, "total": 0, "cancelled": False, "_proc": None}
     t = threading.Thread(target=_do_scan, args=(run_id, cidr), daemon=True)
     t.start()
+
+
+def _do_probe(run_id: int, ip: str):
+    def update(status=None, progress=None, error=None):
+        with _lock:
+            job = scan_jobs[run_id]
+            if status:              job["status"] = status
+            if progress is not None: job["progress"] = progress
+            if error:               job["error"] = error
+
+    try:
+        with _lock:
+            job = scan_jobs[run_id]
+
+        update(status="scanning", progress=0)
+
+        xml = _run_nmap(["-sV", "-O", "--open", "-T4", "--version-intensity", "5", ip], job)
+        if xml is None or job.get("cancelled"):
+            with _lock:
+                scan_jobs[run_id]["status"] = "cancelled"
+            try:
+                conn = get_conn()
+                conn.execute("UPDATE scan_runs SET status='cancelled', completed_at=datetime('now') WHERE id=?", (run_id,))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+            return
+
+        nm = nmap.PortScanner()
+        nm.analyse_nmap_xml_scan(xml)
+
+        conn = get_conn()
+        if ip in nm.all_hosts():
+            addresses = nm[ip].get("addresses", {})
+            mac = addresses.get("mac")
+            hostname = nm[ip].hostname() or None
+
+            os_guess = None
+            osmatches = nm[ip].get("osmatch", [])
+            if osmatches:
+                os_guess = osmatches[0]["name"]
+
+            vendor_dict = nm[ip].get("vendor", {})
+            vendor = list(vendor_dict.values())[0] if vendor_dict else None
+
+            conn.execute("""
+                UPDATE hosts SET
+                    mac       = COALESCE(?, mac),
+                    hostname  = COALESCE(?, hostname),
+                    os_guess  = COALESCE(?, os_guess),
+                    vendor    = COALESCE(?, vendor),
+                    last_seen = datetime('now')
+                WHERE ip=?
+            """, (mac, hostname, os_guess, vendor, ip))
+            conn.commit()
+
+            host_row = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
+            if host_row:
+                host_id = host_row["id"]
+                for proto in nm[ip].all_protocols():
+                    for port, svc in nm[ip][proto].items():
+                        conn.execute("""
+                            INSERT INTO ports (host_id, port, protocol, state, service, version)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                            ON CONFLICT(host_id, port, protocol) DO UPDATE SET
+                                state   = excluded.state,
+                                service = excluded.service,
+                                version = excluded.version
+                        """, (host_id, port, proto, svc["state"],
+                              svc.get("name"), svc.get("version") or None))
+                conn.commit()
+
+        conn.execute("""
+            UPDATE scan_runs
+            SET status='completed', completed_at=datetime('now'), hosts_found=1
+            WHERE id=?
+        """, (run_id,))
+        conn.commit()
+        conn.close()
+        update(status="completed", progress=100)
+
+    except Exception as e:
+        with _lock:
+            scan_jobs[run_id]["status"] = "error"
+            scan_jobs[run_id]["error"] = str(e)
+        try:
+            conn = get_conn()
+            conn.execute("UPDATE scan_runs SET status='error' WHERE id=?", (run_id,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+
+def start_probe(run_id: int, ip: str):
+    with _lock:
+        scan_jobs[run_id] = {"status": "starting", "progress": 0, "total": 1, "cancelled": False, "_proc": None}
+    t = threading.Thread(target=_do_probe, args=(run_id, ip), daemon=True)
+    t.start()

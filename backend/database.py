@@ -141,6 +141,9 @@ def init_db():
             "ALTER TABLE hosts ADD COLUMN is_dhcp INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE hosts ADD COLUMN dhcp_pool TEXT",
             "ALTER TABLE hosts ADD COLUMN is_dns INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE hosts ADD COLUMN source TEXT NOT NULL DEFAULT 'scanned'",
+            "ALTER TABLE scan_runs ADD COLUMN type TEXT NOT NULL DEFAULT 'scan'",
+            "ALTER TABLE scan_runs ADD COLUMN host_ip TEXT",
         ]:
             try:
                 conn.execute(sql)
