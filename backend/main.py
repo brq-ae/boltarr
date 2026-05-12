@@ -577,6 +577,42 @@ def delete_service_endpoint(svc_id: int):
     return {"ok": True}
 
 
+# ── Service dependencies ──────────────────────────────────────────────────────
+
+class ServiceDependency(BaseModel):
+    from_service_id: int
+    to_service_id:   int
+
+@app.get("/api/service-dependencies")
+def list_service_dependencies():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM service_dependencies").fetchall()
+        return [dict(r) for r in rows]
+
+@app.post("/api/service-dependencies", status_code=201)
+def add_service_dependency(data: ServiceDependency):
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO service_dependencies (from_service_id, to_service_id) VALUES (?,?)",
+                (data.from_service_id, data.to_service_id)
+            )
+            conn.commit()
+        except Exception:
+            raise HTTPException(409, "Dependency already exists")
+        row = conn.execute(
+            "SELECT * FROM service_dependencies WHERE from_service_id=? AND to_service_id=?",
+            (data.from_service_id, data.to_service_id)
+        ).fetchone()
+        return dict(row)
+
+@app.delete("/api/service-dependencies/{dep_id}", status_code=204)
+def delete_service_dependency(dep_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM service_dependencies WHERE id=?", (dep_id,))
+        conn.commit()
+
+
 # ── VLANs ─────────────────────────────────────────────────────────────────────
 
 class VlanIn(BaseModel):

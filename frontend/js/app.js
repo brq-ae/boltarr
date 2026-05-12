@@ -1,17 +1,21 @@
 // Boltarr — main application logic
 
-let allHosts      = [];
-let graphEdges    = [];
-let subnets       = [];
-let allServices   = [];
-let allVlans      = [];
-let hiddenSubnets = new Set();
-let activeRunId = null;
-let pollTimer   = null;
-let sortCol     = "ip";
-let sortDir     = 1;
-let filterText  = "";
+let allHosts        = [];
+let graphEdges      = [];
+let subnets         = [];
+let allServices     = [];
+let allDependencies = [];
+let allVlans        = [];
+let hiddenSubnets   = new Set();
+let activeRunId     = null;
+let pollTimer       = null;
+let sortCol         = "ip";
+let sortDir         = 1;
+let filterText      = "";
 let activeDetailTab = "info";
+let currentSvcTab   = "list";
+let svcHostFilterVal = "";
+let svcCy           = null;
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -1050,6 +1054,7 @@ function svcRowHTML(s, hostIp) {
       <button class="svc-kebab" onclick="toggleSvcMenu('r${s.id}')" title="Actions">⋮</button>
       <div class="svc-menu" id="svcmenu-r${s.id}">
         ${s.url ? `<a href="${s.url}" target="_blank" class="svc-menu-item">↗ Open URL</a>` : ""}
+        <button class="svc-menu-item" onclick="closeSvcMenus();openManageDeps(${s.id})">⊕ Dependencies</button>
         <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
         <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvc(${s.id},'${hostIp}')">✕ Delete</button>
       </div>
@@ -1187,6 +1192,18 @@ let svcSortDir    = 1;
 
 async function loadServicesData() {
   try { allServices = await api("GET", "/api/services"); } catch { allServices = []; }
+  try { allDependencies = await api("GET", "/api/service-dependencies"); } catch { allDependencies = []; }
+  populateSvcHostFilter();
+}
+
+function populateSvcHostFilter() {
+  const sel = document.getElementById("svcHostFilter");
+  if (!sel) return;
+  const current = sel.value;
+  const hosts = [...new Map(allServices.map(s => [s.ip, {ip: s.ip, hostname: s.hostname}])).values()]
+    .sort((a, b) => (a.hostname || a.ip).localeCompare(b.hostname || b.ip));
+  sel.innerHTML = `<option value="">All hosts</option>` +
+    hosts.map(h => `<option value="${h.ip}"${h.ip === current ? " selected" : ""}>${h.hostname || h.ip}</option>`).join("");
 }
 
 async function loadServicesTab() {
@@ -1198,7 +1215,7 @@ function renderServicesTable() {
   const tbody = document.querySelector("#servicesTable tbody");
   if (!tbody) return;
 
-  let rows = allServices;
+  let rows = svcHostFilterVal ? allServices.filter(s => s.ip === svcHostFilterVal) : allServices;
   if (svcFilterText) {
     const q = svcFilterText.toLowerCase();
     rows = rows.filter(s =>
@@ -1245,6 +1262,7 @@ function renderServicesTable() {
           <button class="svc-kebab" onclick="toggleSvcMenu('t${s.id}')" title="Actions">⋮</button>
           <div class="svc-menu" id="svcmenu-t${s.id}">
             ${s.url ? `<a href="${s.url}" target="_blank" class="svc-menu-item">↗ Open URL</a>` : ""}
+            <button class="svc-menu-item" onclick="closeSvcMenus();openManageDeps(${s.id})">⊕ Dependencies</button>
             <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
             <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvcFromTable(${s.id})">✕ Delete</button>
           </div>
@@ -1284,10 +1302,192 @@ document.addEventListener("DOMContentLoaded", () => {
     svcFilterText = e.target.value;
     renderServicesTable();
   });
+  document.getElementById("svcHostFilter")?.addEventListener("change", e => {
+    svcHostFilterVal = e.target.value;
+    renderServicesTable();
+    if (currentSvcTab === "topology") renderSvcTopology();
+  });
   document.addEventListener("click", e => {
     if (!e.target.closest(".svc-actions")) closeSvcMenus();
   });
 });
+
+// ── Services sub-tabs ─────────────────────────────────────────────────────────
+
+function setSvcTab(tab) {
+  currentSvcTab = tab;
+  document.getElementById("svc-panel-list").style.display      = tab === "list"     ? ""     : "none";
+  document.getElementById("svc-panel-topology").style.display  = tab === "topology" ? "flex" : "none";
+  document.getElementById("serviceFilter").style.display       = tab === "list"     ? ""     : "none";
+  document.getElementById("serviceCount").style.display        = tab === "list"     ? ""     : "none";
+  document.querySelectorAll(".svc-subtab").forEach(b => b.classList.remove("active"));
+  document.getElementById(`svcTabBtn-${tab}`)?.classList.add("active");
+  if (tab === "topology") renderSvcTopology();
+}
+
+// ── Services topology ─────────────────────────────────────────────────────────
+
+function renderSvcTopology() {
+  const container = document.getElementById("svcTopoCanvas");
+  if (!container) return;
+
+  const services = svcHostFilterVal
+    ? allServices.filter(s => s.ip === svcHostFilterVal)
+    : allServices;
+
+  if (services.length === 0) {
+    container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:13px">No services to display.</div>`;
+    if (svcCy) { svcCy.destroy(); svcCy = null; }
+    return;
+  }
+  container.innerHTML = "";
+
+  // Unique hosts from visible services
+  const hostMap = new Map();
+  services.forEach(s => { if (!hostMap.has(s.ip)) hostMap.set(s.ip, s.hostname || s.ip); });
+
+  const elements = [];
+
+  // Host nodes
+  hostMap.forEach((label, ip) => {
+    elements.push({ group: "nodes", data: { id: `host-${ip}`, label, type: "host", ip } });
+  });
+
+  // Service nodes + runs-on edges
+  const svcIdSet = new Set(services.map(s => s.id));
+  services.forEach(s => {
+    const depCount = allDependencies.filter(d => d.from_service_id === s.id && svcIdSet.has(d.to_service_id)).length;
+    elements.push({ group: "nodes", data: {
+      id: `svc-${s.id}`, label: s.name, type: "service",
+      status: s.status, svcId: s.id, deps: depCount
+    }});
+    elements.push({ group: "edges", data: {
+      id: `runs-${s.id}`, source: `host-${s.ip}`, target: `svc-${s.id}`, type: "runs-on"
+    }});
+  });
+
+  // Dependency edges (only between visible services)
+  allDependencies.forEach(d => {
+    if (svcIdSet.has(d.from_service_id) && svcIdSet.has(d.to_service_id)) {
+      elements.push({ group: "edges", data: {
+        id: `dep-${d.id}`, source: `svc-${d.from_service_id}`, target: `svc-${d.to_service_id}`, type: "depends-on"
+      }});
+    }
+  });
+
+  if (svcCy) { svcCy.destroy(); svcCy = null; }
+
+  svcCy = cytoscape({
+    container,
+    elements,
+    style: [
+      { selector: 'node[type="host"]', style: {
+        "background-color": "oklch(20% 0.025 240)",
+        "border-width": 2, "border-color": "#1a6fa8",
+        "label": "data(label)", "color": "#9ab0c8",
+        "font-size": "11px", "text-valign": "center", "text-halign": "center",
+        "width": 76, "height": 76, "shape": "roundrectangle",
+        "text-wrap": "wrap", "text-max-width": "68px"
+      }},
+      { selector: 'node[type="service"]', style: {
+        "background-color": "oklch(17% 0.02 240)",
+        "border-width": 1.5, "border-color": "oklch(33% 0.03 240)",
+        "label": "data(label)", "color": "#7a90a4",
+        "font-size": "9px", "text-valign": "bottom", "text-halign": "center",
+        "text-margin-y": "4px", "width": 34, "height": 34, "shape": "ellipse",
+        "text-wrap": "wrap", "text-max-width": "64px"
+      }},
+      { selector: 'node[status="running"]', style: { "border-color": "oklch(70% 0.165 145)", "border-width": 2 }},
+      { selector: 'node[status="stopped"]', style: { "border-color": "oklch(58% 0.21 25)",  "border-width": 2 }},
+      { selector: 'edge[type="runs-on"]', style: {
+        "width": 1, "line-color": "oklch(26% 0.02 240)",
+        "line-style": "dashed", "line-dash-pattern": [4, 4],
+        "target-arrow-shape": "none", "curve-style": "straight"
+      }},
+      { selector: 'edge[type="depends-on"]', style: {
+        "width": 2, "line-color": "oklch(72% 0.15 55)",
+        "target-arrow-color": "oklch(72% 0.15 55)",
+        "target-arrow-shape": "triangle", "curve-style": "bezier", "arrow-scale": 1.2
+      }},
+      { selector: ":selected", style: { "border-color": "var(--accent)", "border-width": 3 }}
+    ],
+    layout: {
+      name: "cose", animate: false, randomize: true, fit: true, padding: 50,
+      componentSpacing: 100, nodeOverlap: 10,
+      nodeRepulsion: () => 12000, edgeElasticity: () => 200,
+      gravity: 1.2, numIter: 1000, initialTemp: 1000, coolingFactor: 0.99, minTemp: 1
+    }
+  });
+
+  svcCy.on("tap", 'node[type="host"]',    e => showHostDetail(e.target.data("ip")));
+  svcCy.on("tap", 'node[type="service"]', e => {
+    const svc = allServices.find(s => s.id === e.target.data("svcId"));
+    if (svc) showHostDetail(svc.ip);
+  });
+}
+
+// ── Dependency modal ──────────────────────────────────────────────────────────
+
+function openManageDeps(svcId) {
+  const svc = allServices.find(s => s.id === svcId);
+  if (!svc) return;
+  document.getElementById("depsModalSvcId").value    = svcId;
+  document.getElementById("depsModalSvcName").textContent = svc.name;
+  renderDepsModal(svcId);
+  document.getElementById("depsModal").classList.add("open");
+}
+
+function closeDepsModal() {
+  document.getElementById("depsModal").classList.remove("open");
+}
+
+function renderDepsModal(svcId) {
+  const id     = parseInt(svcId);
+  const myDeps = allDependencies.filter(d => d.from_service_id === id);
+  const myDepIds = new Set(myDeps.map(d => d.to_service_id));
+
+  const list = document.getElementById("depsList");
+  if (myDeps.length === 0) {
+    list.innerHTML = `<div style="font-size:12px;color:var(--text-3);padding:6px 0">None yet.</div>`;
+  } else {
+    list.innerHTML = myDeps.map(d => {
+      const t = allServices.find(s => s.id === d.to_service_id);
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+        <span style="flex:1;font-size:12px">${t ? t.name : `#${d.to_service_id}`}
+          ${t ? `<span style="font-size:10px;color:var(--text-3)"> — ${t.hostname || t.ip}</span>` : ""}
+        </span>
+        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeSvcDep(${d.id},${id})">✕</button>
+      </div>`;
+    }).join("");
+  }
+
+  const sel       = document.getElementById("depsAddSelect");
+  const available = allServices.filter(s => s.id !== id && !myDepIds.has(s.id));
+  sel.disabled    = available.length === 0;
+  sel.innerHTML   = available.length === 0
+    ? `<option value="">No other services</option>`
+    : `<option value="">Pick a service…</option>` +
+      available.map(s => `<option value="${s.id}">${s.name} (${s.hostname || s.ip})</option>`).join("");
+}
+
+async function addSvcDep() {
+  const fromId = parseInt(document.getElementById("depsModalSvcId").value);
+  const toId   = parseInt(document.getElementById("depsAddSelect").value);
+  if (!toId) return;
+  try {
+    const dep = await api("POST", "/api/service-dependencies", { from_service_id: fromId, to_service_id: toId });
+    allDependencies.push(dep);
+    renderDepsModal(fromId);
+    if (currentSvcTab === "topology") renderSvcTopology();
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function removeSvcDep(depId, svcId) {
+  await api("DELETE", `/api/service-dependencies/${depId}`);
+  allDependencies = allDependencies.filter(d => d.id !== depId);
+  renderDepsModal(svcId);
+  if (currentSvcTab === "topology") renderSvcTopology();
+}
 
 // ── Edit connection ───────────────────────────────────────────────────────────
 
