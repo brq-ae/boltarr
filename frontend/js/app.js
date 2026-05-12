@@ -18,6 +18,8 @@ let svcHostFilterVal  = "";
 let svcCy             = null;
 let pickedContainerIp = null;
 let bulkSelectedIps   = new Map();
+let svcDetailId       = null;
+let svcDetailStatus   = "unknown";
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -399,6 +401,7 @@ async function addLinkFromDetail(ip) {
 // ── Host detail ───────────────────────────────────────────────────────────────
 
 async function showHostDetail(ip) {
+  hideSvcDetail();
   const host = await api("GET", `/api/hosts/${ip}`);
   const panel = document.getElementById("hostDetail");
   const dt = host.device_type || "unknown";
@@ -1305,12 +1308,12 @@ function renderServicesTable() {
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(s => `
-    <tr id="svc-tr-${s.id}">
+    <tr id="svc-tr-${s.id}" style="cursor:pointer" onclick="showSvcDetail(${s.id})">
       <td style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
       <td>
         <div style="font-size:12px;font-weight:500">${s.name}</div>
@@ -1323,18 +1326,7 @@ function renderServicesTable() {
       <td>
         <div class="svc-port-status">
           ${s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}
-          <button class="svc-status ${s.status}" onclick="cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button>
-        </div>
-      </td>
-      <td style="padding:4px 8px 4px 4px">
-        <div class="svc-actions">
-          <button class="svc-kebab" onclick="toggleSvcMenu('t${s.id}')" title="Actions">⋮</button>
-          <div class="svc-menu" id="svcmenu-t${s.id}">
-            ${s.url ? `<a href="${s.url}" target="_blank" class="svc-menu-item">↗ Open URL</a>` : ""}
-            <button class="svc-menu-item" onclick="closeSvcMenus();openManageDeps(${s.id})">⊕ Dependencies</button>
-            <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
-            <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvcFromTable(${s.id})">✕ Delete</button>
-          </div>
+          <button class="svc-status ${s.status}" onclick="event.stopPropagation();cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button>
         </div>
       </td>
     </tr>
@@ -1556,6 +1548,126 @@ async function removeSvcDep(depId, svcId) {
   allDependencies = allDependencies.filter(d => d.id !== depId);
   renderDepsModal(svcId);
   if (currentSvcTab === "topology") renderSvcTopology();
+}
+
+// ── Service detail panel ──────────────────────────────────────────────────────
+
+function _setSvcDetailIcon(name) {
+  const el = document.getElementById("svcDetailIcon");
+  if (!el) return;
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0x7FFFFFFF;
+  const hue = h % 360;
+  el.style.background = `hsl(${hue},40%,28%)`;
+  el.style.color       = `hsl(${hue},60%,68%)`;
+  el.textContent       = name.replace(/[^a-z0-9]/gi, "").substring(0, 2).toUpperCase() || "??";
+}
+
+function showSvcDetail(id) {
+  const s = allServices.find(s => s.id === id);
+  if (!s) return;
+  hideHostDetail();
+  svcDetailId     = id;
+  svcDetailStatus = s.status || "unknown";
+
+  _setSvcDetailIcon(s.name);
+
+  document.getElementById("svcDetailName").value        = s.name || "";
+  document.getElementById("svcDetailHostLabel").textContent =
+    s.ip + (s.hostname ? ` · ${s.hostname}` : "");
+  document.getElementById("svcDetailPort").value        = s.port || "";
+  const proto = document.getElementById("svcDetailProto");
+  if (proto) proto.value = s.protocol || "tcp";
+  document.getElementById("svcDetailUrl").value         = s.url || "";
+  document.getElementById("svcDetailDesc").value        = s.description || "";
+
+  const btn = document.getElementById("svcDetailStatusBtn");
+  btn.textContent = svcDetailStatus;
+  btn.className   = `svc-status ${svcDetailStatus}`;
+
+  updateSvcDetailUrlBtn();
+  renderSvcDetailDeps(id);
+
+  document.getElementById("svcDetailPanel").classList.add("open");
+}
+
+function hideSvcDetail() {
+  document.getElementById("svcDetailPanel")?.classList.remove("open");
+  svcDetailId = null;
+}
+
+function cycleSvcDetailStatus() {
+  svcDetailStatus = STATUS_CYCLE[svcDetailStatus] || "unknown";
+  const btn = document.getElementById("svcDetailStatusBtn");
+  btn.textContent = svcDetailStatus;
+  btn.className   = `svc-status ${svcDetailStatus}`;
+}
+
+function updateSvcDetailUrlBtn() {
+  const val = document.getElementById("svcDetailUrl")?.value.trim();
+  const btn = document.getElementById("svcDetailUrlBtn");
+  if (!btn) return;
+  if (val) {
+    btn.href    = val;
+    btn.style.display = "";
+  } else {
+    btn.style.display = "none";
+  }
+}
+
+async function saveSvcDetail() {
+  if (!svcDetailId) return;
+  const name  = document.getElementById("svcDetailName").value.trim();
+  if (!name) return alert("Service name is required.");
+  const port  = parseInt(document.getElementById("svcDetailPort").value) || null;
+  const proto = document.getElementById("svcDetailProto")?.value || "tcp";
+  const url   = document.getElementById("svcDetailUrl").value.trim() || null;
+  const desc  = document.getElementById("svcDetailDesc").value.trim() || null;
+  try {
+    const svc = await api("PUT", `/api/services/${svcDetailId}`, {
+      name, port, protocol: proto, url, description: desc, status: svcDetailStatus,
+    });
+    allServices = allServices.map(s => s.id === svcDetailId ? { ...s, ...svc } : s);
+    const hostIp = allServices.find(s => s.id === svcDetailId)?.ip;
+    const row = document.getElementById(`svc-row-${svcDetailId}`);
+    if (row) row.outerHTML = svcRowHTML(svc, hostIp || svc.ip);
+    renderServicesTable();
+    if (currentSvcTab === "topology") renderSvcTopology();
+    _setSvcDetailIcon(name);
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function deleteSvcDetail() {
+  if (!svcDetailId) return;
+  if (!confirm("Delete this service?")) return;
+  try {
+    await api("DELETE", `/api/services/${svcDetailId}`);
+    allServices = allServices.filter(s => s.id !== svcDetailId);
+    document.getElementById(`svc-row-${svcDetailId}`)?.remove();
+    renderServicesTable();
+    if (currentSvcTab === "topology") renderSvcTopology();
+    hideSvcDetail();
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+function renderSvcDetailDeps(svcId) {
+  const container = document.getElementById("svcDetailDeps");
+  if (!container) return;
+  const outgoing = allDependencies.filter(d => d.from_service_id === svcId);
+  const incoming = allDependencies.filter(d => d.to_service_id   === svcId);
+  const chips = [
+    ...outgoing.map(d => {
+      const target = allServices.find(s => s.id === d.to_service_id);
+      return `<span class="dep-chip outgoing">→ ${target ? target.name : d.to_service_id}</span>`;
+    }),
+    ...incoming.map(d => {
+      const src = allServices.find(s => s.id === d.from_service_id);
+      return `<span class="dep-chip incoming">← ${src ? src.name : d.from_service_id}</span>`;
+    }),
+  ];
+  container.innerHTML = chips.length
+    ? chips.join("")
+    : `<span style="font-size:11px;color:var(--text-3)">None — use ⊕ Deps to manage</span>`;
 }
 
 // ── Bulk add containers ───────────────────────────────────────────────────────

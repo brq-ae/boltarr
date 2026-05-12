@@ -173,7 +173,6 @@
                 <th onclick="sortServices('name')">Service</th>
                 <th onclick="sortServices('ip')">Host</th>
                 <th onclick="sortServices('port')">Port / Status</th>
-                <th style="width:40px"></th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -807,6 +806,47 @@
       <span style="flex:1"></span>
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Service detail panel -->
+<div class="svc-detail-panel" id="svcDetailPanel">
+  <div class="svc-detail-header">
+    <div id="svcDetailIcon" class="svc-icon" style="width:34px;height:34px;font-size:15px;flex-shrink:0;border-radius:8px"></div>
+    <input class="svc-detail-name-input" id="svcDetailName" type="text" placeholder="Service name">
+    <button class="svc-status" id="svcDetailStatusBtn" onclick="cycleSvcDetailStatus()">unknown</button>
+    <div class="svc-detail-actions">
+      <a id="svcDetailUrlBtn" href="#" target="_blank" class="btn-ghost" style="font-size:11px;padding:3px 8px;display:none">↗ URL</a>
+      <button class="btn btn-primary" style="font-size:11px;padding:4px 11px" onclick="saveSvcDetail()">Save</button>
+      <button class="btn-ghost btn-danger" style="font-size:12px;padding:3px 8px" onclick="deleteSvcDetail()">Delete</button>
+      <button class="btn-ghost" onclick="hideSvcDetail()" style="font-size:17px;padding:1px 7px;line-height:1">×</button>
+    </div>
+  </div>
+  <div class="svc-detail-body">
+    <div class="svc-detail-field">
+      <label>Host</label>
+      <span id="svcDetailHostLabel" class="mono" style="font-size:11px;color:var(--text-2)"></span>
+    </div>
+    <div class="svc-detail-field">
+      <label>Port</label>
+      <input type="number" id="svcDetailPort" class="mono" placeholder="—" style="width:72px">
+    </div>
+    <div class="svc-detail-field">
+      <label>Protocol</label>
+      <select id="svcDetailProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+    </div>
+    <div class="svc-detail-field svc-detail-field-wide">
+      <label>URL</label>
+      <input type="text" id="svcDetailUrl" placeholder="http://…" oninput="updateSvcDetailUrlBtn()">
+    </div>
+    <div class="svc-detail-field svc-detail-field-wide">
+      <label>Description</label>
+      <input type="text" id="svcDetailDesc" placeholder="Brief description">
+    </div>
+    <div class="svc-detail-field svc-detail-field-wide">
+      <label>Depends on</label>
+      <div id="svcDetailDeps" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center"></div>
     </div>
   </div>
 </div>
