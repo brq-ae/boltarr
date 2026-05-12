@@ -380,7 +380,18 @@ async function showHostDetail(ip) {
   const panel = document.getElementById("hostDetail");
   const dt = host.device_type || "unknown";
 
+  const sheetLabel = (host.hostname && !host.ip.startsWith('node-'))
+    ? `${host.ip} · ${host.hostname}` : (host.ip.startsWith('node-') ? (host.hostname || '(no IP)') : host.ip);
+
   panel.innerHTML = `
+    <div class="sheet-handle" id="sheetHandle">
+      <div class="sheet-pill"></div>
+      <div class="sheet-handle-row">
+        <span class="sheet-handle-label mono">${sheetLabel}</span>
+        <span class="sheet-handle-hint" id="sheetHint">tap to expand</span>
+        <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:17px;padding:1px 6px;line-height:1;flex-shrink:0">×</button>
+      </div>
+    </div>
     <div class="detail-header">
       <div>
         <div class="detail-ip">${host.ip.startsWith("node-") ? (host.hostname || "(no IP)") : host.ip}</div>
@@ -512,6 +523,7 @@ async function showHostDetail(ip) {
   }
 
   panel.classList.add("open");
+  initSheetDrag();
 }
 
 function switchDetailTab(name) {
@@ -525,7 +537,84 @@ function switchDetailTab(name) {
 }
 
 function hideHostDetail() {
-  document.getElementById("hostDetail").classList.remove("open");
+  const panel = document.getElementById("hostDetail");
+  panel.classList.remove("open", "sheet-half", "sheet-full");
+}
+
+// ── Bottom sheet (mobile host detail) ─────────────────────────────────────────
+
+function setSheetState(state) {
+  const panel = document.getElementById("hostDetail");
+  const hint  = document.getElementById("sheetHint");
+  panel.classList.remove("sheet-half", "sheet-full");
+  if (state === "half") panel.classList.add("sheet-half");
+  else if (state === "full") panel.classList.add("sheet-full");
+  if (hint) hint.textContent = state === "peek" ? "tap to expand" : "";
+}
+
+function cycleSheetState() {
+  const panel = document.getElementById("hostDetail");
+  if (panel.classList.contains("sheet-full"))      setSheetState("peek");
+  else if (panel.classList.contains("sheet-half")) setSheetState("full");
+  else                                              setSheetState("half");
+}
+
+function initSheetDrag() {
+  if (window.innerWidth > 799) return;
+  const panel  = document.getElementById("hostDetail");
+  const handle = document.getElementById("sheetHandle");
+  if (!handle) return;
+
+  let startY = 0, startTY = 0, moved = false;
+
+  function getTY() {
+    const t = getComputedStyle(panel).transform;
+    if (!t || t === "none") return 0;
+    const m = t.match(/matrix\([^)]+\)/);
+    if (m) return parseFloat(t.split(",")[5]) || 0;
+    return 0;
+  }
+
+  handle.addEventListener("touchstart", e => {
+    startY = e.touches[0].clientY;
+    startTY = getTY();
+    moved = false;
+    panel.style.transition = "none";
+  }, { passive: true });
+
+  handle.addEventListener("touchmove", e => {
+    const dy = e.touches[0].clientY - startY;
+    if (Math.abs(dy) > 4) moved = true;
+    const h = window.innerHeight * 0.85;
+    const clamped = Math.max(0, Math.min(startTY + dy, h - 48));
+    panel.style.transform = `translateY(${clamped}px)`;
+  }, { passive: true });
+
+  handle.addEventListener("touchend", () => {
+    if (!moved) {
+      panel.style.transition = "";
+      panel.style.transform  = "";
+      cycleSheetState();
+      return;
+    }
+    const current = getTY();
+    const h = window.innerHeight * 0.85;
+    const snaps = [
+      { y: 0,       state: "full" },
+      { y: h / 2,   state: "half" },
+      { y: h - 48,  state: "peek" },
+    ];
+    const nearest = snaps.reduce((a, b) =>
+      Math.abs(a.y - current) < Math.abs(b.y - current) ? a : b
+    );
+    panel.style.transition = "transform 0.35s cubic-bezier(0.32,0.72,0,1)";
+    panel.style.transform  = `translateY(${nearest.y}px)`;
+    setTimeout(() => {
+      panel.style.transition = "";
+      panel.style.transform  = "";
+      setSheetState(nearest.state);
+    }, 360);
+  });
 }
 
 // ── Add host ──────────────────────────────────────────────────────────────────
