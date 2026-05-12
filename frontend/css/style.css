@@ -1322,7 +1322,6 @@ tbody td {
   gap: 1px;
 }
 .container-chip:hover  { background: var(--surface3, oklch(22% 0.02 240)); border-color: var(--accent); color: var(--text-1); }
-.container-chip.used   { opacity: 0.4; cursor: default; pointer-events: none; }
 .container-chip-name   { font-weight: 500; }
 .container-chip-ip     { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
 
