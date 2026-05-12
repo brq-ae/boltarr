@@ -20,7 +20,9 @@ from .llm import (
     build_host_prompt, build_network_prompt, infer_device_type, LLMError, LONG_TIMEOUT,
 )
 
-app = FastAPI(title="Boltarr")
+APP_VERSION = (Path(__file__).parent.parent / "VERSION").read_text().strip()
+
+app = FastAPI(title="Boltarr", version=APP_VERSION)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
@@ -28,6 +30,11 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 @app.on_event("startup")
 def startup():
     init_db()
+
+
+@app.get("/api/version")
+def get_version():
+    return {"version": APP_VERSION}
 
 
 # ── Subnets ───────────────────────────────────────────────────────────────────

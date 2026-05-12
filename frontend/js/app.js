@@ -34,6 +34,10 @@ async function boot() {
   await loadGraph();
   await loadScans();
   setTab("topology");
+  api("GET", "/api/version").then(d => {
+    const el = document.getElementById("appVersion");
+    if (el && d.version) el.textContent = "v" + d.version;
+  }).catch(() => {});
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
