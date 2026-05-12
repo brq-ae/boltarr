@@ -127,7 +127,8 @@ def _do_scan(run_id: int, cidr: str):
                             hostname  = COALESCE(excluded.hostname, hostname),
                             os_guess  = COALESCE(excluded.os_guess, os_guess),
                             vendor    = COALESCE(excluded.vendor, vendor),
-                            last_seen = excluded.last_seen
+                            last_seen = excluded.last_seen,
+                            source    = CASE WHEN excluded.mac IS NOT NULL THEN 'scanned' ELSE source END
                     """, (ip, mac, hostname, os_guess, vendor))
                     row = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
                     host_id = row["id"]

@@ -249,14 +249,14 @@ function renderHostsTable() {
     const aliasCount  = (h.aliases||[]).length;
     const aliasBadge  = aliasCount ? `<span class="port-badge" style="margin-left:4px" title="${(h.aliases||[]).join(', ')}">+${aliasCount} IP${aliasCount>1?'s':''}</span>` : "";
     const manualBadge = h.source === "manual" ? `<span class="port-badge" style="margin-left:4px;background:oklch(38% 0.1 280);color:oklch(78% 0.1 280)">manual</span>` : "";
-    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip + aliasBadge + manualBadge;
+    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip + aliasBadge;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td class="td-ip mono" style="color:var(--accent)">${displayIp}</td>
       <td class="td-host">${h.hostname || `<span style="color:var(--text-3)">—</span>`}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac||"—"}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${h.vendor||"—"}</td>
-      <td class="td-type"><span class="tag tag-${dt}">${dt}</span></td>
+      <td class="td-type"><span class="tag tag-${dt}">${dt}</span>${manualBadge}</td>
       <td class="col-os" style="font-size:11px;color:var(--text-3)">${(h.os_guess||"—").substring(0,34)}</td>
       <td><div class="port-list">${portHtml}${more}</div></td>
       <td class="td-seen mono" style="color:var(--text-3)">${(h.last_seen||"—").substring(0,16)}</td>
