@@ -1130,6 +1130,19 @@ tbody td {
 
   .sheet-handle { display: flex; }
 
+  .detail-header {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+  }
+  .detail-header-right {
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .detail-header-right #analyzeModel { display: none; }
+
   .graph-legend { display: none; }
 
   #hostsTable .col-mac,
