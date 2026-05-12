@@ -779,7 +779,9 @@ tbody td {
   flex-shrink: 0;
   cursor: grab;
   touch-action: none;
+  user-select: none;
 }
+.sheet-handle:active { cursor: grabbing; }
 .sheet-pill {
   width: 36px;
   height: 4px;

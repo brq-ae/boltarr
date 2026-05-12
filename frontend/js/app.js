@@ -565,7 +565,7 @@ function initSheetDrag() {
   const handle = document.getElementById("sheetHandle");
   if (!handle) return;
 
-  let startY = 0, startTY = 0, moved = false;
+  let startY = 0, startTY = 0, moved = false, dragging = false;
 
   function getTY() {
     const t = getComputedStyle(panel).transform;
@@ -575,22 +575,26 @@ function initSheetDrag() {
     return 0;
   }
 
-  handle.addEventListener("touchstart", e => {
-    startY = e.touches[0].clientY;
+  function onDragStart(clientY) {
+    startY  = clientY;
     startTY = getTY();
-    moved = false;
+    moved   = false;
+    dragging = true;
     panel.style.transition = "none";
-  }, { passive: true });
+  }
 
-  handle.addEventListener("touchmove", e => {
-    const dy = e.touches[0].clientY - startY;
+  function onDragMove(clientY) {
+    if (!dragging) return;
+    const dy = clientY - startY;
     if (Math.abs(dy) > 4) moved = true;
     const h = window.innerHeight * 0.85;
     const clamped = Math.max(0, Math.min(startTY + dy, h - 48));
     panel.style.transform = `translateY(${clamped}px)`;
-  }, { passive: true });
+  }
 
-  handle.addEventListener("touchend", () => {
+  function onDragEnd() {
+    if (!dragging) return;
+    dragging = false;
     if (!moved) {
       panel.style.transition = "";
       panel.style.transform  = "";
@@ -600,9 +604,9 @@ function initSheetDrag() {
     const current = getTY();
     const h = window.innerHeight * 0.85;
     const snaps = [
-      { y: 0,       state: "full" },
-      { y: h / 2,   state: "half" },
-      { y: h - 48,  state: "peek" },
+      { y: 0,      state: "full" },
+      { y: h / 2,  state: "half" },
+      { y: h - 48, state: "peek" },
     ];
     const nearest = snaps.reduce((a, b) =>
       Math.abs(a.y - current) < Math.abs(b.y - current) ? a : b
@@ -614,7 +618,17 @@ function initSheetDrag() {
       panel.style.transform  = "";
       setSheetState(nearest.state);
     }, 360);
-  });
+  }
+
+  // Touch
+  handle.addEventListener("touchstart", e => onDragStart(e.touches[0].clientY), { passive: true });
+  handle.addEventListener("touchmove",  e => onDragMove(e.touches[0].clientY),  { passive: true });
+  handle.addEventListener("touchend",   onDragEnd);
+
+  // Mouse
+  handle.addEventListener("mousedown", e => { e.preventDefault(); onDragStart(e.clientY); });
+  document.addEventListener("mousemove", e => onDragMove(e.clientY));
+  document.addEventListener("mouseup",   onDragEnd);
 }
 
 // ── Add host ──────────────────────────────────────────────────────────────────
