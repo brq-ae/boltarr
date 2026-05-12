@@ -306,6 +306,7 @@ def create_host(data: HostCreate):
 
 class HostUpdate(BaseModel):
     hostname:    Optional[str] = None
+    mac:         Optional[str] = None
     device_type: Optional[str] = None
     vendor:      Optional[str] = None
     os_guess:    Optional[str] = None
@@ -329,6 +330,7 @@ def update_host(ip: str, data: HostUpdate):
         conn.execute("""
             UPDATE hosts SET
                 hostname    = COALESCE(?, hostname),
+                mac         = COALESCE(?, mac),
                 device_type = COALESCE(?, device_type),
                 vendor      = COALESCE(?, vendor),
                 os_guess    = COALESCE(?, os_guess),
@@ -338,7 +340,7 @@ def update_host(ip: str, data: HostUpdate):
                 is_dns      = COALESCE(?, is_dns),
                 is_dhcp     = COALESCE(?, is_dhcp)
             WHERE ip=?
-        """, (data.hostname, data.device_type, data.vendor, data.os_guess,
+        """, (data.hostname, data.mac or None, data.device_type, data.vendor, data.os_guess,
               data.notes, data.port_count,
               1 if data.has_wifi else (0 if data.has_wifi is not None else None),
               1 if data.is_dns  else (0 if data.is_dns  is not None else None),

@@ -276,11 +276,24 @@ function sortTable(col) {
   renderHostsTable();
 }
 
+function formatMacInput(e) {
+  const input = e.target;
+  const pos = input.selectionStart;
+  const raw = input.value.replace(/[^0-9a-fA-F]/g, "").substring(0, 12);
+  const formatted = raw.match(/.{1,2}/g)?.join(":") || "";
+  input.value = formatted;
+  // keep cursor roughly in place after formatting inserts colons
+  const colonsAdded = (formatted.substring(0, pos).match(/:/g) || []).length;
+  input.setSelectionRange(Math.min(pos + colonsAdded, formatted.length), Math.min(pos + colonsAdded, formatted.length));
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("tableFilter")?.addEventListener("input", e => {
     filterText = e.target.value;
     renderHostsTable();
   });
+  document.getElementById("addHostMac")?.addEventListener("input", formatMacInput);
+  document.getElementById("editMac")?.addEventListener("input", formatMacInput);
 });
 
 // ── Links tab helpers ─────────────────────────────────────────────────────────
@@ -679,6 +692,7 @@ async function openEditHost(ip) {
   const host = await api("GET", `/api/hosts/${ip}`);
   document.getElementById("editIp").value         = ip;
   document.getElementById("editHostname").value   = host.hostname || "";
+  document.getElementById("editMac").value        = host.mac || "";
   document.getElementById("editVendor").value     = host.vendor || "";
   document.getElementById("editOs").value         = host.os_guess || "";
   document.getElementById("editNotes").value      = host.notes || "";
@@ -750,6 +764,7 @@ async function saveHostEdit() {
   const ip = document.getElementById("editIp").value;
   const payload = {
     hostname:    document.getElementById("editHostname").value.trim() || null,
+    mac:         document.getElementById("editMac").value.trim() || null,
     device_type: document.getElementById("editDeviceType").value,
     vendor:      document.getElementById("editVendor").value.trim() || null,
     os_guess:    document.getElementById("editOs").value.trim() || null,
