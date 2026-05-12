@@ -238,9 +238,10 @@ def _do_probe(run_id: int, ip: str):
                     hostname  = COALESCE(?, hostname),
                     os_guess  = COALESCE(?, os_guess),
                     vendor    = COALESCE(?, vendor),
-                    last_seen = datetime('now')
+                    last_seen = datetime('now'),
+                    source    = CASE WHEN ? IS NOT NULL THEN 'scanned' ELSE source END
                 WHERE ip=?
-            """, (mac, hostname, os_guess, vendor, ip))
+            """, (mac, hostname, os_guess, vendor, mac, ip))
             conn.commit()
 
             host_row = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
