@@ -907,6 +907,25 @@ tbody td {
   border-radius: 4px; padding: 2px 6px; font-size: 11px; color: var(--text-2);
 }
 
+/* hosts table alias toggle + sub-row */
+.alias-toggle {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-3); font-size: 10px; padding: 1px 4px;
+  margin-left: 4px; border-radius: 3px; vertical-align: middle;
+  transition: color 0.15s;
+}
+.alias-toggle:hover, .alias-toggle.open { color: var(--accent); }
+.alias-sub-row { background: var(--bg) !important; }
+.alias-sub-cell {
+  padding: 4px 16px 6px 28px !important;
+  border-bottom: 1px solid var(--border);
+}
+.alias-chips-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.alias-chip-inline {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 3px; padding: 1px 6px; font-size: 10px; color: var(--text-3);
+}
+
 .notes-box {
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -1325,6 +1344,41 @@ tbody td {
 .container-chip.selected { background: oklch(22% 0.05 240); border-color: var(--accent); color: var(--text-1); }
 .container-chip-name   { font-weight: 500; }
 .container-chip-ip     { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); }
+
+/* ── SSH key list ────────────────────────────────────────────────────────────── */
+.ssh-key-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.ssh-key-info { flex: 1; min-width: 0; }
+.ssh-key-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.ssh-key-preview {
+  font-size: 10px;
+  color: var(--text-3);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.ssh-key-preview.expanded {
+  white-space: pre-wrap;
+  word-break: break-all;
+  text-overflow: unset;
+  overflow: visible;
+}
+.ssh-key-inline-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.ssh-key-kebab-wrap { display: none; flex-shrink: 0; position: relative; }
+
+@media (max-width: 799px) {
+  .ssh-key-inline-actions { display: none; }
+  .ssh-key-kebab-wrap { display: block; }
+}
 
 /* ── Service detail panel ────────────────────────────────────────────────────── */
 .svc-detail-panel {

@@ -20,6 +20,7 @@ let pickedContainerIp = null;
 let bulkSelectedIps   = new Map();
 let svcDetailId       = null;
 let svcDetailStatus   = "unknown";
+let expandedAliases   = new Set();
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -254,13 +255,16 @@ function renderHostsTable() {
     const dt = h.device_type || "unknown";
 
     const isSynthetic = h.ip.startsWith("node-");
-    const aliasCount  = (h.aliases||[]).length;
-    const aliasBadge  = aliasCount ? `<span class="port-badge" style="margin-left:4px" title="${(h.aliases||[]).join(', ')}">+${aliasCount} IP${aliasCount>1?'s':''}</span>` : "";
+    const aliases     = h.aliases || [];
+    const expanded    = expandedAliases.has(h.ip);
+    const aliasToggle = aliases.length
+      ? `<button class="alias-toggle${expanded ? " open" : ""}" onclick="event.stopPropagation();toggleAliasRow('${h.ip}')" title="${expanded ? "Hide" : "Show"} aliases">${expanded ? "▼" : "▶"} +${aliases.length}</button>`
+      : "";
     const manualBadge = h.source === "manual" ? `<span class="port-badge" style="margin-left:4px;background:oklch(38% 0.1 280);color:oklch(78% 0.1 280)">manual</span>` : "";
-    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip + aliasBadge;
+    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip;
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="td-ip mono" style="color:var(--accent)">${displayIp}</td>
+      <td class="td-ip mono" style="color:var(--accent)">${displayIp}${aliasToggle}</td>
       <td class="td-host">${h.hostname || `<span style="color:var(--text-3)">—</span>`}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac||"—"}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${h.vendor||"—"}</td>
@@ -271,7 +275,24 @@ function renderHostsTable() {
     `;
     tr.addEventListener("click", () => showHostDetail(h.ip));
     tbody.appendChild(tr);
+    if (aliases.length && expanded) {
+      const subTr = document.createElement("tr");
+      subTr.className = "alias-sub-row";
+      subTr.innerHTML = `<td colspan="8" class="alias-sub-cell">
+        <div class="alias-chips-row">
+          <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Aliases</span>
+          ${aliases.map(a => `<span class="alias-chip-inline mono">${a}</span>`).join("")}
+        </div>
+      </td>`;
+      tbody.appendChild(subTr);
+    }
   });
+}
+
+function toggleAliasRow(ip) {
+  if (expandedAliases.has(ip)) expandedAliases.delete(ip);
+  else expandedAliases.add(ip);
+  renderHostsTable();
 }
 
 function ipToNum(ip) {
@@ -1370,6 +1391,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.addEventListener("click", e => {
     if (!e.target.closest(".svc-actions")) closeSvcMenus();
+    if (!e.target.closest(".ssh-key-kebab-wrap")) closeSshKeyMenus();
   });
 });
 
@@ -2210,6 +2232,7 @@ function showToast(msg) {
 // ── SSH Key Management ────────────────────────────────────────────────────────
 
 let sshKeys = [];
+let sshKeyVisible = new Set();
 
 async function loadSshKeys() {
   sshKeys = await api("GET", "/api/ssh-keys");
@@ -2223,15 +2246,77 @@ function renderSshKeys() {
     el.innerHTML = `<div style="font-size:12px;color:var(--text-3);padding:8px 0">No keys registered yet.</div>`;
     return;
   }
-  el.innerHTML = sshKeys.map(k => `
-    <div style="display:flex;align-items:center;gap:10px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px">
-      <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:600;color:var(--text)">${k.name}</div>
-        <div style="font-size:10px;font-family:monospace;color:var(--text-3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k.fingerprint || k.public_key.substring(0,40) + "…"}</div>
+  el.innerHTML = sshKeys.map(k => {
+    const visible  = sshKeyVisible.has(k.id);
+    const preview  = visible ? k.public_key : (k.fingerprint || (k.public_key.substring(0, 40) + "…"));
+    const eyeTitle = visible ? "Hide key" : "Show key";
+    const eyeIcon  = visible ? "🙈" : "👁";
+    return `
+    <div class="ssh-key-row" id="sshkrow-${k.id}">
+      <div class="ssh-key-info">
+        <div class="ssh-key-name">${k.name}</div>
+        <div class="ssh-key-preview mono" id="sshkprev-${k.id}">${preview}</div>
       </div>
-      <button class="btn btn-danger" style="font-size:11px;padding:3px 8px;flex-shrink:0" onclick="deleteSshKey(${k.id})">Remove</button>
-    </div>
-  `).join("");
+      <div class="ssh-key-inline-actions">
+        <button class="btn-icon" title="${eyeTitle}" onclick="toggleSshKeyView(${k.id})">${eyeIcon}</button>
+        <button class="btn-icon" title="Copy key" onclick="copySshKey(${k.id})">⎘</button>
+        <button class="btn-icon btn-danger" title="Remove" onclick="deleteSshKey(${k.id})">✕</button>
+      </div>
+      <div class="ssh-key-kebab-wrap">
+        <button class="svc-kebab" onclick="toggleSshKeyMenu(${k.id})" title="Actions">⋮</button>
+        <div class="svc-menu" id="sshkmenu-${k.id}">
+          <button class="svc-menu-item" onclick="closeSshKeyMenus();toggleSshKeyView(${k.id})">${eyeIcon} ${eyeTitle}</button>
+          <button class="svc-menu-item" onclick="closeSshKeyMenus();copySshKey(${k.id})">⎘ Copy key</button>
+          <button class="svc-menu-item danger" onclick="closeSshKeyMenus();deleteSshKey(${k.id})">✕ Remove</button>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleSshKeyView(id) {
+  if (sshKeyVisible.has(id)) sshKeyVisible.delete(id);
+  else sshKeyVisible.add(id);
+  const k = sshKeys.find(k => k.id === id);
+  if (!k) return;
+  const visible = sshKeyVisible.has(id);
+  const prev = document.getElementById(`sshkprev-${id}`);
+  if (prev) {
+    prev.textContent = visible ? k.public_key : (k.fingerprint || k.public_key.substring(0, 40) + "…");
+    prev.classList.toggle("expanded", visible);
+  }
+  // update eye icon in both inline and menu
+  const row = document.getElementById(`sshkrow-${id}`);
+  if (!row) return;
+  const eyeIcon  = visible ? "🙈" : "👁";
+  const eyeTitle = visible ? "Hide key" : "Show key";
+  const inlineEye = row.querySelector(".ssh-key-inline-actions button:first-child");
+  if (inlineEye) { inlineEye.textContent = eyeIcon; inlineEye.title = eyeTitle; }
+  const menuEye = row.querySelector(".svc-menu button:first-child");
+  if (menuEye) menuEye.textContent = `${eyeIcon} ${eyeTitle}`;
+}
+
+async function copySshKey(id) {
+  const k = sshKeys.find(k => k.id === id);
+  if (!k) return;
+  try {
+    await navigator.clipboard.writeText(k.public_key);
+    showToast("Key copied to clipboard");
+  } catch {
+    showToast("Copy failed — try showing the key and copying manually");
+  }
+}
+
+function toggleSshKeyMenu(id) {
+  const menu = document.getElementById(`sshkmenu-${id}`);
+  if (!menu) return;
+  const wasOpen = menu.classList.contains("open");
+  closeSshKeyMenus();
+  if (!wasOpen) menu.classList.add("open");
+}
+
+function closeSshKeyMenus() {
+  document.querySelectorAll(".ssh-key-kebab-wrap .svc-menu.open").forEach(m => m.classList.remove("open"));
 }
 
 async function addSshKey() {
