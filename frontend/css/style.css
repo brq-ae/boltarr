@@ -1300,11 +1300,12 @@ tbody td {
 #svc-panel-topology {
   flex: 1;
   min-height: 0;
-  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 #svcTopoCanvas {
-  width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Container quick-pick in Add Service modal */

@@ -178,8 +178,22 @@
             <tbody></tbody>
           </table>
         </div>
-        <div id="svc-panel-topology" style="display:none;flex:1;position:relative;min-height:0">
-          <div id="svcTopoCanvas" style="width:100%;height:100%"></div>
+        <div id="svc-panel-topology" style="display:none;flex:1;position:relative;min-height:0;flex-direction:column">
+          <div id="svcTopoToolbar" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0">
+            <button class="btn" style="font-size:11px;padding:4px 10px" onclick="toggleLinkHostsForm()">↔ Link Hosts</button>
+            <div id="linkHostsForm" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
+              <select id="linkSrc" class="search-input" style="max-width:160px"></select>
+              <span style="color:var(--text-3);font-size:12px">→ nested in</span>
+              <select id="linkDst" class="search-input" style="max-width:160px"></select>
+              <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="saveHostLink()">Add</button>
+              <button class="btn-ghost" style="font-size:11px;padding:4px 8px" onclick="toggleLinkHostsForm()">Cancel</button>
+            </div>
+            <span id="svcTopoEdgeActions" style="display:none;align-items:center;gap:6px;margin-left:auto">
+              <span id="svcTopoEdgeLabel" style="font-size:11px;color:var(--text-3)"></span>
+              <button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="deleteSelectedHostLink()">✕ Remove link</button>
+            </span>
+          </div>
+          <div id="svcTopoCanvas" style="flex:1;min-height:0"></div>
         </div>
       </div>
 

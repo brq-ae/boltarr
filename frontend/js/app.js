@@ -1174,11 +1174,15 @@ function openAddService(presetIp) {
   const hostRow = document.getElementById("svcHostRow");
   hostRow.style.display = "";
   const sel = document.getElementById("svcHostIp");
-  // Host dropdown: exclude container-type hosts (they're in the pick list above)
-  sel.innerHTML = allHosts
-    .filter(h => h.device_type !== "container")
-    .map(h => `<option value="${h.ip}">${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`)
-    .join("");
+  // Group hosts: regular hosts first, then containers (which can themselves run services)
+  const regularHosts   = allHosts.filter(h => h.device_type !== "container");
+  const containerHosts = allHosts.filter(h => h.device_type === "container");
+  const hostOpts = host => `<option value="${host.ip}">${host.ip}${host.hostname ? " — " + host.hostname : ""}</option>`;
+  sel.innerHTML =
+    regularHosts.map(hostOpts).join("") +
+    (containerHosts.length
+      ? `<optgroup label="── Containers ──">${containerHosts.map(hostOpts).join("")}</optgroup>`
+      : "");
   // Pre-select: explicit preset → last used → first option
   if (presetIp && sel.querySelector(`option[value="${presetIp}"]`)) {
     sel.value = presetIp;
@@ -1424,25 +1428,29 @@ function renderSvcTopology() {
     return;
   }
   container.innerHTML = "";
+  document.getElementById("svcTopoEdgeActions").style.display = "none";
 
   // Unique hosts from visible services
   const hostMap = new Map();
-  services.forEach(s => { if (!hostMap.has(s.ip)) hostMap.set(s.ip, s.hostname || s.ip); });
+  services.forEach(s => {
+    if (!hostMap.has(s.ip)) {
+      const h = allHosts.find(h => h.ip === s.ip);
+      hostMap.set(s.ip, { label: s.hostname || s.ip, device_type: h?.device_type || "unknown" });
+    }
+  });
 
   const elements = [];
 
-  // Host nodes
-  hostMap.forEach((label, ip) => {
-    elements.push({ group: "nodes", data: { id: `host-${ip}`, label, type: "host", ip } });
+  // Host nodes — colored by device_type like IP topology
+  hostMap.forEach(({ label, device_type }, ip) => {
+    elements.push({ group: "nodes", data: { id: `host-${ip}`, label, type: "host", ip, device_type } });
   });
 
   // Service nodes + runs-on edges
   const svcIdSet = new Set(services.map(s => s.id));
   services.forEach(s => {
-    const depCount = allDependencies.filter(d => d.from_service_id === s.id && svcIdSet.has(d.to_service_id)).length;
     elements.push({ group: "nodes", data: {
-      id: `svc-${s.id}`, label: s.name, type: "service",
-      status: s.status, svcId: s.id, deps: depCount
+      id: `svc-${s.id}`, label: s.name, type: "service", status: s.status, svcId: s.id
     }});
     elements.push({ group: "edges", data: {
       id: `runs-${s.id}`, source: `host-${s.ip}`, target: `svc-${s.id}`, type: "runs-on"
@@ -1458,6 +1466,20 @@ function renderSvcTopology() {
     }
   });
 
+  // Host-link edges (manual "nested in" connections)
+  (graphEdges || []).forEach(e => {
+    if (e.data.type === "host-link") {
+      const srcId = `host-${e.data.source}`;
+      const dstId = `host-${e.data.target}`;
+      if (hostMap.has(e.data.source) && hostMap.has(e.data.target)) {
+        elements.push({ group: "edges", data: {
+          id: `hl-${e.data.connection_id}`, source: srcId, target: dstId,
+          type: "host-link", connId: e.data.connection_id, label: e.data.label || ""
+        }});
+      }
+    }
+  });
+
   if (svcCy) { svcCy.destroy(); svcCy = null; }
 
   svcCy = cytoscape({
@@ -1465,48 +1487,138 @@ function renderSvcTopology() {
     elements,
     style: [
       { selector: 'node[type="host"]', style: {
-        "background-color": "oklch(20% 0.025 240)",
-        "border-width": 2, "border-color": "#1a6fa8",
-        "label": "data(label)", "color": "#9ab0c8",
+        "background-color": ele => NODE_COLORS[ele.data("device_type")] || NODE_COLORS.unknown,
+        "background-opacity": 0.25,
+        "border-width": 2,
+        "border-color": ele => NODE_COLORS[ele.data("device_type")] || NODE_COLORS.unknown,
+        "label": "data(label)", "color": "#e8e3de",
+        "text-outline-color": "#0d1117", "text-outline-width": 2,
         "font-size": "11px", "text-valign": "center", "text-halign": "center",
-        "width": 76, "height": 76, "shape": "roundrectangle",
-        "text-wrap": "wrap", "text-max-width": "68px"
+        "width": 80, "height": 80, "shape": "roundrectangle",
+        "text-wrap": "wrap", "text-max-width": "72px"
       }},
       { selector: 'node[type="service"]', style: {
-        "background-color": "oklch(17% 0.02 240)",
-        "border-width": 1.5, "border-color": "oklch(33% 0.03 240)",
-        "label": "data(label)", "color": "#7a90a4",
+        "background-color": "#131c28",
+        "border-width": 1.5, "border-color": "#2a3a4e",
+        "label": "data(label)", "color": "#8aafcc",
+        "text-outline-color": "#0d1117", "text-outline-width": 1,
         "font-size": "9px", "text-valign": "bottom", "text-halign": "center",
-        "text-margin-y": "4px", "width": 34, "height": 34, "shape": "ellipse",
+        "text-margin-y": "4px", "width": 32, "height": 32, "shape": "ellipse",
         "text-wrap": "wrap", "text-max-width": "64px"
       }},
-      { selector: 'node[status="running"]', style: { "border-color": "oklch(70% 0.165 145)", "border-width": 2 }},
-      { selector: 'node[status="stopped"]', style: { "border-color": "oklch(58% 0.21 25)",  "border-width": 2 }},
+      { selector: 'node[status="running"]', style: { "border-color": "#42b86a", "border-width": 2 }},
+      { selector: 'node[status="stopped"]', style: { "border-color": "#d94f3d", "border-width": 2 }},
       { selector: 'edge[type="runs-on"]', style: {
-        "width": 1, "line-color": "oklch(26% 0.02 240)",
+        "width": 1, "line-color": "#1e2e3e",
         "line-style": "dashed", "line-dash-pattern": [4, 4],
         "target-arrow-shape": "none", "curve-style": "straight"
       }},
       { selector: 'edge[type="depends-on"]', style: {
-        "width": 2, "line-color": "oklch(72% 0.15 55)",
-        "target-arrow-color": "oklch(72% 0.15 55)",
+        "width": 2, "line-color": "#e8c517",
+        "target-arrow-color": "#e8c517",
         "target-arrow-shape": "triangle", "curve-style": "bezier", "arrow-scale": 1.2
       }},
-      { selector: ":selected", style: { "border-color": "var(--accent)", "border-width": 3 }}
+      { selector: 'edge[type="host-link"]', style: {
+        "width": 2, "line-color": "#20a8c0",
+        "target-arrow-color": "#20a8c0",
+        "target-arrow-shape": "triangle", "curve-style": "bezier",
+        "line-style": "solid", "arrow-scale": 1.3,
+        "label": "data(label)", "font-size": "9px", "color": "#20a8c0",
+        "text-rotation": "autorotate"
+      }},
+      { selector: ":selected", style: { "border-color": "#e8c517", "border-width": 3 }},
+      { selector: 'edge:selected', style: { "line-color": "#e8c517", "target-arrow-color": "#e8c517" }},
     ],
     layout: {
       name: "cose", animate: false, randomize: true, fit: true, padding: 50,
-      componentSpacing: 100, nodeOverlap: 10,
-      nodeRepulsion: () => 12000, edgeElasticity: () => 200,
-      gravity: 1.2, numIter: 1000, initialTemp: 1000, coolingFactor: 0.99, minTemp: 1
+      componentSpacing: 120, nodeOverlap: 10,
+      nodeRepulsion: () => 8000,
+      idealEdgeLength: e => e.data("type") === "depends-on" ? 55 : 140,
+      edgeElasticity:  e => e.data("type") === "depends-on" ? 1500 : 100,
+      gravity: 1.2, numIter: 1200, initialTemp: 1000, coolingFactor: 0.99, minTemp: 1
     }
   });
 
-  svcCy.on("tap", 'node[type="host"]',    e => showHostDetail(e.target.data("ip")));
-  svcCy.on("tap", 'node[type="service"]', e => {
-    const svc = allServices.find(s => s.id === e.target.data("svcId"));
-    if (svc) showHostDetail(svc.ip);
+  // ── Drag host → services follow in real time (delta approach) ───────────────
+  let _lastHostPos = null;
+  let _dragSvcs    = [];
+
+  svcCy.on("grab", 'node[type="host"]', e => {
+    _lastHostPos = { ...e.target.position() };
+    _dragSvcs    = svcCy.edges(`[type="runs-on"][source="${e.target.id()}"]`).targets().toArray();
   });
+
+  svcCy.on("drag", 'node[type="host"]', e => {
+    if (!_lastHostPos) return;
+    const cur = e.target.position();
+    const dx  = cur.x - _lastHostPos.x;
+    const dy  = cur.y - _lastHostPos.y;
+    _dragSvcs.forEach(svc => {
+      const p = svc.position();
+      svc.position({ x: p.x + dx, y: p.y + dy });
+    });
+    _lastHostPos = { x: cur.x, y: cur.y };
+  });
+
+  svcCy.on("free", 'node[type="host"]', () => {
+    _lastHostPos = null;
+    _dragSvcs    = [];
+  });
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  svcCy.on("tap", 'node[type="host"]',    e => showHostDetail(e.target.data("ip")));
+  svcCy.on("tap", 'node[type="service"]', e => showSvcDetail(e.target.data("svcId")));
+  svcCy.on("tap", 'edge[type="host-link"]', e => {
+    const d = e.target.data();
+    const actions = document.getElementById("svcTopoEdgeActions");
+    const lbl     = document.getElementById("svcTopoEdgeLabel");
+    actions.style.display = "flex";
+    lbl.textContent = d.label ? `"${d.label}"` : `${d.source.replace("host-","")} → ${d.target.replace("host-","")}`;
+    actions.dataset.connId = d.connId;
+  });
+  svcCy.on("tap", e => {
+    if (e.target === svcCy) document.getElementById("svcTopoEdgeActions").style.display = "none";
+  });
+}
+
+// ── Host-link (nested) connections in services topology ───────────────────────
+
+function toggleLinkHostsForm() {
+  const form = document.getElementById("linkHostsForm");
+  const visible = form.style.display !== "none";
+  form.style.display = visible ? "none" : "flex";
+  if (!visible) {
+    // populate selects from hosts visible in current topology
+    const ips = [...new Set(allServices.map(s => s.ip))];
+    const opts = ips.map(ip => {
+      const h = allHosts.find(h => h.ip === ip);
+      return `<option value="${ip}">${ip}${h?.hostname ? " — " + h.hostname : ""}</option>`;
+    }).join("");
+    document.getElementById("linkSrc").innerHTML = opts;
+    document.getElementById("linkDst").innerHTML = opts;
+  }
+}
+
+async function saveHostLink() {
+  const src = document.getElementById("linkSrc").value;
+  const dst = document.getElementById("linkDst").value;
+  if (!src || !dst || src === dst) return alert("Pick two different hosts.");
+  try {
+    await api("POST", "/api/connections", { src_ip: src, dst_ip: dst, type: "host-link" });
+    await loadGraph();
+    toggleLinkHostsForm();
+    renderSvcTopology();
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function deleteSelectedHostLink() {
+  const actions = document.getElementById("svcTopoEdgeActions");
+  const connId  = actions.dataset.connId;
+  if (!connId || !confirm("Remove this host link?")) return;
+  await api("DELETE", `/api/connections/${connId}`);
+  await loadGraph();
+  actions.style.display = "none";
+  renderSvcTopology();
 }
 
 // ── Dependency modal ──────────────────────────────────────────────────────────
@@ -1720,10 +1832,11 @@ function openBulkAddContainers() {
     </div>`;
   }).join("");
   const sel = document.getElementById("bulkHostIp");
-  sel.innerHTML = allHosts
-    .filter(h => h.device_type !== "container")
-    .map(h => `<option value="${h.ip}">${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`)
-    .join("");
+  const regularH   = allHosts.filter(h => h.device_type !== "container");
+  const containerH = allHosts.filter(h => h.device_type === "container");
+  const bulkOpt = h => `<option value="${h.ip}">${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`;
+  sel.innerHTML = regularH.map(bulkOpt).join("") +
+    (containerH.length ? `<optgroup label="── Containers ──">${containerH.map(bulkOpt).join("")}</optgroup>` : "");
   const last = localStorage.getItem("boltarr_last_svc_host");
   if (last && sel.querySelector(`option[value="${last}"]`)) sel.value = last;
   updateBulkAddBtn();
