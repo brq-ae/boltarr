@@ -15,7 +15,7 @@
     AI is optional — works without it. Supports Ollama, OpenAI-compatible APIs, and Anthropic.
   </Overview>
   <Category>Network:Management Tools:</Category>
-  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
+  <WebUI>http://[IP]:[PORT:12100]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/brq-ae/boltarr/master/templates/unraid.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/brq-ae/boltarr/master/frontend/img/BoltarrLogo.png</Icon>
   <ExtraParams></ExtraParams>
@@ -40,14 +40,14 @@
   <!-- Web UI port -->
   <Config
     Name="Web UI Port"
-    Target="8000"
-    Default="8000"
+    Target="12100"
+    Default="12100"
     Mode="tcp"
     Description="Port Boltarr listens on. Access the UI at http://[server-ip]:[port]/"
     Type="Port"
     Display="always"
     Required="true"
-    Mask="false">8000</Config>
+    Mask="false">12100</Config>
 
   <!-- Data volume -->
   <Config
