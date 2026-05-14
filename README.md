@@ -23,7 +23,7 @@ curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.y
 docker compose up -d
 ```
 
-Open **http://localhost:8000**
+Open **http://localhost:12100**
 
 > Or if you prefer to clone the full repo:
 > ```bash
@@ -135,7 +135,7 @@ brew install nmap           # macOS
 bash run.sh
 ```
 
-App starts at **http://localhost:8000**
+App starts at **http://localhost:12100**
 
 ## Data
 

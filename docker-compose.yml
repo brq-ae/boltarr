@@ -3,7 +3,7 @@ services:
     image: brqae/boltarr:latest
     container_name: boltarr
     ports:
-      - "8000:8000"
+      - "12100:12100"
     volumes:
       - ./data:/app/data   # persists DB and config.yaml
     restart: unless-stopped
