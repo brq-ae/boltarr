@@ -17,6 +17,7 @@ COPY VERSION .
 # Runtime data (DB + config) is stored in /app/data — mount a volume here
 RUN mkdir -p /app/data
 
-EXPOSE 8000
+ENV PORT=12100
+EXPOSE 12100
 
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT}"]

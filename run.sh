@@ -9,5 +9,6 @@ if [ ! -d venv ]; then
   ./venv/bin/pip install -q -r requirements.txt
 fi
 
-echo "Starting Boltarr on http://0.0.0.0:8000"
-./venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+PORT=${PORT:-12100}
+echo "Starting Boltarr on http://0.0.0.0:${PORT}"
+./venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port "${PORT}" --reload
