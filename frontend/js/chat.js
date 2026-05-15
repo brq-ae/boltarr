@@ -39,8 +39,19 @@ async function sendChat() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: chatHistory, model }),
     });
-    const data = await res.json();
+    const text = await res.text();
     thinking.remove();
+    let data;
+    try { data = JSON.parse(text); } catch {
+      appendMsg("assistant", `Server error (${res.status}) — check that a model is selected and AI is configured.`);
+      chatHistory.pop();
+      return;
+    }
+    if (!res.ok) {
+      appendMsg("assistant", `Error: ${data.detail || res.statusText}`);
+      chatHistory.pop();
+      return;
+    }
     chatHistory.push({ role: "assistant", content: data.response });
     appendMsg("assistant", data.response);
   } catch (e) {

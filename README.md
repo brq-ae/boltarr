@@ -69,6 +69,14 @@ LLM_LONG_TIMEOUT: 600
 
 Env vars override the UI settings when set.
 
+### AI chat behind a reverse proxy
+
+If you access Boltarr through a reverse proxy (Nginx Proxy Manager, Caddy, Traefik, etc.) and see errors in the AI chat — especially with larger models — the proxy is likely timing out before the model responds. Increase the proxy timeout for `/api/chat` to at least 120–300 seconds.
+
+**Nginx Proxy Manager:** add `proxy_read_timeout 300;` and `proxy_send_timeout 300;` as custom Nginx config for the proxy host.
+
+**Caddy:** add `timeouts { read 5m }` to the reverse_proxy block.
+
 ### Config file
 
 Copy `data/config.yaml.example` to `data/config.yaml` and edit:
