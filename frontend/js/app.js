@@ -2489,12 +2489,11 @@ async function loadHostSshSection(ip) {
         <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeHostSshAccess(${a.id},'${ip}')">✕</button>
       </div>`).join("");
 
-    const curlCmd = `curl -sfL "${location.protocol}//${location.host}/api/hosts/${ip}/authorized-keys?user=${user}" | tee -a ~/.ssh/authorized_keys`;
     return `
       <div style="margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span style="font-size:11px;font-weight:600;color:var(--accent);font-family:monospace">${user}</span>
-          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="copySshCurl('${ip}','${user}')">Copy curl</button>
+          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="copySshCurl('${ip}','${user}')" title="Copies a command that deploys these keys into ${user}'s ~/.ssh/authorized_keys">Copy deploy cmd</button>
           <button class="btn" style="font-size:10px;padding:2px 8px" onclick="downloadAuthorizedKeys('${ip}','${user}')">Download</button>
         </div>
         ${rows}
@@ -2540,11 +2539,21 @@ async function removeHostSshAccess(accessId, ip) {
   await loadHostSshSection(ip);
 }
 
+function sshDeployCmd(ip, user) {
+  const url = `${location.protocol}//${location.host}/api/hosts/${ip}/authorized-keys?user=${user}`;
+  // Resolves the TARGET user's home (root→/root, john→/home/john), creates ~/.ssh,
+  // appends keys, dedupes, and fixes perms + ownership. Run as root (or via sudo).
+  return `sudo sh -c 'U="${user}"; H=$(getent passwd "$U" | cut -d: -f6); ` +
+    `install -d -m700 "$H/.ssh"; ` +
+    `curl -sfL "${url}" >> "$H/.ssh/authorized_keys"; ` +
+    `sort -u "$H/.ssh/authorized_keys" -o "$H/.ssh/authorized_keys"; ` +
+    `chmod 600 "$H/.ssh/authorized_keys"; ` +
+    `chown -R "$U" "$H/.ssh"'`;
+}
+
 async function copySshCurl(ip, user) {
-  const base = `${location.protocol}//${location.host}`;
-  const cmd = `curl -sfL "${base}/api/hosts/${ip}/authorized-keys?user=${user}" | tee -a ~/.ssh/authorized_keys`;
-  await navigator.clipboard.writeText(cmd);
-  showToast("Copied curl command");
+  await navigator.clipboard.writeText(sshDeployCmd(ip, user));
+  showToast(`Copied — deploys to ${user}'s ~/.ssh/authorized_keys`);
 }
 
 async function downloadAuthorizedKeys(ip, user) {
