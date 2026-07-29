@@ -15,6 +15,24 @@ def _endpoint(cfg: dict) -> str:
     return f"{server}/{topic}"
 
 
+def _safe_header(s: str) -> str:
+    """HTTP header values must be ASCII (httpx/h11 reject anything else).
+    Titles may contain emoji/unicode (service names, etc.), so drop
+    non-ASCII and trim rather than letting the whole request crash. The
+    full unicode text still shows in the message body (sent as UTF-8);
+    put emoji in `tags`, not titles."""
+    return s.encode("ascii", "ignore").decode("ascii").strip()
+
+
+def _build_headers(cfg: dict, title: str, priority: str, tags: list[str] | None) -> dict:
+    headers = {"Title": _safe_header(title), "Priority": priority}
+    if tags:
+        headers["Tags"] = ",".join(tags)
+    if cfg.get("token"):
+        headers["Authorization"] = f"Bearer {cfg['token']}"
+    return headers
+
+
 def send(title: str, message: str, priority: str = "default",
          tags: list[str] | None = None) -> tuple[bool, str]:
     """Send a notification. Returns (ok, error_message).
@@ -28,15 +46,7 @@ def send(title: str, message: str, priority: str = "default",
     if not cfg.get("server") or not cfg.get("topic"):
         return False, "server or topic not configured"
 
-    headers = {
-        "Title": title,
-        "Priority": priority,
-    }
-    if tags:
-        headers["Tags"] = ",".join(tags)
-    if cfg.get("token"):
-        headers["Authorization"] = f"Bearer {cfg['token']}"
-
+    headers = _build_headers(cfg, title, priority, tags)
     try:
         with httpx.Client(timeout=10) as client:
             r = client.post(_endpoint(cfg), data=message.encode("utf-8"), headers=headers)
@@ -52,11 +62,7 @@ def send_with(cfg: dict, title: str, message: str, priority: str = "default",
     the settings are saved). Returns (ok, error_message)."""
     if not cfg.get("server") or not cfg.get("topic"):
         return False, "server or topic not configured"
-    headers = {"Title": title, "Priority": priority}
-    if tags:
-        headers["Tags"] = ",".join(tags)
-    if cfg.get("token"):
-        headers["Authorization"] = f"Bearer {cfg['token']}"
+    headers = _build_headers(cfg, title, priority, tags)
     try:
         with httpx.Client(timeout=10) as client:
             r = client.post(_endpoint(cfg), data=message.encode("utf-8"), headers=headers)

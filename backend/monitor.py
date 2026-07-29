@@ -169,9 +169,10 @@ def _where(svc: dict) -> str:
 
 
 def _alert_down(svc: dict) -> None:
+    # Emoji goes in `tags` (ntfy renders it), never in the Title header.
     mins = _grace_seconds() // 60
     notify.send(
-        title=f"🔴 {svc['name']} is down",
+        title=f"{svc['name']} is down",
         message=f"{svc['name']} has been unreachable for {mins}+ min (on {_where(svc)}).",
         priority="high",
         tags=["rotating_light"],
@@ -181,7 +182,7 @@ def _alert_down(svc: dict) -> None:
 def _alert_up(svc: dict, down_seconds: float | None) -> None:
     tail = f" after ~{_fmt_duration(down_seconds)} down" if down_seconds else ""
     notify.send(
-        title=f"✅ {svc['name']} recovered",
+        title=f"{svc['name']} recovered",
         message=f"{svc['name']} is back up{tail} (on {_where(svc)}).",
         priority="default",
         tags=["white_check_mark"],
