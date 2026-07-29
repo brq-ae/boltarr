@@ -6,9 +6,12 @@ venv/
 *.egg-info/
 
 # Runtime data — never commit personal network data
-data/netmap.db
-data/netmap.db-wal
-data/netmap.db-shm
+data/boltarr.db
+data/boltarr.db-wal
+data/boltarr.db-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm
 data/config.yaml
 
 # Keep the example
