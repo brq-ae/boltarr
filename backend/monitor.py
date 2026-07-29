@@ -183,11 +183,21 @@ def _process(conn, svc: dict, new: str) -> str:
             "UPDATE services SET monitor_status=?, monitor_last_check=?, monitor_last_change=?, "
             "monitor_fail_since=?, monitor_alerted=? WHERE id=?",
             (new, now, now, r["fail_since"], r["alerted"], svc["id"]))
+        # Record the transition for uptime history
+        conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
+                     (svc["id"], new, now))
     else:
         conn.execute(
             "UPDATE services SET monitor_status=?, monitor_last_check=?, "
             "monitor_fail_since=?, monitor_alerted=? WHERE id=?",
             (new, now, r["fail_since"], r["alerted"], svc["id"]))
+        # Seed a starting event if this monitored service has no history yet
+        # (e.g. it was already 'up' and stable, so no transition ever fired).
+        has_events = conn.execute(
+            "SELECT 1 FROM monitor_events WHERE service_id=? LIMIT 1", (svc["id"],)).fetchone()
+        if not has_events:
+            conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
+                         (svc["id"], new, now))
     conn.commit()
 
     if r["alert"] == "down":
@@ -246,11 +256,118 @@ def _sweep() -> None:
             _process(conn, svc, new)
 
 
+# ── Uptime history + retention ────────────────────────────────────────────────
+
+RETENTION_DAYS = 31          # rolling window: ~1 month, older data is pruned
+
+
+def _events(conn, service_id: int):
+    return [dict(r) for r in conn.execute(
+        "SELECT status, ts FROM monitor_events WHERE service_id=? ORDER BY ts", (service_id,)
+    ).fetchall()]
+
+
+def uptime(service_id: int, window_seconds: int, now: datetime | None = None) -> dict | None:
+    """Uptime over [now-window, now] from the event timeline.
+    Returns {pct, up_seconds, monitored_seconds} or None if no data in range."""
+    now = now or _now_dt()
+    start = now.timestamp() - window_seconds
+    with get_conn() as conn:
+        evs = _events(conn, service_id)
+        anchor = conn.execute(
+            "SELECT status, ts FROM monitor_events WHERE service_id=? AND ts < ? "
+            "ORDER BY ts DESC LIMIT 1",
+            (service_id, datetime.fromtimestamp(start, timezone.utc).isoformat(timespec="seconds")),
+        ).fetchone()
+    # Build (timestamp, state) points from window start to now
+    points: list[tuple[float, str]] = []
+    if anchor:
+        points.append((start, anchor["status"]))
+    for e in evs:
+        t = _parse(e["ts"])
+        if not t:
+            continue
+        ts = t.timestamp()
+        if ts >= start:
+            points.append((ts, e["status"]))
+    if not points:
+        return None
+    # If the first data point is after window start (monitoring began mid-window),
+    # only measure from that first point — don't count un-monitored time.
+    seg_start = points[0][0]
+    up = 0.0
+    total = 0.0
+    for i, (ts, state) in enumerate(points):
+        seg_end = points[i + 1][0] if i + 1 < len(points) else now.timestamp()
+        dur = max(0.0, seg_end - ts)
+        total += dur
+        if state == "up":
+            up += dur
+    if total <= 0:
+        return None
+    return {"pct": round(up / total * 100, 3), "up_seconds": int(up), "monitored_seconds": int(total)}
+
+
+def outages(service_id: int, window_seconds: int, limit: int = 10, now: datetime | None = None) -> list[dict]:
+    """Recent down periods within the window: {start, end|None, seconds}."""
+    now = now or _now_dt()
+    start_dt = now.timestamp() - window_seconds
+    with get_conn() as conn:
+        evs = _events(conn, service_id)
+    out: list[dict] = []
+    cur_down_start = None
+    for e in evs:
+        t = _parse(e["ts"])
+        if not t:
+            continue
+        ts = t.timestamp()
+        if e["status"] == "down" and cur_down_start is None:
+            cur_down_start = ts
+        elif e["status"] == "up" and cur_down_start is not None:
+            if ts >= start_dt:
+                out.append({"start": _iso(datetime.fromtimestamp(cur_down_start, timezone.utc)),
+                            "end": e["ts"], "seconds": int(ts - cur_down_start)})
+            cur_down_start = None
+    if cur_down_start is not None:  # still down now
+        out.append({"start": _iso(datetime.fromtimestamp(cur_down_start, timezone.utc)),
+                    "end": None, "seconds": int(now.timestamp() - cur_down_start)})
+    return list(reversed(out))[:limit]
+
+
+def prune_events(retention_days: int = RETENTION_DAYS) -> None:
+    """Drop events older than the retention window, but keep the timeline
+    anchored: rebase the last event before the cutoff to the cutoff time so
+    uptime maths stay correct without storing >1-month-old data."""
+    cutoff_dt = _now_dt().timestamp() - retention_days * 86400
+    cutoff = _iso(datetime.fromtimestamp(cutoff_dt, timezone.utc))
+    with get_conn() as conn:
+        svc_ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT service_id FROM monitor_events WHERE ts < ?", (cutoff,)).fetchall()]
+        for sid in svc_ids:
+            anchor = conn.execute(
+                "SELECT id, status FROM monitor_events WHERE service_id=? AND ts < ? "
+                "ORDER BY ts DESC LIMIT 1", (sid, cutoff)).fetchone()
+            # delete everything older than cutoff
+            conn.execute("DELETE FROM monitor_events WHERE service_id=? AND ts < ?", (sid, cutoff))
+            # re-insert a single anchor at the cutoff carrying the state
+            if anchor:
+                conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
+                             (sid, anchor["status"], cutoff))
+        conn.commit()
+
+
+# ── Loop ──────────────────────────────────────────────────────────────────────
+
 def _loop() -> None:
     _stop.wait(3)
+    last_prune = 0.0
     while not _stop.is_set():
         try:
             _sweep()
+            # prune roughly once a day
+            if _now_dt().timestamp() - last_prune > 86400:
+                prune_events()
+                last_prune = _now_dt().timestamp()
         except Exception:
             pass
         _stop.wait(CHECK_INTERVAL)

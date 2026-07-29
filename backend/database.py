@@ -151,6 +151,13 @@ def init_db():
             "ALTER TABLE services ADD COLUMN monitor_last_change TEXT",
             "ALTER TABLE services ADD COLUMN monitor_fail_since TEXT",
             "ALTER TABLE services ADD COLUMN monitor_alerted INTEGER NOT NULL DEFAULT 0",
+            """CREATE TABLE IF NOT EXISTS monitor_events (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+                status     TEXT NOT NULL,          -- 'up' | 'down'
+                ts         TEXT NOT NULL           -- UTC ISO8601
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_monitor_events_svc_ts ON monitor_events(service_id, ts)",
             """CREATE TABLE IF NOT EXISTS service_dependencies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

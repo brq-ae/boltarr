@@ -1396,6 +1396,18 @@ tbody td {
 @keyframes mon-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 .svc-mon-cell { display: inline-flex; align-items: center; gap: 6px; }
 
+/* uptime stats in the service detail panel */
+.uptime-row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
+.uptime-stat { display: flex; flex-direction: column; gap: 1px; }
+.uptime-stat .val { font-size: 15px; font-weight: 600; }
+.uptime-stat .lbl { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-3); }
+.uptime-good { color: #42b86a; }
+.uptime-mid  { color: var(--accent); }
+.uptime-bad  { color: #d94f3d; }
+.outage-list { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+.outage-item { font-size: 10px; color: var(--text-3); font-family: var(--font-mono); }
+.outage-item.ongoing { color: #d94f3d; }
+
 /* ── Service detail panel ────────────────────────────────────────────────────── */
 .svc-detail-panel {
   position: fixed;

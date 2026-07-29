@@ -610,6 +610,15 @@ def check_service_now(svc_id: int):
     return monitor.check_now(svc_id)
 
 
+@app.get("/api/services/{svc_id}/uptime")
+def service_uptime(svc_id: int):
+    windows = {"24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}
+    return {
+        "uptime": {k: monitor.uptime(svc_id, secs) for k, secs in windows.items()},
+        "outages": monitor.outages(svc_id, 30 * 86400, limit=10),
+    }
+
+
 @app.delete("/api/services/{svc_id}")
 def delete_service_endpoint(svc_id: int):
     with get_conn() as conn:

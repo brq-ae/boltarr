@@ -1777,7 +1777,50 @@ function showSvcDetail(id) {
   document.getElementById("svcDetailMonitored").checked = !!s.monitored;
   setSvcDetailMonDot(s.monitored ? (s.monitor_status || "unknown") : "off");
 
+  loadSvcUptime(id, !!s.monitored);
+
   document.getElementById("svcDetailPanel").classList.add("open");
+}
+
+function _uptimeClass(pct) {
+  return pct >= 99.5 ? "uptime-good" : pct >= 95 ? "uptime-mid" : "uptime-bad";
+}
+function _fmtDur(sec) {
+  if (sec < 60) return sec + "s";
+  const m = Math.floor(sec / 60);
+  if (m < 60) return m + "m";
+  const h = Math.floor(m / 60);
+  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+async function loadSvcUptime(id, monitored) {
+  const wrap = document.getElementById("svcDetailUptimeWrap");
+  const el   = document.getElementById("svcDetailUptime");
+  if (!monitored) { wrap.style.display = "none"; return; }
+  wrap.style.display = "";
+  el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">Loading…</span>`;
+  try {
+    const d = await api("GET", `/api/services/${id}/uptime`);
+    const stat = (label, u) => {
+      if (!u) return `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${label}</span></div>`;
+      return `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${label}</span></div>`;
+    };
+    const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
+    let outages = "";
+    if (d.outages && d.outages.length) {
+      outages = `<div class="outage-list">${d.outages.map(o => {
+        const start = new Date(o.start).toLocaleString();
+        return o.end
+          ? `<span class="outage-item">▾ ${start} — down ${_fmtDur(o.seconds)}</span>`
+          : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
+      }).join("")}</div>`;
+    } else {
+      outages = `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
+    }
+    el.innerHTML = rows + outages;
+  } catch (e) {
+    el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
+  }
 }
 
 // Paint the monitor dot + label in the detail panel. status: up|down|unknown|off|checking
@@ -1801,6 +1844,7 @@ async function toggleSvcMonitor() {
     allServices = allServices.map(s => s.id === svcDetailId
       ? { ...s, monitored: on ? 1 : 0, monitor_status: r.monitor_status } : s);
     setSvcDetailMonDot(on ? (r.monitor_status || "unknown") : "off");
+    loadSvcUptime(svcDetailId, on);
     renderServicesTable();
   } catch (e) {
     alert("Error: " + e.message);
