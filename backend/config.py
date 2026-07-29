@@ -22,6 +22,11 @@ _DEFAULTS: dict = {
         "topic": "",          # the ntfy topic (channel) to publish to
         "token": "",          # optional ntfy access token, if the server needs auth
     },
+    # Service-monitor behaviour.
+    "monitoring": {
+        # Minutes a service must be continuously down before a down-alert fires.
+        "alert_after_minutes": 5,
+    },
 }
 
 
@@ -29,6 +34,7 @@ def get_config() -> dict:
     cfg: dict = {
         "llm": dict(_DEFAULTS["llm"]),
         "notifications": dict(_DEFAULTS["notifications"]),
+        "monitoring": dict(_DEFAULTS["monitoring"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -37,6 +43,8 @@ def get_config() -> dict:
             cfg["llm"].update({k: v for k, v in raw["llm"].items() if v is not None})
         if "notifications" in raw:
             cfg["notifications"].update({k: v for k, v in raw["notifications"].items() if v is not None})
+        if "monitoring" in raw:
+            cfg["monitoring"].update({k: v for k, v in raw["monitoring"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -65,11 +73,21 @@ def get_config() -> dict:
     if os.environ.get("NTFY_ENABLED"):
         cfg["notifications"]["enabled"] = os.environ["NTFY_ENABLED"].lower() in ("1", "true", "yes", "on")
 
+    if os.environ.get("MONITOR_ALERT_MINUTES"):
+        try:
+            cfg["monitoring"]["alert_after_minutes"] = int(os.environ["MONITOR_ALERT_MINUTES"])
+        except ValueError:
+            pass
+
     return cfg
 
 
 def get_llm_config() -> dict:
     return get_config()["llm"]
+
+
+def get_monitoring_config() -> dict:
+    return get_config()["monitoring"]
 
 
 def get_notifications_config() -> dict:

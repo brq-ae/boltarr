@@ -2334,6 +2334,7 @@ async function openSettings() {
     document.getElementById("setNtfyServer").value    = n.server || "";
     document.getElementById("setNtfyTopic").value     = n.topic  || "";
     document.getElementById("setNtfyToken").value     = n.token  || "";
+    document.getElementById("setAlertAfter").value    = n.alert_after_minutes ?? 5;
     document.getElementById("setNtfyTestResult").style.display = "none";
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
@@ -2375,6 +2376,7 @@ async function saveSettings() {
     server:  document.getElementById("setNtfyServer").value.trim(),
     topic:   document.getElementById("setNtfyTopic").value.trim(),
     token:   document.getElementById("setNtfyToken").value,
+    alert_after_minutes: parseInt(document.getElementById("setAlertAfter").value) || 0,
   };
   try {
     await api("PUT", "/api/settings", payload);

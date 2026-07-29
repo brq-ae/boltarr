@@ -838,6 +838,11 @@
         <label>Access token</label>
         <input id="setNtfyToken" type="password" placeholder="(optional — only if your ntfy needs a login)">
       </div>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Alert after service down for</label>
+        <input id="setAlertAfter" type="number" min="0" style="width:64px" value="5">
+        <span style="font-size:11px;color:var(--text-3)">minutes (0 = alert immediately)</span>
+      </div>
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn" onclick="testNotification()">📲 Send test</button>
         <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>

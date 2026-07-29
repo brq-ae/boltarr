@@ -149,6 +149,8 @@ def init_db():
             "ALTER TABLE services ADD COLUMN monitor_status TEXT DEFAULT 'unknown'",
             "ALTER TABLE services ADD COLUMN monitor_last_check TEXT",
             "ALTER TABLE services ADD COLUMN monitor_last_change TEXT",
+            "ALTER TABLE services ADD COLUMN monitor_fail_since TEXT",
+            "ALTER TABLE services ADD COLUMN monitor_alerted INTEGER NOT NULL DEFAULT 0",
             """CREATE TABLE IF NOT EXISTS service_dependencies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 from_service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

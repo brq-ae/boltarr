@@ -1,25 +1,29 @@
 """Service uptime monitor.
 
-A lightweight background loop that probes services flagged `monitored=1`
-every CHECK_INTERVAL seconds and records whether each is reachable.
-
-Step 1 scope: probing + live up/down status only. No alerts, no maintenance
-windows, no history yet — those come in later steps.
+Background loop that probes services flagged `monitored=1` every
+CHECK_INTERVAL seconds, records live up/down status, and (Step 2) sends
+ntfy alerts when a service stays down past the configured grace period,
+and again when it recovers.
 
 Probe rule (reachable = up):
-  - If the service has a URL  -> HTTP(S) GET; ANY response counts as up
-    (even 401/403/500 means the server is alive). Connect error / timeout = down.
-  - else if it has a port     -> open a TCP connection to host_ip:port.
-  - else                      -> cannot probe; left as 'unknown'.
+  - URL present  -> HTTP(S) GET; ANY response = up. Connect error/timeout = down.
+  - else port    -> TCP connect to host_ip:port.
+  - else         -> 'unknown' (cannot probe).
+
+Alerting: the live status/dot flips to 'down' on the first failed probe,
+but a down-ALERT only fires once the service has been continuously down for
+`alert_after_minutes` (config, default 5). A recovery alert fires when it
+comes back, but only if a down-alert had been sent.
 """
 import socket
 import threading
-import time
 from datetime import datetime, timezone
 
 import httpx
 
 from .database import get_conn
+from .config import get_monitoring_config
+from . import notify
 
 CHECK_INTERVAL = 60          # seconds between sweeps
 HTTP_TIMEOUT   = 6           # seconds per HTTP probe
@@ -28,15 +32,42 @@ TCP_TIMEOUT    = 5           # seconds per TCP probe
 _thread: threading.Thread | None = None
 _stop = threading.Event()
 
+_SELECT = """
+    SELECT s.id, s.name, s.url, s.port, s.monitor_status,
+           s.monitor_fail_since, s.monitor_alerted, h.ip, h.hostname
+    FROM services s JOIN hosts h ON s.host_id = h.id
+"""
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat(timespec="seconds")
+
+
+def _parse(iso: str | None) -> datetime | None:
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso)
+    except Exception:
+        return None
+
+
+def _fmt_duration(seconds: float) -> str:
+    m = int(seconds // 60)
+    if m < 60:
+        return f"{m} min"
+    h, m = divmod(m, 60)
+    return f"{h} h {m} min" if m else f"{h} h"
+
+
+# ── Probing ───────────────────────────────────────────────────────────────────
 
 def _probe_http(url: str) -> bool:
     try:
-        # verify=False: homelab services often use self-signed certs; we only
-        # care whether the service answers, not whether the cert is trusted.
         with httpx.Client(timeout=HTTP_TIMEOUT, verify=False, follow_redirects=True) as c:
             c.get(url)
         return True
@@ -53,7 +84,6 @@ def _probe_tcp(host: str, port: int) -> bool:
 
 
 def probe(service: dict) -> str:
-    """Return 'up' or 'down' for a service dict (needs url or ip+port)."""
     url = (service.get("url") or "").strip()
     if url:
         return "up" if _probe_http(url) else "down"
@@ -64,59 +94,125 @@ def probe(service: dict) -> str:
     return "unknown"
 
 
-def _monitored_services(conn) -> list[dict]:
-    rows = conn.execute("""
-        SELECT s.id, s.url, s.port, s.monitor_status, h.ip
-        FROM services s JOIN hosts h ON s.host_id = h.id
-        WHERE s.monitored = 1
-    """).fetchall()
-    return [dict(r) for r in rows]
+# ── Alert-state evaluation (pure, unit-testable) ──────────────────────────────
+
+def evaluate(prev: str, new: str, fail_since: str | None, alerted: int,
+             grace_seconds: int, now: datetime) -> dict:
+    """Decide the new outage-tracking state and whether to alert.
+
+    Returns: {fail_since, alerted, alert, down_seconds}
+      alert: None | 'down' | 'up'
+    """
+    if new == "up":
+        if alerted:  # we had told the user it was down -> recovery alert
+            dur = None
+            fs = _parse(fail_since)
+            if fs:
+                dur = (now - fs).total_seconds()
+            return {"fail_since": None, "alerted": 0, "alert": "up", "down_seconds": dur}
+        return {"fail_since": None, "alerted": 0, "alert": None, "down_seconds": None}
+
+    if new == "down":
+        fs = _parse(fail_since) or now            # start the clock on first fail
+        elapsed = (now - fs).total_seconds()
+        if not alerted and elapsed >= grace_seconds:
+            return {"fail_since": _iso(fs), "alerted": 1, "alert": "down", "down_seconds": elapsed}
+        return {"fail_since": _iso(fs), "alerted": alerted, "alert": None, "down_seconds": None}
+
+    # unknown: leave state untouched
+    return {"fail_since": fail_since, "alerted": alerted, "alert": None, "down_seconds": None}
 
 
-def _apply_result(conn, svc_id: int, prev: str, new: str) -> None:
-    now = _now()
+def _grace_seconds() -> int:
+    try:
+        return max(0, int(get_monitoring_config().get("alert_after_minutes", 5))) * 60
+    except Exception:
+        return 300
+
+
+# ── Persisting a probe result + firing alerts ─────────────────────────────────
+
+def _process(conn, svc: dict, new: str) -> str:
+    now_dt = _now_dt()
+    now = _iso(now_dt)
+    prev = svc.get("monitor_status") or "unknown"
+
+    if new == "unknown":
+        conn.execute("UPDATE services SET monitor_last_check=? WHERE id=?", (now, svc["id"]))
+        conn.commit()
+        return prev
+
+    r = evaluate(prev, new, svc.get("monitor_fail_since"),
+                 svc.get("monitor_alerted") or 0, _grace_seconds(), now_dt)
+
     if new != prev:
         conn.execute(
-            "UPDATE services SET monitor_status=?, monitor_last_check=?, monitor_last_change=? WHERE id=?",
-            (new, now, now, svc_id),
-        )
+            "UPDATE services SET monitor_status=?, monitor_last_check=?, monitor_last_change=?, "
+            "monitor_fail_since=?, monitor_alerted=? WHERE id=?",
+            (new, now, now, r["fail_since"], r["alerted"], svc["id"]))
     else:
         conn.execute(
-            "UPDATE services SET monitor_status=?, monitor_last_check=? WHERE id=?",
-            (new, now, svc_id),
-        )
+            "UPDATE services SET monitor_status=?, monitor_last_check=?, "
+            "monitor_fail_since=?, monitor_alerted=? WHERE id=?",
+            (new, now, r["fail_since"], r["alerted"], svc["id"]))
+    conn.commit()
 
+    if r["alert"] == "down":
+        _alert_down(svc)
+    elif r["alert"] == "up":
+        _alert_up(svc, r.get("down_seconds"))
+    return new
+
+
+def _where(svc: dict) -> str:
+    return svc.get("hostname") or svc.get("ip") or "?"
+
+
+def _alert_down(svc: dict) -> None:
+    mins = _grace_seconds() // 60
+    notify.send(
+        title=f"🔴 {svc['name']} is down",
+        message=f"{svc['name']} has been unreachable for {mins}+ min (on {_where(svc)}).",
+        priority="high",
+        tags=["rotating_light"],
+    )
+
+
+def _alert_up(svc: dict, down_seconds: float | None) -> None:
+    tail = f" after ~{_fmt_duration(down_seconds)} down" if down_seconds else ""
+    notify.send(
+        title=f"✅ {svc['name']} recovered",
+        message=f"{svc['name']} is back up{tail} (on {_where(svc)}).",
+        priority="default",
+        tags=["white_check_mark"],
+    )
+
+
+# ── Public entry points ───────────────────────────────────────────────────────
 
 def check_now(svc_id: int) -> dict:
-    """Probe a single service immediately and persist the result.
-    Used for instant feedback when the user toggles monitoring on."""
+    """Probe one service immediately and persist. Used for instant feedback
+    when the user toggles monitoring on."""
     with get_conn() as conn:
-        row = conn.execute("""
-            SELECT s.id, s.url, s.port, s.monitor_status, h.ip
-            FROM services s JOIN hosts h ON s.host_id = h.id
-            WHERE s.id = ?
-        """, (svc_id,)).fetchone()
+        row = conn.execute(_SELECT + " WHERE s.id = ?", (svc_id,)).fetchone()
         if not row:
             return {"status": "unknown"}
         svc = dict(row)
         new = probe(svc)
-        _apply_result(conn, svc_id, svc.get("monitor_status") or "unknown", new)
-        conn.commit()
-        return {"status": new, "checked_at": _now()}
+        final = _process(conn, svc, new)
+        return {"status": final, "checked_at": _iso(_now_dt())}
 
 
 def _sweep() -> None:
     with get_conn() as conn:
-        services = _monitored_services(conn)
+        services = [dict(r) for r in conn.execute(_SELECT + " WHERE s.monitored = 1").fetchall()]
     for svc in services:
         new = probe(svc)
         with get_conn() as conn:
-            _apply_result(conn, svc["id"], svc.get("monitor_status") or "unknown", new)
-            conn.commit()
+            _process(conn, svc, new)
 
 
 def _loop() -> None:
-    # small delay so it doesn't fight app startup
     _stop.wait(3)
     while not _stop.is_set():
         try:

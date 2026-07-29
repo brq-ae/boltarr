@@ -592,7 +592,8 @@ def set_service_monitor(svc_id: int, data: MonitorToggleIn):
             conn.execute("UPDATE services SET monitored=1 WHERE id=?", (svc_id,))
         else:
             conn.execute(
-                "UPDATE services SET monitored=0, monitor_status='unknown' WHERE id=?",
+                "UPDATE services SET monitored=0, monitor_status='unknown', "
+                "monitor_fail_since=NULL, monitor_alerted=0 WHERE id=?",
                 (svc_id,))
         conn.commit()
     status = "unknown"
@@ -1030,10 +1031,11 @@ _MASKED = "••••••••"
 
 
 class NotificationSettingsIn(BaseModel):
-    enabled: Optional[bool] = None
-    server:  Optional[str]  = None
-    topic:   Optional[str]  = None
-    token:   Optional[str]  = None
+    enabled:              Optional[bool] = None
+    server:               Optional[str]  = None
+    topic:                Optional[str]  = None
+    token:                Optional[str]  = None
+    alert_after_minutes:  Optional[int]  = None
 
 
 @app.get("/api/settings")
@@ -1046,6 +1048,7 @@ def get_settings():
 
     ntfy = dict(cfg["notifications"])
     ntfy["token"] = _MASKED if ntfy.get("token") else ""
+    ntfy["alert_after_minutes"] = cfg["monitoring"].get("alert_after_minutes", 5)
     return {"llm": llm, "notifications": ntfy}
 
 
@@ -1080,9 +1083,12 @@ def update_notification_settings(data: NotificationSettingsIn):
     if data.token is not None and data.token != _MASKED:
         ntfy["token"] = data.token.strip()
     cfg["notifications"] = ntfy
+    if data.alert_after_minutes is not None:
+        cfg.setdefault("monitoring", {})["alert_after_minutes"] = max(0, int(data.alert_after_minutes))
     save_config(cfg)
     result = dict(ntfy)
     result["token"] = _MASKED if ntfy.get("token") else ""
+    result["alert_after_minutes"] = cfg.get("monitoring", {}).get("alert_after_minutes", 5)
     return {"ok": True, "notifications": result}
 
 
