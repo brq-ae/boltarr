@@ -2244,7 +2244,7 @@ const PROVIDER_KEY_PLACEHOLDER = {
 
 async function openSettings() {
   try {
-    const { llm } = await api("GET", "/api/settings");
+    const { llm, notifications } = await api("GET", "/api/settings");
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
@@ -2253,6 +2253,13 @@ async function openSettings() {
     document.getElementById("setLongTimeout").value  = llm.long_timeout || 600;
     onSettingsProviderChange();
     document.getElementById("setTestResult").style.display = "none";
+
+    const n = notifications || {};
+    document.getElementById("setNtfyEnabled").checked = !!n.enabled;
+    document.getElementById("setNtfyServer").value    = n.server || "";
+    document.getElementById("setNtfyTopic").value     = n.topic  || "";
+    document.getElementById("setNtfyToken").value     = n.token  || "";
+    document.getElementById("setNtfyTestResult").style.display = "none";
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
 }
@@ -2288,14 +2295,45 @@ async function saveSettings() {
     timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
     long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
   };
+  const ntfyPayload = {
+    enabled: document.getElementById("setNtfyEnabled").checked,
+    server:  document.getElementById("setNtfyServer").value.trim(),
+    topic:   document.getElementById("setNtfyTopic").value.trim(),
+    token:   document.getElementById("setNtfyToken").value,
+  };
   try {
     await api("PUT", "/api/settings", payload);
+    await api("PUT", "/api/settings/notifications", ntfyPayload);
     closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
-    showToast("AI settings saved");
+    showToast("Settings saved");
   } catch (e) {
     alert("Failed to save settings: " + e.message);
+  }
+}
+
+async function testNotification() {
+  const resultEl = document.getElementById("setNtfyTestResult");
+  resultEl.style.display = "";
+  resultEl.className = "settings-test-result";
+  resultEl.textContent = "Sending…";
+  try {
+    const result = await api("POST", "/api/notifications/test", {
+      server: document.getElementById("setNtfyServer").value.trim(),
+      topic:  document.getElementById("setNtfyTopic").value.trim(),
+      token:  document.getElementById("setNtfyToken").value,
+    });
+    if (result.ok) {
+      resultEl.className = "settings-test-result ok";
+      resultEl.textContent = "✓ Sent — check your phone";
+    } else {
+      resultEl.className = "settings-test-result err";
+      resultEl.textContent = "✗ " + (result.error || "failed");
+    }
+  } catch (e) {
+    resultEl.className = "settings-test-result err";
+    resultEl.textContent = "✗ " + e.message;
   }
 }
 

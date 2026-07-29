@@ -13,17 +13,30 @@ _DEFAULTS: dict = {
         "model": "",
         "timeout": 120,
         "long_timeout": 600,
-    }
+    },
+    # ntfy push notifications. Real values live in data/config.yaml (gitignored),
+    # never here — keep these generic so nothing private is committed.
+    "notifications": {
+        "enabled": False,
+        "server": "",         # e.g. https://ntfy.sh or your self-hosted ntfy
+        "topic": "",          # the ntfy topic (channel) to publish to
+        "token": "",          # optional ntfy access token, if the server needs auth
+    },
 }
 
 
 def get_config() -> dict:
-    cfg: dict = {"llm": dict(_DEFAULTS["llm"])}
+    cfg: dict = {
+        "llm": dict(_DEFAULTS["llm"]),
+        "notifications": dict(_DEFAULTS["notifications"]),
+    }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
             raw = yaml.safe_load(f) or {}
         if "llm" in raw:
             cfg["llm"].update({k: v for k, v in raw["llm"].items() if v is not None})
+        if "notifications" in raw:
+            cfg["notifications"].update({k: v for k, v in raw["notifications"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -39,11 +52,28 @@ def get_config() -> dict:
         if val:
             cfg["llm"][cfg_key] = int(val) if cfg_key in ("timeout", "long_timeout") else val
 
+    # ntfy env overrides
+    ntfy_env = {
+        "NTFY_SERVER": "server",
+        "NTFY_TOPIC":  "topic",
+        "NTFY_TOKEN":  "token",
+    }
+    for env_key, cfg_key in ntfy_env.items():
+        val = os.environ.get(env_key)
+        if val:
+            cfg["notifications"][cfg_key] = val
+    if os.environ.get("NTFY_ENABLED"):
+        cfg["notifications"]["enabled"] = os.environ["NTFY_ENABLED"].lower() in ("1", "true", "yes", "on")
+
     return cfg
 
 
 def get_llm_config() -> dict:
     return get_config()["llm"]
+
+
+def get_notifications_config() -> dict:
+    return get_config()["notifications"]
 
 
 def save_config(cfg: dict) -> None:

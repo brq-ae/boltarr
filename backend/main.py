@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 from .database import init_db, get_conn
 from .scanner import start_scan, scan_jobs, cancel_scan, start_probe
-from .config import get_config, get_llm_config, save_config
+from .config import get_config, get_llm_config, get_notifications_config, save_config
+from . import notify
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
     build_host_prompt, build_network_prompt, infer_device_type, LLMError, LONG_TIMEOUT,
@@ -990,6 +991,13 @@ class LLMSettingsIn(BaseModel):
 _MASKED = "••••••••"
 
 
+class NotificationSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    server:  Optional[str]  = None
+    topic:   Optional[str]  = None
+    token:   Optional[str]  = None
+
+
 @app.get("/api/settings")
 def get_settings():
     cfg = get_config()
@@ -997,7 +1005,10 @@ def get_settings():
     has_key = bool(llm.get("api_key"))
     llm["api_key"] = _MASKED if has_key else ""
     llm["configured"] = is_configured()
-    return {"llm": llm}
+
+    ntfy = dict(cfg["notifications"])
+    ntfy["token"] = _MASKED if ntfy.get("token") else ""
+    return {"llm": llm, "notifications": ntfy}
 
 
 @app.put("/api/settings")
@@ -1018,6 +1029,44 @@ def update_settings(data: LLMSettingsIn):
     result["api_key"] = _MASKED if llm.get("api_key") else ""
     result["configured"] = llm.get("provider", "none") != "none"
     return {"ok": True, "llm": result}
+
+
+@app.put("/api/settings/notifications")
+def update_notification_settings(data: NotificationSettingsIn):
+    cfg = get_config()
+    ntfy = cfg.get("notifications", {})
+    if data.enabled is not None: ntfy["enabled"] = data.enabled
+    if data.server  is not None: ntfy["server"]  = data.server.strip().rstrip("/")
+    if data.topic   is not None: ntfy["topic"]   = data.topic.strip()
+    # Only update token if it's not the masked placeholder
+    if data.token is not None and data.token != _MASKED:
+        ntfy["token"] = data.token.strip()
+    cfg["notifications"] = ntfy
+    save_config(cfg)
+    result = dict(ntfy)
+    result["token"] = _MASKED if ntfy.get("token") else ""
+    return {"ok": True, "notifications": result}
+
+
+@app.post("/api/notifications/test")
+def test_notification(data: NotificationSettingsIn):
+    # Build the config to test with: use posted values, but fall back to the
+    # saved token when the field came in masked (user didn't retype it).
+    cfg = get_notifications_config()
+    test_cfg = {
+        "server": (data.server or cfg.get("server") or "").strip().rstrip("/"),
+        "topic":  (data.topic  or cfg.get("topic")  or "").strip(),
+        "token":  cfg.get("token", ""),
+    }
+    if data.token is not None and data.token != _MASKED:
+        test_cfg["token"] = data.token.strip()
+    ok, err = notify.send_with(
+        test_cfg,
+        title="Boltarr",
+        message="Test notification — your Boltarr alerts are working.",
+        tags=["white_check_mark"],
+    )
+    return {"ok": ok, "error": err}
 
 
 @app.post("/api/settings/test")

@@ -54,7 +54,7 @@
     <div class="sidebar-footer">
       <button class="ai-settings-btn" id="aiSettingsBtn" onclick="openSettings()">
         <span id="aiStatusDot" class="ai-status-dot ai-status-none"></span>
-        ⚙ AI Settings
+        ⚙ Settings
       </button>
       <label style="margin-top:6px">Model override</label>
       <select id="globalModel" title="Leave empty to use the default from settings"></select>
@@ -777,7 +777,7 @@
 <div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
   <div class="modal" style="width:500px;max-width:95%">
     <div class="modal-header">
-      <span>⚙ AI Settings</span>
+      <span>⚙ Settings</span>
       <button class="icon-btn" onclick="closeSettings()">✕</button>
     </div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
@@ -814,9 +814,37 @@
         <input id="setLongTimeout" type="number" style="width:80px" min="30" value="600">
       </div>
       <div id="setTestResult" class="settings-test-result" style="display:none"></div>
+
+      <div class="sidebar-divider" style="margin:4px 0"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">📱 Notifications (ntfy)</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="setNtfyEnabled"> Enabled
+        </label>
+      </div>
+      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+        Boltarr sends alerts to your phone via <a href="https://ntfy.sh" target="_blank" style="color:var(--accent)">ntfy</a>.
+        Subscribe to your topic in the ntfy app to receive them.
+      </p>
+      <div class="form-row">
+        <label>Server</label>
+        <input id="setNtfyServer" type="text" placeholder="https://ntfy.sh">
+      </div>
+      <div class="form-row">
+        <label>Topic</label>
+        <input id="setNtfyTopic" type="text" placeholder="my-secret-topic" class="mono">
+      </div>
+      <div class="form-row">
+        <label>Access token</label>
+        <input id="setNtfyToken" type="password" placeholder="(optional — only if your ntfy needs a login)">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn" onclick="testNotification()">📲 Send test</button>
+        <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
+      </div>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="testLLMConnection()">⚡ Test</button>
+      <button class="btn" onclick="testLLMConnection()">⚡ Test AI</button>
       <span style="flex:1"></span>
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>

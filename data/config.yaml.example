@@ -1,7 +1,8 @@
-# NetMap AI configuration
-# Copy this file to config.yaml and edit to enable AI features.
-# Environment variables (LLM_PROVIDER, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)
-# override this file when set — useful for Docker / CI environments.
+# Boltarr configuration
+# Copy this file to config.yaml and edit to enable AI features and notifications.
+# Environment variables override this file when set — useful for Docker / CI:
+#   AI:     LLM_PROVIDER, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+#   ntfy:   NTFY_ENABLED, NTFY_SERVER, NTFY_TOPIC, NTFY_TOKEN
 
 llm:
   # Provider options: none | ollama | openai | anthropic
@@ -29,3 +30,14 @@ llm:
 
   # Timeout for long-running requests (analyze entire network)
   long_timeout: 600
+
+# Push notifications via ntfy (https://ntfy.sh). Boltarr sends alerts to the
+# topic below; subscribe to it in the ntfy app to receive them.
+notifications:
+  enabled: false
+  # ntfy.sh, or your own self-hosted server, e.g. https://ntfy.example.com
+  server: ""
+  # Pick a long, unguessable topic — with no auth, the topic name is the secret
+  topic: ""
+  # Optional access token, only if your ntfy server requires a login
+  token: ""
