@@ -1381,6 +1381,21 @@ tbody td {
   .ssh-key-kebab-wrap { display: block; }
 }
 
+/* ── Service monitor status dots ─────────────────────────────────────────────── */
+.mon-dot {
+  display: inline-block;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.mon-up      { background: #42b86a; box-shadow: 0 0 5px #42b86a99; }
+.mon-down    { background: #d94f3d; box-shadow: 0 0 5px #d94f3d99; }
+.mon-unknown { background: var(--border2); }
+.mon-dot.checking { animation: mon-pulse 0.9s ease-in-out infinite; }
+@keyframes mon-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+.svc-mon-cell { display: inline-flex; align-items: center; gap: 6px; }
+
 /* ── Service detail panel ────────────────────────────────────────────────────── */
 .svc-detail-panel {
   position: fixed;

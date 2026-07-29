@@ -1030,6 +1030,10 @@ function setTab(name) {
   if (name === "hierarchy") loadHierarchy();
   if (name === "services")  loadServicesTab();
   if (name === "sshkeys")   loadSshKeys();
+
+  // Live monitor dots only need refreshing while the Services tab is open
+  if (name === "services") startMonitorPolling();
+  else stopMonitorPolling();
 }
 
 // ── Chat toggle ───────────────────────────────────────────────────────────────
@@ -1350,7 +1354,7 @@ function renderServicesTable() {
     <tr id="svc-tr-${s.id}" style="cursor:pointer" onclick="showSvcDetail(${s.id})">
       <td style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
       <td>
-        <div style="font-size:12px;font-weight:500">${s.name}</div>
+        <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}${s.name}</div>
         ${s.description ? `<div style="font-size:10px;color:var(--text-3)">${s.description}</div>` : ""}
       </td>
       <td class="svc-host-cell">
@@ -1367,11 +1371,50 @@ function renderServicesTable() {
   `).join("");
 }
 
+// Small up/down dot shown in the services table for monitored services.
+function monDotHTML(s) {
+  if (!s.monitored) return "";
+  const st  = s.monitor_status || "unknown";
+  const cls = st === "up" ? "mon-up" : st === "down" ? "mon-down" : "mon-unknown";
+  const title = st === "up" ? "Monitored — up" : st === "down" ? "Monitored — down" : "Monitored — checking…";
+  return `<span class="mon-dot ${cls}" title="${title}"></span>`;
+}
+
 async function deleteSvcFromTable(id) {
   if (!confirm("Delete this service?")) return;
   await api("DELETE", `/api/services/${id}`);
   allServices = allServices.filter(s => s.id !== id);
   renderServicesTable();
+}
+
+// Periodically refresh live monitor status while viewing the Services tab.
+let _monPollTimer = null;
+async function refreshMonitorStatus() {
+  if (!allServices.some(s => s.monitored)) return;
+  try {
+    const fresh = await api("GET", "/api/services");
+    const byId = new Map(fresh.map(s => [s.id, s]));
+    let changed = false;
+    allServices = allServices.map(s => {
+      const f = byId.get(s.id);
+      if (f && (f.monitor_status !== s.monitor_status || f.monitored !== s.monitored)) changed = true;
+      return f ? { ...s, monitored: f.monitored, monitor_status: f.monitor_status, monitor_last_check: f.monitor_last_check } : s;
+    });
+    if (changed) {
+      renderServicesTable();
+      if (svcDetailId) {
+        const cur = allServices.find(s => s.id === svcDetailId);
+        if (cur) setSvcDetailMonDot(cur.monitored ? (cur.monitor_status || "unknown") : "off");
+      }
+    }
+  } catch {}
+}
+function startMonitorPolling() {
+  if (_monPollTimer) return;
+  _monPollTimer = setInterval(refreshMonitorStatus, 20000);  // every 20s while tab open
+}
+function stopMonitorPolling() {
+  if (_monPollTimer) { clearInterval(_monPollTimer); _monPollTimer = null; }
 }
 
 function sortServices(col) {
@@ -1731,7 +1774,39 @@ function showSvcDetail(id) {
   updateSvcDetailUrlBtn();
   renderSvcDetailDeps(id);
 
+  document.getElementById("svcDetailMonitored").checked = !!s.monitored;
+  setSvcDetailMonDot(s.monitored ? (s.monitor_status || "unknown") : "off");
+
   document.getElementById("svcDetailPanel").classList.add("open");
+}
+
+// Paint the monitor dot + label in the detail panel. status: up|down|unknown|off|checking
+function setSvcDetailMonDot(status) {
+  const dot  = document.getElementById("svcDetailMonitorDot");
+  const text = document.getElementById("svcDetailMonitorText");
+  if (!dot || !text) return;
+  const label = { up: "up", down: "down", unknown: "checking…", checking: "checking…", off: "off" }[status] || "off";
+  const cls   = status === "up" ? "mon-up" : status === "down" ? "mon-down" : "mon-unknown";
+  dot.className  = "mon-dot " + cls + (status === "checking" || status === "unknown" ? " checking" : "");
+  text.textContent = label;
+}
+
+async function toggleSvcMonitor() {
+  if (!svcDetailId) return;
+  const on = document.getElementById("svcDetailMonitored").checked;
+  setSvcDetailMonDot(on ? "checking" : "off");
+  try {
+    // Dedicated endpoint — only touches the `monitored` flag, never other fields
+    const r = await api("POST", `/api/services/${svcDetailId}/monitor`, { enabled: on });
+    allServices = allServices.map(s => s.id === svcDetailId
+      ? { ...s, monitored: on ? 1 : 0, monitor_status: r.monitor_status } : s);
+    setSvcDetailMonDot(on ? (r.monitor_status || "unknown") : "off");
+    renderServicesTable();
+  } catch (e) {
+    alert("Error: " + e.message);
+    document.getElementById("svcDetailMonitored").checked = !on;
+    setSvcDetailMonDot(!on ? "unknown" : "off");
+  }
 }
 
 function hideSvcDetail() {

@@ -16,6 +16,7 @@ from .database import init_db, get_conn
 from .scanner import start_scan, scan_jobs, cancel_scan, start_probe
 from .config import get_config, get_llm_config, get_notifications_config, save_config
 from . import notify
+from . import monitor
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
     build_host_prompt, build_network_prompt, infer_device_type, LLMError, LONG_TIMEOUT,
@@ -31,6 +32,7 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 @app.on_event("startup")
 def startup():
     init_db()
+    monitor.start_monitor()
 
 
 @app.get("/api/version")
@@ -510,6 +512,7 @@ class ServiceUpdate(BaseModel):
     status:      Optional[str] = None
     url:         Optional[str] = None
     icon:        Optional[str] = None
+    monitored:   Optional[bool] = None
 
 
 @app.get("/api/services")
@@ -551,6 +554,7 @@ def update_service(svc_id: int, data: ServiceUpdate):
         s = conn.execute("SELECT id FROM services WHERE id=?", (svc_id,)).fetchone()
         if not s:
             raise HTTPException(404, "Service not found")
+        monitored = None if data.monitored is None else (1 if data.monitored else 0)
         conn.execute("""
             UPDATE services SET
                 name        = COALESCE(?, name),
@@ -559,16 +563,50 @@ def update_service(svc_id: int, data: ServiceUpdate):
                 protocol    = COALESCE(?, protocol),
                 status      = COALESCE(?, status),
                 url         = ?,
-                icon        = COALESCE(?, icon)
+                icon        = COALESCE(?, icon),
+                monitored   = COALESCE(?, monitored)
             WHERE id=?
         """, (data.name, data.description, data.port, data.protocol,
-              data.status, data.url, data.icon, svc_id))
+              data.status, data.url, data.icon, monitored, svc_id))
         conn.commit()
         row = conn.execute("""
             SELECT s.*, h.ip, h.hostname FROM services s
             JOIN hosts h ON s.host_id = h.id WHERE s.id=?
         """, (svc_id,)).fetchone()
         return dict(row)
+
+
+class MonitorToggleIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/services/{svc_id}/monitor")
+def set_service_monitor(svc_id: int, data: MonitorToggleIn):
+    """Toggle monitoring for a service WITHOUT touching its other fields.
+    Turning on probes immediately; turning off resets the live status."""
+    with get_conn() as conn:
+        s = conn.execute("SELECT id FROM services WHERE id=?", (svc_id,)).fetchone()
+        if not s:
+            raise HTTPException(404, "Service not found")
+        if data.enabled:
+            conn.execute("UPDATE services SET monitored=1 WHERE id=?", (svc_id,))
+        else:
+            conn.execute(
+                "UPDATE services SET monitored=0, monitor_status='unknown' WHERE id=?",
+                (svc_id,))
+        conn.commit()
+    status = "unknown"
+    if data.enabled:
+        try:
+            status = monitor.check_now(svc_id)["status"]
+        except Exception:
+            pass
+    return {"id": svc_id, "monitored": data.enabled, "monitor_status": status}
+
+
+@app.post("/api/services/{svc_id}/check")
+def check_service_now(svc_id: int):
+    return monitor.check_now(svc_id)
 
 
 @app.delete("/api/services/{svc_id}")

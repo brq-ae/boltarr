@@ -878,6 +878,14 @@
       <label>Protocol</label>
       <select id="svcDetailProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
     </div>
+    <div class="svc-detail-field">
+      <label>Monitor</label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:26px">
+        <input type="checkbox" id="svcDetailMonitored" onchange="toggleSvcMonitor()">
+        <span id="svcDetailMonitorDot" class="mon-dot mon-unknown"></span>
+        <span id="svcDetailMonitorText" style="font-size:11px;color:var(--text-3)">off</span>
+      </label>
+    </div>
     <div class="svc-detail-field svc-detail-field-wide">
       <label>URL</label>
       <input type="text" id="svcDetailUrl" placeholder="http://…" oninput="updateSvcDetailUrlBtn()">
