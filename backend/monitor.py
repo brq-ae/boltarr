@@ -17,7 +17,7 @@ comes back, but only if a down-alert had been sent.
 """
 import socket
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as time_of_day
 
 import httpx
 
@@ -97,30 +97,61 @@ def probe(service: dict) -> str:
 # ── Alert-state evaluation (pure, unit-testable) ──────────────────────────────
 
 def evaluate(prev: str, new: str, fail_since: str | None, alerted: int,
-             grace_seconds: int, now: datetime) -> dict:
+             grace_seconds: int, now: datetime, suppress: bool = False) -> dict:
     """Decide the new outage-tracking state and whether to alert.
+
+    `suppress` = we're inside the global quiet window: never send an alert,
+    and (crucially) never mark a down as 'alerted', so it stays PENDING and
+    fires the moment the window ends and it's still down.
 
     Returns: {fail_since, alerted, alert, down_seconds}
       alert: None | 'down' | 'up'
     """
     if new == "up":
-        if alerted:  # we had told the user it was down -> recovery alert
+        if alerted and not suppress:  # was down + already buzzed -> recovery alert
             dur = None
             fs = _parse(fail_since)
             if fs:
                 dur = (now - fs).total_seconds()
             return {"fail_since": None, "alerted": 0, "alert": "up", "down_seconds": dur}
+        # recovered but never alerted, or muted by quiet window -> reset quietly
         return {"fail_since": None, "alerted": 0, "alert": None, "down_seconds": None}
 
     if new == "down":
         fs = _parse(fail_since) or now            # start the clock on first fail
         elapsed = (now - fs).total_seconds()
-        if not alerted and elapsed >= grace_seconds:
+        if not alerted and elapsed >= grace_seconds and not suppress:
             return {"fail_since": _iso(fs), "alerted": 1, "alert": "down", "down_seconds": elapsed}
+        # within grace, already alerted, or muted -> keep pending (alerted unchanged)
         return {"fail_since": _iso(fs), "alerted": alerted, "alert": None, "down_seconds": None}
 
     # unknown: leave state untouched
     return {"fail_since": fail_since, "alerted": alerted, "alert": None, "down_seconds": None}
+
+
+def _parse_hhmm(s: str | None) -> time_of_day | None:
+    if not s:
+        return None
+    try:
+        hh, mm = s.strip().split(":")
+        return time_of_day(int(hh), int(mm))
+    except Exception:
+        return None
+
+
+def in_quiet_window(now_local: time_of_day, cfg: dict | None = None) -> bool:
+    """True if the given local wall-clock time falls inside the quiet window.
+    Handles windows that cross midnight (e.g. 23:00-06:00)."""
+    cfg = cfg if cfg is not None else get_monitoring_config()
+    if not cfg.get("quiet_enabled"):
+        return False
+    start = _parse_hhmm(cfg.get("quiet_start"))
+    end = _parse_hhmm(cfg.get("quiet_end"))
+    if start is None or end is None or start == end:
+        return False
+    if start < end:
+        return start <= now_local < end
+    return now_local >= start or now_local < end   # crosses midnight
 
 
 def _grace_seconds() -> int:
@@ -142,8 +173,10 @@ def _process(conn, svc: dict, new: str) -> str:
         conn.commit()
         return prev
 
+    # Quiet window uses local wall-clock time (container TZ), not UTC
+    suppress = in_quiet_window(datetime.now().time())
     r = evaluate(prev, new, svc.get("monitor_fail_since"),
-                 svc.get("monitor_alerted") or 0, _grace_seconds(), now_dt)
+                 svc.get("monitor_alerted") or 0, _grace_seconds(), now_dt, suppress=suppress)
 
     if new != prev:
         conn.execute(

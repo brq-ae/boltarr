@@ -1036,6 +1036,9 @@ class NotificationSettingsIn(BaseModel):
     topic:                Optional[str]  = None
     token:                Optional[str]  = None
     alert_after_minutes:  Optional[int]  = None
+    quiet_enabled:        Optional[bool] = None
+    quiet_start:          Optional[str]  = None
+    quiet_end:            Optional[str]  = None
 
 
 @app.get("/api/settings")
@@ -1048,7 +1051,11 @@ def get_settings():
 
     ntfy = dict(cfg["notifications"])
     ntfy["token"] = _MASKED if ntfy.get("token") else ""
-    ntfy["alert_after_minutes"] = cfg["monitoring"].get("alert_after_minutes", 5)
+    mon = cfg["monitoring"]
+    ntfy["alert_after_minutes"] = mon.get("alert_after_minutes", 5)
+    ntfy["quiet_enabled"] = mon.get("quiet_enabled", False)
+    ntfy["quiet_start"]   = mon.get("quiet_start", "")
+    ntfy["quiet_end"]     = mon.get("quiet_end", "")
     return {"llm": llm, "notifications": ntfy}
 
 
@@ -1083,12 +1090,22 @@ def update_notification_settings(data: NotificationSettingsIn):
     if data.token is not None and data.token != _MASKED:
         ntfy["token"] = data.token.strip()
     cfg["notifications"] = ntfy
+    mon = cfg.setdefault("monitoring", {})
     if data.alert_after_minutes is not None:
-        cfg.setdefault("monitoring", {})["alert_after_minutes"] = max(0, int(data.alert_after_minutes))
+        mon["alert_after_minutes"] = max(0, int(data.alert_after_minutes))
+    if data.quiet_enabled is not None:
+        mon["quiet_enabled"] = data.quiet_enabled
+    if data.quiet_start is not None:
+        mon["quiet_start"] = data.quiet_start.strip()
+    if data.quiet_end is not None:
+        mon["quiet_end"] = data.quiet_end.strip()
     save_config(cfg)
     result = dict(ntfy)
     result["token"] = _MASKED if ntfy.get("token") else ""
-    result["alert_after_minutes"] = cfg.get("monitoring", {}).get("alert_after_minutes", 5)
+    result["alert_after_minutes"] = mon.get("alert_after_minutes", 5)
+    result["quiet_enabled"] = mon.get("quiet_enabled", False)
+    result["quiet_start"]   = mon.get("quiet_start", "")
+    result["quiet_end"]     = mon.get("quiet_end", "")
     return {"ok": True, "notifications": result}
 
 

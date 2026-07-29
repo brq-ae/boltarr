@@ -843,6 +843,20 @@
         <input id="setAlertAfter" type="number" min="0" style="width:64px" value="5">
         <span style="font-size:11px;color:var(--text-3)">minutes (0 = alert immediately)</span>
       </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="setQuietEnabled" onchange="onQuietToggle()"> Quiet hours (mute alerts)
+        </label>
+        <span id="setQuietRange" style="display:none;align-items:center;gap:6px">
+          <span style="font-size:11px;color:var(--text-3)">from</span>
+          <input id="setQuietStart" type="time" value="02:00">
+          <span style="font-size:11px;color:var(--text-3)">to</span>
+          <input id="setQuietEnd" type="time" value="05:00">
+        </span>
+      </div>
+      <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
+        During quiet hours (your local time) alerts are held. Anything still down when the window ends alerts you then.
+      </p>
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn" onclick="testNotification()">📲 Send test</button>
         <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>

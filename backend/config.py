@@ -26,6 +26,11 @@ _DEFAULTS: dict = {
     "monitoring": {
         # Minutes a service must be continuously down before a down-alert fires.
         "alert_after_minutes": 5,
+        # Global quiet window (do-not-disturb): alerts are muted during it, in
+        # local time. Anything still down when it ends alerts then.
+        "quiet_enabled": False,
+        "quiet_start": "",    # "HH:MM"
+        "quiet_end": "",      # "HH:MM"
     },
 }
 
@@ -78,6 +83,12 @@ def get_config() -> dict:
             cfg["monitoring"]["alert_after_minutes"] = int(os.environ["MONITOR_ALERT_MINUTES"])
         except ValueError:
             pass
+    if os.environ.get("MONITOR_QUIET_ENABLED"):
+        cfg["monitoring"]["quiet_enabled"] = os.environ["MONITOR_QUIET_ENABLED"].lower() in ("1", "true", "yes", "on")
+    if os.environ.get("MONITOR_QUIET_START"):
+        cfg["monitoring"]["quiet_start"] = os.environ["MONITOR_QUIET_START"]
+    if os.environ.get("MONITOR_QUIET_END"):
+        cfg["monitoring"]["quiet_end"] = os.environ["MONITOR_QUIET_END"]
 
     return cfg
 

@@ -2335,6 +2335,10 @@ async function openSettings() {
     document.getElementById("setNtfyTopic").value     = n.topic  || "";
     document.getElementById("setNtfyToken").value     = n.token  || "";
     document.getElementById("setAlertAfter").value    = n.alert_after_minutes ?? 5;
+    document.getElementById("setQuietEnabled").checked = !!n.quiet_enabled;
+    if (n.quiet_start) document.getElementById("setQuietStart").value = n.quiet_start;
+    if (n.quiet_end)   document.getElementById("setQuietEnd").value   = n.quiet_end;
+    onQuietToggle();
     document.getElementById("setNtfyTestResult").style.display = "none";
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
@@ -2342,6 +2346,11 @@ async function openSettings() {
 
 function closeSettings() {
   document.getElementById("settingsModal").classList.remove("open");
+}
+
+function onQuietToggle() {
+  const on = document.getElementById("setQuietEnabled").checked;
+  document.getElementById("setQuietRange").style.display = on ? "inline-flex" : "none";
 }
 
 function onSettingsProviderChange() {
@@ -2377,6 +2386,9 @@ async function saveSettings() {
     topic:   document.getElementById("setNtfyTopic").value.trim(),
     token:   document.getElementById("setNtfyToken").value,
     alert_after_minutes: parseInt(document.getElementById("setAlertAfter").value) || 0,
+    quiet_enabled: document.getElementById("setQuietEnabled").checked,
+    quiet_start:   document.getElementById("setQuietStart").value,
+    quiet_end:     document.getElementById("setQuietEnd").value,
   };
   try {
     await api("PUT", "/api/settings", payload);
