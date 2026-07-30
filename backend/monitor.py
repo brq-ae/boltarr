@@ -22,7 +22,7 @@ from datetime import datetime, timezone, time as time_of_day
 import httpx
 
 from .database import get_conn
-from .config import get_monitoring_config
+from .config import get_monitoring_config, get_statuspage_config
 from . import notify
 
 CHECK_INTERVAL = 60          # seconds between sweeps
@@ -356,6 +356,79 @@ def prune_events(retention_days: int = RETENTION_DAYS) -> None:
         conn.commit()
 
 
+# ── Public status page: ticks, payload, push ──────────────────────────────────
+
+def ticks(service_id: int, minutes: int = 60, now: datetime | None = None) -> list[str]:
+    """Per-minute up/down/unknown for the last `minutes`, oldest→newest,
+    derived from the event timeline."""
+    now = now or _now_dt()
+    since = now.timestamp() - minutes * 60
+    since_iso = _iso(datetime.fromtimestamp(since, timezone.utc))
+    with get_conn() as conn:
+        anchor = conn.execute(
+            "SELECT status FROM monitor_events WHERE service_id=? AND ts < ? "
+            "ORDER BY ts DESC LIMIT 1", (service_id, since_iso)).fetchone()
+        evs = [dict(r) for r in conn.execute(
+            "SELECT status, ts FROM monitor_events WHERE service_id=? AND ts >= ? ORDER BY ts",
+            (service_id, since_iso)).fetchall()]
+    points: list[tuple[float, str]] = [(since, anchor["status"] if anchor else "unknown")]
+    for e in evs:
+        t = _parse(e["ts"])
+        if t:
+            points.append((t.timestamp(), e["status"]))
+    out = []
+    for i in range(minutes):
+        slot = since + i * 60 + 30            # middle of each minute
+        state = "unknown"
+        for pts_ts, pts_state in points:
+            if pts_ts <= slot:
+                state = pts_state
+            else:
+                break
+        out.append(state if state in ("up", "down") else "unknown")
+    return out
+
+
+def build_status_payload() -> dict:
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute("""
+            SELECT s.id, s.name, s.public_name, s.monitor_status
+            FROM services s
+            WHERE s.public = 1 AND s.monitored = 1
+            ORDER BY COALESCE(NULLIF(TRIM(s.public_name), ''), s.name)
+        """).fetchall()]
+    services = []
+    for r in rows:
+        up = uptime(r["id"], 86400)
+        services.append({
+            "key": f"svc-{r['id']}",
+            "name": (r.get("public_name") or "").strip() or r["name"],
+            "status": r.get("monitor_status") or "unknown",
+            "uptime_24h": up["pct"] if up else None,
+            "ticks": ticks(r["id"], 60),
+        })
+    return {"updated_at": _iso(_now_dt()), "title": "Service Status",
+            "services": services, "announcements": []}
+
+
+def push_status() -> tuple[bool, str]:
+    cfg = get_statuspage_config()
+    if not cfg.get("enabled") or not cfg.get("url"):
+        return False, "status page push disabled or no URL"
+    base = cfg["url"].strip().rstrip("/")
+    url = base if base.endswith("/push") else base + "/push"
+    headers = {}
+    if cfg.get("token"):
+        headers["Authorization"] = f"Bearer {cfg['token']}"
+    try:
+        with httpx.Client(timeout=8) as c:
+            r = c.post(url, json=build_status_payload(), headers=headers)
+            r.raise_for_status()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
 # ── Loop ──────────────────────────────────────────────────────────────────────
 
 def _loop() -> None:
@@ -364,6 +437,11 @@ def _loop() -> None:
     while not _stop.is_set():
         try:
             _sweep()
+            # heartbeat push to the public status page (tiny, LAN-only)
+            try:
+                push_status()
+            except Exception:
+                pass
             # prune roughly once a day
             if _now_dt().timestamp() - last_prune > 86400:
                 prune_events()

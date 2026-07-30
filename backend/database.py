@@ -151,6 +151,8 @@ def init_db():
             "ALTER TABLE services ADD COLUMN monitor_last_change TEXT",
             "ALTER TABLE services ADD COLUMN monitor_fail_since TEXT",
             "ALTER TABLE services ADD COLUMN monitor_alerted INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE services ADD COLUMN public INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE services ADD COLUMN public_name TEXT",
             """CREATE TABLE IF NOT EXISTS monitor_events (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

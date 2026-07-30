@@ -1777,6 +1777,10 @@ function showSvcDetail(id) {
   document.getElementById("svcDetailMonitored").checked = !!s.monitored;
   setSvcDetailMonDot(s.monitored ? (s.monitor_status || "unknown") : "off");
 
+  document.getElementById("svcDetailPublic").checked = !!s.public;
+  document.getElementById("svcDetailPublicName").value = s.public_name || "";
+  document.getElementById("svcDetailPublicNameRow").style.display = s.public ? "" : "none";
+
   loadSvcUptime(id, !!s.monitored);
 
   document.getElementById("svcDetailPanel").classList.add("open");
@@ -1834,6 +1838,23 @@ function setSvcDetailMonDot(status) {
   text.textContent = label;
 }
 
+function toggleSvcPublicName() {
+  const on = document.getElementById("svcDetailPublic").checked;
+  document.getElementById("svcDetailPublicNameRow").style.display = on ? "" : "none";
+}
+
+// Saves the public toggle + public name via the dedicated endpoint (never
+// touches other service fields). Called from the detail panel Save.
+async function saveSvcPublic() {
+  if (!svcDetailId) return;
+  const enabled = document.getElementById("svcDetailPublic").checked;
+  const name    = document.getElementById("svcDetailPublicName").value.trim();
+  const r = await api("POST", `/api/services/${svcDetailId}/public`, { enabled, name });
+  allServices = allServices.map(s => s.id === svcDetailId
+    ? { ...s, public: enabled ? 1 : 0, public_name: name } : s);
+  return r;
+}
+
 async function toggleSvcMonitor() {
   if (!svcDetailId) return;
   const on = document.getElementById("svcDetailMonitored").checked;
@@ -1889,6 +1910,7 @@ async function saveSvcDetail() {
     const svc = await api("PUT", `/api/services/${svcDetailId}`, {
       name, port, protocol: proto, url, description: desc, status: svcDetailStatus,
     });
+    await saveSvcPublic();   // public toggle + public name (dedicated, safe endpoint)
     allServices = allServices.map(s => s.id === svcDetailId ? { ...s, ...svc } : s);
     const hostIp = allServices.find(s => s.id === svcDetailId)?.ip;
     const row = document.getElementById(`svc-row-${svcDetailId}`);
@@ -1896,6 +1918,7 @@ async function saveSvcDetail() {
     renderServicesTable();
     if (currentSvcTab === "topology") renderSvcTopology();
     _setSvcDetailIcon(name);
+    showToast("Service saved");
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -2363,7 +2386,7 @@ const PROVIDER_KEY_PLACEHOLDER = {
 
 async function openSettings() {
   try {
-    const { llm, notifications } = await api("GET", "/api/settings");
+    const { llm, notifications, statuspage } = await api("GET", "/api/settings");
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
@@ -2384,6 +2407,12 @@ async function openSettings() {
     if (n.quiet_end)   document.getElementById("setQuietEnd").value   = n.quiet_end;
     onQuietToggle();
     document.getElementById("setNtfyTestResult").style.display = "none";
+
+    const sp = statuspage || {};
+    document.getElementById("setSpEnabled").checked = !!sp.enabled;
+    document.getElementById("setSpUrl").value   = sp.url   || "";
+    document.getElementById("setSpToken").value = sp.token || "";
+    document.getElementById("setSpTestResult").style.display = "none";
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
 }
@@ -2434,15 +2463,47 @@ async function saveSettings() {
     quiet_start:   document.getElementById("setQuietStart").value,
     quiet_end:     document.getElementById("setQuietEnd").value,
   };
+  const spPayload = {
+    enabled: document.getElementById("setSpEnabled").checked,
+    url:     document.getElementById("setSpUrl").value.trim(),
+    token:   document.getElementById("setSpToken").value,
+  };
   try {
     await api("PUT", "/api/settings", payload);
     await api("PUT", "/api/settings/notifications", ntfyPayload);
+    await api("PUT", "/api/settings/statuspage", spPayload);
     closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
     showToast("Settings saved");
   } catch (e) {
     alert("Failed to save settings: " + e.message);
+  }
+}
+
+async function testStatusPush() {
+  const resultEl = document.getElementById("setSpTestResult");
+  resultEl.style.display = "";
+  resultEl.className = "settings-test-result";
+  resultEl.textContent = "Saving & pushing…";
+  try {
+    // save current values first so the push uses what's typed
+    await api("PUT", "/api/settings/statuspage", {
+      enabled: document.getElementById("setSpEnabled").checked,
+      url:     document.getElementById("setSpUrl").value.trim(),
+      token:   document.getElementById("setSpToken").value,
+    });
+    const r = await api("POST", "/api/statuspage/test");
+    if (r.ok) {
+      resultEl.className = "settings-test-result ok";
+      resultEl.textContent = "✓ Pushed to the status app";
+    } else {
+      resultEl.className = "settings-test-result err";
+      resultEl.textContent = "✗ " + (r.error || "failed");
+    }
+  } catch (e) {
+    resultEl.className = "settings-test-result err";
+    resultEl.textContent = "✗ " + e.message;
   }
 }
 

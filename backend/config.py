@@ -32,6 +32,13 @@ _DEFAULTS: dict = {
         "quiet_start": "",    # "HH:MM"
         "quiet_end": "",      # "HH:MM"
     },
+    # Public status page push (LAN → separate status container). Real values
+    # live in data/config.yaml (gitignored) — keep generic here.
+    "statuspage": {
+        "enabled": False,
+        "url": "",            # base URL of the status app, e.g. http://192.168.1.20:8081
+        "token": "",          # shared secret; sent as Bearer on /push
+    },
 }
 
 
@@ -40,6 +47,7 @@ def get_config() -> dict:
         "llm": dict(_DEFAULTS["llm"]),
         "notifications": dict(_DEFAULTS["notifications"]),
         "monitoring": dict(_DEFAULTS["monitoring"]),
+        "statuspage": dict(_DEFAULTS["statuspage"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -50,6 +58,8 @@ def get_config() -> dict:
             cfg["notifications"].update({k: v for k, v in raw["notifications"].items() if v is not None})
         if "monitoring" in raw:
             cfg["monitoring"].update({k: v for k, v in raw["monitoring"].items() if v is not None})
+        if "statuspage" in raw:
+            cfg["statuspage"].update({k: v for k, v in raw["statuspage"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -90,6 +100,14 @@ def get_config() -> dict:
     if os.environ.get("MONITOR_QUIET_END"):
         cfg["monitoring"]["quiet_end"] = os.environ["MONITOR_QUIET_END"]
 
+    # status page push env overrides
+    if os.environ.get("STATUSPAGE_ENABLED"):
+        cfg["statuspage"]["enabled"] = os.environ["STATUSPAGE_ENABLED"].lower() in ("1", "true", "yes", "on")
+    if os.environ.get("STATUSPAGE_URL"):
+        cfg["statuspage"]["url"] = os.environ["STATUSPAGE_URL"]
+    if os.environ.get("STATUSPAGE_TOKEN"):
+        cfg["statuspage"]["token"] = os.environ["STATUSPAGE_TOKEN"]
+
     return cfg
 
 
@@ -99,6 +117,10 @@ def get_llm_config() -> dict:
 
 def get_monitoring_config() -> dict:
     return get_config()["monitoring"]
+
+
+def get_statuspage_config() -> dict:
+    return get_config()["statuspage"]
 
 
 def get_notifications_config() -> dict:

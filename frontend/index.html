@@ -861,6 +861,29 @@
         <button class="btn" onclick="testNotification()">📲 Send test</button>
         <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
+
+      <div class="sidebar-divider" style="margin:4px 0"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">🌐 Public status page</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="setSpEnabled"> Enabled
+        </label>
+      </div>
+      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+        Boltarr pushes a sanitized status of services you mark "public" to a separate status app over your LAN.
+      </p>
+      <div class="form-row">
+        <label>Status app URL</label>
+        <input id="setSpUrl" type="text" placeholder="http://192.168.1.20:8081">
+      </div>
+      <div class="form-row">
+        <label>Token</label>
+        <input id="setSpToken" type="password" placeholder="shared secret">
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn" onclick="testStatusPush()">🌐 Push now</button>
+        <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
+      </div>
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="testLLMConnection()">⚡ Test AI</button>
@@ -904,6 +927,17 @@
         <span id="svcDetailMonitorDot" class="mon-dot mon-unknown"></span>
         <span id="svcDetailMonitorText" style="font-size:11px;color:var(--text-3)">off</span>
       </label>
+    </div>
+    <div class="svc-detail-field">
+      <label>Public status page</label>
+      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:26px" title="Show this service on the public status page (requires Monitor on)">
+        <input type="checkbox" id="svcDetailPublic" onchange="toggleSvcPublicName()">
+        <span style="font-size:11px;color:var(--text-3)">show publicly</span>
+      </label>
+    </div>
+    <div class="svc-detail-field svc-detail-field-wide" id="svcDetailPublicNameRow" style="display:none">
+      <label>Public name (optional)</label>
+      <input type="text" id="svcDetailPublicName" placeholder="Defaults to the service name">
     </div>
     <div class="svc-detail-field svc-detail-field-wide">
       <label>URL</label>

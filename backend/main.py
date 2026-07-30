@@ -602,12 +602,41 @@ def set_service_monitor(svc_id: int, data: MonitorToggleIn):
             status = monitor.check_now(svc_id)["status"]
         except Exception:
             pass
+    try:
+        monitor.push_status()   # keep public page in sync
+    except Exception:
+        pass
     return {"id": svc_id, "monitored": data.enabled, "monitor_status": status}
 
 
 @app.post("/api/services/{svc_id}/check")
 def check_service_now(svc_id: int):
     return monitor.check_now(svc_id)
+
+
+class PublicToggleIn(BaseModel):
+    enabled: bool
+    name:    Optional[str] = None   # public label; None leaves it unchanged
+
+
+@app.post("/api/services/{svc_id}/public")
+def set_service_public(svc_id: int, data: PublicToggleIn):
+    """Toggle whether a service appears on the public status page, and set its
+    public label. Only touches the public fields (never other service data)."""
+    with get_conn() as conn:
+        s = conn.execute("SELECT id FROM services WHERE id=?", (svc_id,)).fetchone()
+        if not s:
+            raise HTTPException(404, "Service not found")
+        conn.execute("UPDATE services SET public=? WHERE id=?", (1 if data.enabled else 0, svc_id))
+        if data.name is not None:
+            conn.execute("UPDATE services SET public_name=? WHERE id=?", (data.name.strip(), svc_id))
+        conn.commit()
+    # reflect immediately on the public page
+    try:
+        monitor.push_status()
+    except Exception:
+        pass
+    return {"id": svc_id, "public": data.enabled}
 
 
 @app.get("/api/services/{svc_id}/uptime")
@@ -1050,6 +1079,12 @@ class NotificationSettingsIn(BaseModel):
     quiet_end:            Optional[str]  = None
 
 
+class StatusPageSettingsIn(BaseModel):
+    enabled: Optional[bool] = None
+    url:     Optional[str]  = None
+    token:   Optional[str]  = None
+
+
 @app.get("/api/settings")
 def get_settings():
     cfg = get_config()
@@ -1065,7 +1100,10 @@ def get_settings():
     ntfy["quiet_enabled"] = mon.get("quiet_enabled", False)
     ntfy["quiet_start"]   = mon.get("quiet_start", "")
     ntfy["quiet_end"]     = mon.get("quiet_end", "")
-    return {"llm": llm, "notifications": ntfy}
+
+    sp = dict(cfg["statuspage"])
+    sp["token"] = _MASKED if sp.get("token") else ""
+    return {"llm": llm, "notifications": ntfy, "statuspage": sp}
 
 
 @app.put("/api/settings")
@@ -1136,6 +1174,27 @@ def test_notification(data: NotificationSettingsIn):
         message="Test notification — your Boltarr alerts are working.",
         tags=["white_check_mark"],
     )
+    return {"ok": ok, "error": err}
+
+
+@app.put("/api/settings/statuspage")
+def update_statuspage_settings(data: StatusPageSettingsIn):
+    cfg = get_config()
+    sp = cfg.get("statuspage", {})
+    if data.enabled is not None: sp["enabled"] = data.enabled
+    if data.url     is not None: sp["url"]     = data.url.strip().rstrip("/")
+    if data.token is not None and data.token != _MASKED:
+        sp["token"] = data.token.strip()
+    cfg["statuspage"] = sp
+    save_config(cfg)
+    result = dict(sp)
+    result["token"] = _MASKED if sp.get("token") else ""
+    return {"ok": True, "statuspage": result}
+
+
+@app.post("/api/statuspage/test")
+def test_statuspage_push():
+    ok, err = monitor.push_status()
     return {"ok": ok, "error": err}
 
 
