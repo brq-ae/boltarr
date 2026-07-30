@@ -4,14 +4,18 @@
 
 # Boltarr
 
-A self-hosted network dashboard for mapping, monitoring, and analyzing your local network. Scan subnets, visualize topology, track devices, manage VLANs, and chat with an AI assistant that knows your network.
+A self-hosted network dashboard for mapping, monitoring, and analyzing your local network. Scan subnets, visualize topology, track devices, manage VLANs, monitor service uptime, and chat with an AI assistant that knows your network.
+
+**📖 New here? See the [Usage guide](docs/USAGE.md)** for how to operate Boltarr day-to-day.
 
 ## Features
 
 - **Topology view** — interactive Cytoscape.js graph with drag-and-drop layout, VLAN coloring, connection types (wired/wifi/fiber/DAC/virtual)
 - **Network scanning** — nmap-powered host and port discovery
 - **Device management** — add/edit/delete hosts, merge multi-homed devices, annotate with notes
-- **Services registry** — track running services per host with status and URLs
+- **Services registry** — track running services per host, with a services topology and dependencies
+- **Service uptime monitor** — Uptime-Kuma-style up/down checks, ntfy alerts with a grace period, quiet hours, and 24h/7d/30d uptime history
+- **Public status page** — push a sanitized status summary to a separate, internet-facing page over your LAN
 - **VLAN management** — define VLANs, assign them to connections, visualize on topology
 - **AI analysis** — per-host and network-wide analysis; AI chat assistant with full network context
 - **AI optional** — works without AI; supports Ollama, OpenAI-compatible APIs, and Anthropic
