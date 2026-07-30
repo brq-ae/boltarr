@@ -178,10 +178,11 @@ services are up — **without exposing Boltarr itself**. Boltarr only ever pushe
 a sanitized summary (public name, up/down, uptime, ticks — *no IPs, ports, or
 internal detail*) one-way over your LAN to a small separate status app.
 
-The status app is a tiny container you run yourself on a separate host — a
-minimal web app that accepts the pushed JSON on a token-protected endpoint and
-serves it as a read-only page. This guide covers the **Boltarr side** (marking
-services public and configuring the push).
+The status app ships with Boltarr in [`../statuspage/`](../statuspage) — a tiny
+container you run **on a separate host**. See its
+[README](../statuspage/README.md) to deploy it (copy `.env.example` → `.env`,
+set a token, `docker compose up -d`). This section covers the **Boltarr side**
+(marking services public and configuring the push).
 
 **1. Mark services public.** In a service's detail panel, tick **Public status
 page** and optionally set a **Public name** (what strangers see, e.g. "Photos"

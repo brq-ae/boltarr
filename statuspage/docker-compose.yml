@@ -1,0 +1,12 @@
+services:
+  boltarr-status:
+    build: .
+    container_name: boltarr-status
+    restart: unless-stopped
+    ports:
+      # host:container — change the LEFT (host) port if 8080 is already in use
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
