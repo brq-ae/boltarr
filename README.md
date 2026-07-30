@@ -14,7 +14,7 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 - **Network scanning** — nmap-powered host and port discovery
 - **Device management** — add/edit/delete hosts, merge multi-homed devices, annotate with notes
 - **Services registry** — track running services per host, with a services topology and dependencies
-- **Service uptime monitor** — Uptime-Kuma-style up/down checks, ntfy alerts with a grace period, quiet hours, and 24h/7d/30d uptime history
+- **Service uptime monitor** — up/down checks, ntfy alerts with a grace period, quiet hours, and 24h/7d/30d uptime history
 - **Public status page** — push a sanitized status summary to a separate, internet-facing page over your LAN
 - **VLAN management** — define VLANs, assign them to connections, visualize on topology
 - **AI analysis** — per-host and network-wide analysis; AI chat assistant with full network context
