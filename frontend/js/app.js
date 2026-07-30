@@ -2481,6 +2481,17 @@ async function saveSettings() {
   }
 }
 
+function generateStatusToken() {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+  const el = document.getElementById("setSpToken");
+  el.type = "text";                        // reveal so it can be copied
+  el.value = "boltarr_status_" + hex;
+  el.focus(); el.select();
+  showToast("Token generated — Save here, and put the same value in the status app's .env");
+}
+
 async function testStatusPush() {
   const resultEl = document.getElementById("setSpTestResult");
   resultEl.style.display = "";

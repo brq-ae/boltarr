@@ -876,10 +876,14 @@
         <label>Status app URL</label>
         <input id="setSpUrl" type="text" placeholder="http://192.168.1.20:8081">
       </div>
-      <div class="form-row">
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Token</label>
-        <input id="setSpToken" type="password" placeholder="shared secret">
+        <input id="setSpToken" type="password" placeholder="shared secret" style="flex:1;min-width:160px">
+        <button class="btn" type="button" onclick="generateStatusToken()" title="Generate a random token, then copy it into the status app's .env">Generate</button>
       </div>
+      <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
+        The same token must be set in the status app's <code>.env</code> (<code>STATUS_TOKEN</code>).
+      </p>
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn" onclick="testStatusPush()">🌐 Push now</button>
         <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>

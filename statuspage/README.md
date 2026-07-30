@@ -15,15 +15,34 @@ Boltarr (internal)  --LAN push /push (token)-->  status app  --HTTPS-->  visitor
 
 ## Deploy (Docker)
 
+The compose file pulls a prebuilt image (`brqae/boltarr-statuspage:latest`) —
+no build step needed.
+
 ```bash
 # from this folder
 cp .env.example .env
-# edit .env and set STATUS_TOKEN to a long random secret
-docker compose up -d --build
+# edit .env and set STATUS_TOKEN (see "Token" below)
+docker compose up -d
 ```
 
-The app now listens on port **8080** (change the host port in
-`docker-compose.yml` if that's taken). Test it:
+> Prefer to build from source? Comment the `image:` line in
+> `docker-compose.yml` and uncomment `build: .`, then run
+> `docker compose up -d --build`.
+
+The app listens on port **8080** (change the host port in
+`docker-compose.yml` if that's taken).
+
+### Token
+
+`STATUS_TOKEN` is a shared secret — the same value goes in this app's `.env`
+**and** in Boltarr (Settings → Public status page → Token). Generate one either
+way:
+
+- **In Boltarr:** Settings → Public status page → **Generate** — copy the value
+  into `.env` here.
+- **On the CLI:** `openssl rand -hex 32`
+
+Test it:
 
 ```bash
 curl http://localhost:8080/healthz          # -> ok

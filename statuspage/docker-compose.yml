@@ -1,6 +1,9 @@
 services:
   boltarr-status:
-    build: .
+    image: brqae/boltarr-statuspage:latest
+    # To build from source instead of pulling the published image, comment the
+    # `image:` line above and uncomment the line below (then use `up -d --build`):
+    # build: .
     container_name: boltarr-status
     restart: unless-stopped
     ports:
