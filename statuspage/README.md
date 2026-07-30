@@ -29,7 +29,7 @@ docker compose up -d
 > `docker-compose.yml` and uncomment `build: .`, then run
 > `docker compose up -d --build`.
 
-The app listens on port **8080** (change the host port in
+The app listens on port **12102** (change the host port in
 `docker-compose.yml` if that's taken).
 
 ### Token
@@ -45,22 +45,22 @@ way:
 Test it:
 
 ```bash
-curl http://localhost:8080/healthz          # -> ok
+curl http://localhost:12102/healthz          # -> ok
 # push a sample payload (use your token):
-curl -X POST http://localhost:8080/push \
+curl -X POST http://localhost:12102/push \
   -H "Authorization: Bearer <your STATUS_TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"updated_at":"2025-01-01T00:00:00Z","title":"Service Status","services":[{"key":"a","name":"Example","status":"up","uptime_24h":99.9,"ticks":["up","up","down","up"]}],"announcements":[]}'
 ```
 
-Open `http://<this-host>:8080/` — you should see the sample service.
+Open `http://<this-host>:12102/` — you should see the sample service.
 
 ## Connect Boltarr to it
 
 In Boltarr → **Settings → Public status page**:
 
 - **Enabled:** on
-- **Status app URL:** `http://<this-host-LAN-IP>:8080`
+- **Status app URL:** `http://<this-host-LAN-IP>:12102`
 - **Token:** the same `STATUS_TOKEN` you set in `.env`
 
 Then mark services **public** in each service's detail panel. Boltarr pushes on
@@ -68,7 +68,7 @@ change plus a ~60-second heartbeat.
 
 ## Expose it publicly (reverse proxy)
 
-Point a subdomain (e.g. `status.example.com`) at this host's `IP:8080` through
+Point a subdomain (e.g. `status.example.com`) at this host's `IP:12102` through
 your reverse proxy, with HTTPS.
 
 > **⚠️ Block the push path.** A reverse proxy forwards *all* paths by default, so
@@ -79,7 +79,7 @@ your reverse proxy, with HTTPS.
 > location /push { deny all; }
 > ```
 >
-> Boltarr's push goes directly to `IP:8080` over the LAN and bypasses the proxy,
+> Boltarr's push goes directly to `IP:12102` over the LAN and bypasses the proxy,
 > so it keeps working.
 
 ## Endpoints

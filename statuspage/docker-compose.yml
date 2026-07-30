@@ -7,8 +7,8 @@ services:
     container_name: boltarr-status
     restart: unless-stopped
     ports:
-      # host:container — change the LEFT (host) port if 8080 is already in use
-      - "8080:8080"
+      # host:container — change the LEFT (host) port if 12102 is already in use
+      - "12102:12102"
     env_file:
       - .env
     volumes:

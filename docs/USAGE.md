@@ -193,7 +193,7 @@ public appear.
 
 - **Enabled** — on/off.
 - **Status app URL** — the LAN address of your status app, e.g.
-  `http://192.168.1.20:8081`.
+  `http://192.168.1.20:12102`.
 - **Token** — a shared secret sent with each push.
 - **Push now** — sends immediately so you can verify the page updates.
 

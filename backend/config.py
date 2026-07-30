@@ -36,7 +36,7 @@ _DEFAULTS: dict = {
     # live in data/config.yaml (gitignored) — keep generic here.
     "statuspage": {
         "enabled": False,
-        "url": "",            # base URL of the status app, e.g. http://192.168.1.20:8081
+        "url": "",            # base URL of the status app, e.g. http://192.168.1.20:12102
         "token": "",          # shared secret; sent as Bearer on /push
     },
 }
