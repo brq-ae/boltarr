@@ -12,14 +12,18 @@ A practical guide to operating Boltarr day-to-day. For installation, see the
 
 1. [First run](#first-run)
 2. [Subnets & scanning](#subnets--scanning)
-3. [Topology view](#topology-view)
-4. [Hosts](#hosts)
-5. [Services](#services)
-6. [Service monitor (uptime)](#service-monitor-uptime)
-7. [Notifications (ntfy)](#notifications-ntfy)
-8. [Public status page](#public-status-page)
-9. [SSH key management](#ssh-key-management)
-10. [Backup & restore](#backup--restore)
+3. [Scheduled scans](#scheduled-scans)
+4. [Change tracking & alerts](#change-tracking--alerts)
+5. [Host liveness (offline/online)](#host-liveness-offlineonline)
+6. [Timezone](#timezone)
+7. [Topology view](#topology-view)
+8. [Hosts](#hosts)
+9. [Services](#services)
+10. [Service monitor (uptime)](#service-monitor-uptime)
+11. [Notifications (ntfy)](#notifications-ntfy)
+12. [Public status page](#public-status-page)
+13. [SSH key management](#ssh-key-management)
+14. [Backup & restore](#backup--restore)
 
 ---
 
@@ -43,16 +47,93 @@ name and a CIDR (e.g. `192.168.1.0/24`). Each subnet row has:
 - **👁 eye** — show/hide that subnet's nodes in the topology graph.
 - **✕** — remove the subnet (this does *not* delete already-discovered hosts).
 
-**Scan progress** is shown live in the **Scans** tab, which also keeps a history
-of past runs.
+**The Scans tab** has four sub-tabs: **Run · Schedules · History · Changes.**
+
+**Run** is a visual nmap builder. Pick a target subnet and a **scan profile**,
+then tune the options — ports (none/top-1000/top-N/all/custom range), service &
+version detection (`-sV`), OS detection (`-O`), timing (`T0`–`T5`), skip host
+discovery (`-Pn`), UDP (`-sU`), and NSE scripts — with a live command preview.
+Save any combination as a reusable **custom profile**. Built-in profiles: Quick
+(discovery only), Standard (top-1000 + version/OS), Full (all ports).
+
+**History** shows every run with live progress bars and elapsed timers while
+running, the duration and timestamp when done, and skipped runs with their
+reason. Scheduled runs are badged with the schedule name.
 
 **Probe a single host:** from a host's detail panel you can re-probe just that
 host — useful to refresh its open ports or pick up a newly-found MAC address.
 Once a scan finds a host's MAC, the host is marked `scanned` (vs `manual`).
 
-**Static vs DHCP:** set a subnet's DHCP pool range so hosts outside it are
-treated as static. Manually-added hosts are tagged `manual` until a scan
-confirms them.
+**Static vs DHCP:** set a subnet's DHCP pool range (edit a subnet via the ✎
+pencil) so hosts inside it are classified **dynamic** and those outside
+**static**. You can override a host's classification in its edit dialog.
+Manually-added hosts are tagged `manual` until a scan confirms them.
+
+---
+
+## Scheduled scans
+
+The **Scans → Schedules** sub-tab runs scans for you automatically. Findings
+flow into Change tracking and alerts just like a manual scan.
+
+Each schedule has:
+
+- **Target** — all subnets or one specific subnet, and which hosts within it:
+  *whole range* (the only mode that discovers brand-new devices), or just
+  *static* / *dynamic* / *unknown* known hosts.
+- **Profile** — any scan profile (built-in or your custom ones).
+- **Timing** — either **every N hours** (optionally *starting at* a clock time,
+  e.g. "every 6 hours from 03:00", which aligns the runs to the clock), or on
+  **chosen weekdays at a time**.
+
+Each row shows an enable/disable switch, **last run** and computed **next run**
+(absolute + relative, e.g. "Aug 1, 3:00 AM · in 6h"), plus **Run now**, edit and
+delete. Times are interpreted in your configured [timezone](#timezone). If a
+schedule comes due while a scan of that subnet is still running, the run is
+skipped (and logged in History) so scans never stack.
+
+---
+
+## Change tracking & alerts
+
+Every scan is diffed against the last known state. **Settings → Change tracking**
+controls what's recorded (new hosts, opened/closed ports, MAC/hostname changes,
+offline/online) and how long to keep it (retention days). Recorded changes show
+in the **Scans → Changes** feed and per-host **Changes** tab; click a row to jump
+to that host.
+
+**Settings → Change alerts** turns recorded changes into ntfy notifications,
+delivered as a **per-scan summary** and/or a **daily digest** at a time you set.
+New-host and MAC-change alerts are scoped to **static** IPs (with a per-host
+opt-out in the host's edit dialog). All alerts respect quiet hours.
+
+*"Port closed" is only recorded for ports a scan actually covered, so a shallow
+scan never false-flags a deeper scan's ports.*
+
+---
+
+## Host liveness (offline/online)
+
+A light background **ping sweep** (`nmap -sn`) marks each known host online or
+offline — the coloured dot next to each IP in the Hosts table (green online /
+red offline / grey unknown). A host goes offline after a few consecutive missed
+sweeps and back online on the first response, so brief blips don't false-alarm.
+
+Configure it in **Settings → Liveness** (enable, sweep interval, offline-after
+threshold). Offline/online transitions are recorded as changes and — for static
+hosts, unless opted out — fire an immediate, quiet-hours-aware ntfy alert. First
+activation is silent (no alert storm); alerts only fire on a real later
+transition.
+
+---
+
+## Timezone
+
+**Settings → General → Timezone** sets an IANA timezone (e.g. `Asia/Dubai`). It
+drives all time-of-day logic — schedule fire times, quiet hours, the daily
+digest — and how times are displayed throughout the app. Leave it as *Server
+default* to use the server's own clock (UTC in most containers). Set it to your
+local zone so "03:00" means 3 AM where you are.
 
 ---
 

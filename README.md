@@ -4,14 +4,20 @@
 
 # Boltarr
 
-A self-hosted network dashboard for mapping, monitoring, and analyzing your local network. Scan subnets, visualize topology, track devices, manage VLANs, monitor service uptime, and chat with an AI assistant that knows your network.
+A self-hosted network dashboard for mapping, monitoring, and analyzing your local network. Scan subnets on a schedule, track what changes between scans, detect when hosts go offline, visualize topology, manage VLANs, monitor service uptime, and chat with an AI assistant that knows your network.
 
 **📖 New here? See the [Usage guide](docs/USAGE.md)** for how to operate Boltarr day-to-day.
 
 ## Features
 
 - **Topology view** — interactive Cytoscape.js graph with drag-and-drop layout, VLAN coloring, connection types (wired/wifi/fiber/DAC/virtual)
-- **Network scanning** — nmap-powered host and port discovery
+- **Network scanning** — nmap-powered host and port discovery with a visual scan builder and reusable scan profiles (Quick/Standard/Full + custom)
+- **Scheduled scans** — run scans automatically on an interval (optionally clock-anchored) or on chosen weekdays; target all subnets or one, and the whole range or just static/dynamic hosts
+- **Change tracking** — records what each scan finds different vs. before (new hosts, opened/closed ports, MAC/hostname changes), with a per-type retention window
+- **Change alerts** — ntfy notifications for recorded changes as a per-scan summary and/or a daily digest; new-host and MAC alerts scoped to static IPs with per-host opt-outs
+- **Host liveness** — a light background ping tier marks hosts online/offline and alerts on transitions
+- **Timezone-aware** — a configurable timezone drives schedule times, quiet hours, the digest, and how times are displayed
+- **DHCP-aware classification** — per-subnet DHCP range classifies hosts as static or dynamic
 - **Device management** — add/edit/delete hosts, merge multi-homed devices, annotate with notes
 - **Services registry** — track running services per host, with a services topology and dependencies
 - **Service uptime monitor** — up/down checks, ntfy alerts with a grace period, quiet hours, and 24h/7d/30d uptime history
