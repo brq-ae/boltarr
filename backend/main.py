@@ -248,6 +248,27 @@ def delete_scan_profile(pid: int):
     return {"ok": True}
 
 
+# ── Change-tracking log ───────────────────────────────────────────────────────
+
+@app.get("/api/change-events")
+def list_change_events(ip: Optional[str] = None, limit: int = 200):
+    with get_conn() as conn:
+        if ip:
+            rows = conn.execute("SELECT * FROM change_events WHERE ip=? ORDER BY ts DESC LIMIT ?",
+                                (ip, limit)).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM change_events ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.delete("/api/change-events")
+def clear_change_events():
+    with get_conn() as conn:
+        conn.execute("DELETE FROM change_events")
+        conn.commit()
+    return {"ok": True}
+
+
 @app.get("/api/scan/{run_id}/status")
 def scan_status(run_id: int):
     if run_id in scan_jobs:
@@ -1266,7 +1287,33 @@ def get_settings():
 
     sp = dict(cfg["statuspage"])
     sp["token"] = _MASKED if sp.get("token") else ""
-    return {"llm": llm, "notifications": ntfy, "statuspage": sp}
+    return {"llm": llm, "notifications": ntfy, "statuspage": sp,
+            "change_tracking": dict(cfg["change_tracking"])}
+
+
+class ChangeTrackingIn(BaseModel):
+    enabled:          Optional[bool] = None
+    host_new:         Optional[bool] = None
+    port_opened:      Optional[bool] = None
+    port_closed:      Optional[bool] = None
+    mac_changed:      Optional[bool] = None
+    hostname_changed: Optional[bool] = None
+    retention_days:   Optional[int]  = None
+
+
+@app.put("/api/settings/change-tracking")
+def update_change_tracking(data: ChangeTrackingIn):
+    cfg = get_config()
+    ct = cfg.get("change_tracking", {})
+    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed", "hostname_changed"):
+        v = getattr(data, f)
+        if v is not None:
+            ct[f] = v
+    if data.retention_days is not None:
+        ct["retention_days"] = max(1, int(data.retention_days))
+    cfg["change_tracking"] = ct
+    save_config(cfg)
+    return {"ok": True, "change_tracking": ct}
 
 
 @app.put("/api/settings")

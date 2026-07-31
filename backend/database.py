@@ -181,6 +181,20 @@ def init_db():
                 builtin  INTEGER NOT NULL DEFAULT 0,
                 options  TEXT NOT NULL DEFAULT '{}'
             )""",
+            # Change-tracking log: what a scan found different vs. the last known
+            # state. type: host_new | port_opened | port_closed | mac_changed |
+            # hostname_changed. Pruned to a configurable retention window.
+            """CREATE TABLE IF NOT EXISTS change_events (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts        TEXT NOT NULL,
+                ip        TEXT NOT NULL,
+                type      TEXT NOT NULL,
+                port      INTEGER,
+                old_value TEXT,
+                new_value TEXT
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_change_events_ts ON change_events(ts)",
+            "CREATE INDEX IF NOT EXISTS idx_change_events_ip ON change_events(ip, ts)",
         ]:
             try:
                 conn.execute(sql)

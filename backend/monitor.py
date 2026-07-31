@@ -445,6 +445,11 @@ def _loop() -> None:
             # prune roughly once a day
             if _now_dt().timestamp() - last_prune > 86400:
                 prune_events()
+                try:
+                    from . import changes
+                    changes.prune()
+                except Exception:
+                    pass
                 last_prune = _now_dt().timestamp()
         except Exception:
             pass

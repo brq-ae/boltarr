@@ -157,6 +157,7 @@
           <div class="svc-subtabs">
             <button class="svc-subtab active" id="scanTabBtn-run" onclick="setScanTab('run')">Run</button>
             <button class="svc-subtab" id="scanTabBtn-history" onclick="setScanTab('history')">History</button>
+            <button class="svc-subtab" id="scanTabBtn-changes" onclick="setScanTab('changes')">Changes</button>
           </div>
         </div>
 
@@ -229,6 +230,16 @@
         <!-- History -->
         <div id="scan-panel-history" style="display:none">
           <div class="scans-wrap" id="scansWrap"></div>
+        </div>
+
+        <!-- Changes -->
+        <div id="scan-panel-changes" style="display:none">
+          <div class="scans-toolbar" style="padding:10px 16px">
+            <span style="font-size:11px;color:var(--text-3)" id="changesCount"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="clearChanges()">Clear all</button>
+          </div>
+          <div id="changesList" style="padding:0 16px 16px"></div>
         </div>
       </div>
 
@@ -984,6 +995,29 @@
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn" onclick="testStatusPush()">🌐 Push now</button>
         <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
+      </div>
+
+      <div class="sidebar-divider" style="margin:4px 0"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">🕓 Change tracking</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="setCtEnabled"> Enabled
+        </label>
+      </div>
+      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+        Records what each scan finds changed vs. before (new hosts, opened/closed ports, MAC/hostname changes).
+      </p>
+      <div class="scan-checks" style="padding-left:2px">
+        <label><input type="checkbox" id="setCtHostNew"> New host</label>
+        <label><input type="checkbox" id="setCtPortOpened"> Port opened</label>
+        <label><input type="checkbox" id="setCtPortClosed"> Port closed</label>
+        <label><input type="checkbox" id="setCtMacChanged"> MAC changed</label>
+        <label><input type="checkbox" id="setCtHostnameChanged"> Hostname changed</label>
+      </div>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Keep history for</label>
+        <input id="setCtRetention" type="number" min="1" style="width:70px" value="90">
+        <span style="font-size:11px;color:var(--text-3)">days</span>
       </div>
     </div>
     <div class="modal-actions">

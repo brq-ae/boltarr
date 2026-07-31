@@ -39,6 +39,16 @@ _DEFAULTS: dict = {
         "url": "",            # base URL of the status app, e.g. http://192.168.1.20:12102
         "token": "",          # shared secret; sent as Bearer on /push
     },
+    # Scan change-tracking: which changes to record, and how long to keep them.
+    "change_tracking": {
+        "enabled": True,
+        "host_new": True,
+        "port_opened": True,
+        "port_closed": True,
+        "mac_changed": True,
+        "hostname_changed": True,
+        "retention_days": 90,
+    },
 }
 
 
@@ -48,6 +58,7 @@ def get_config() -> dict:
         "notifications": dict(_DEFAULTS["notifications"]),
         "monitoring": dict(_DEFAULTS["monitoring"]),
         "statuspage": dict(_DEFAULTS["statuspage"]),
+        "change_tracking": dict(_DEFAULTS["change_tracking"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -60,6 +71,8 @@ def get_config() -> dict:
             cfg["monitoring"].update({k: v for k, v in raw["monitoring"].items() if v is not None})
         if "statuspage" in raw:
             cfg["statuspage"].update({k: v for k, v in raw["statuspage"].items() if v is not None})
+        if "change_tracking" in raw:
+            cfg["change_tracking"].update({k: v for k, v in raw["change_tracking"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -121,6 +134,10 @@ def get_monitoring_config() -> dict:
 
 def get_statuspage_config() -> dict:
     return get_config()["statuspage"]
+
+
+def get_change_tracking_config() -> dict:
+    return get_config()["change_tracking"]
 
 
 def get_notifications_config() -> dict:

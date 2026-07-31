@@ -2,6 +2,7 @@ import threading
 import subprocess
 import nmap
 from .database import get_conn
+from . import changes
 
 # Keyed by run_id: {"status", "progress", "total", "error", "cancelled", "_proc"}
 scan_jobs: dict[int, dict] = {}
@@ -153,6 +154,10 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                 d_vend = list(nm[ip].get("vendor", {}).values())
                 d_vend = d_vend[0] if d_vend else None
                 arow = conn.execute("SELECT host_id FROM host_aliases WHERE ip=?", (ip,)).fetchone()
+                existing = conn.execute("SELECT mac, hostname FROM hosts WHERE ip=?", (ip,)).fetchone()
+                changes.record_meta(conn, ip, existed=(existing is not None or arow is not None),
+                                    old_mac=(existing["mac"] if existing else None), new_mac=d_mac,
+                                    old_host=(existing["hostname"] if existing else None), new_host=d_host)
                 if arow:
                     conn.execute("UPDATE hosts SET last_seen=datetime('now') WHERE id=?", (arow["host_id"],))
                 else:
@@ -196,6 +201,17 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                 nm2.analyse_nmap_xml_scan(xml2)
 
                 if ip not in nm2.all_hosts():
+                    # Host was up in discovery but this scan found no open ports in
+                    # range → any previously-open in-scope ports are now closed.
+                    try:
+                        hr = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
+                        if hr:
+                            old_open = {r["port"] for r in conn.execute(
+                                "SELECT port FROM ports WHERE host_id=? AND protocol='tcp' AND state='open'", (hr["id"],))}
+                            changes.record_ports(conn, ip, hr["id"], old_open, set(), changes.scanned_ports(o))
+                            conn.commit()
+                    except Exception:
+                        pass
                     scanned += 1
                     update(progress=int(scanned / max(len(live_hosts), 1) * 100))
                     continue
@@ -233,6 +249,17 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                     """, (ip, mac, hostname, os_guess, vendor))
                     row = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
                     host_id = row["id"]
+                conn.commit()
+
+                # Change-tracking: diff open TCP ports vs. what we knew, before upsert.
+                old_open = {r["port"] for r in conn.execute(
+                    "SELECT port FROM ports WHERE host_id=? AND protocol='tcp' AND state='open'", (host_id,))}
+                new_open = set()
+                for proto in nm2[ip].all_protocols():
+                    for port, svc in nm2[ip][proto].items():
+                        if proto == "tcp" and svc["state"] == "open":
+                            new_open.add(port)
+                changes.record_ports(conn, ip, host_id, old_open, new_open, changes.scanned_ports(o))
                 conn.commit()
 
                 for proto in nm2[ip].all_protocols():
@@ -340,6 +367,11 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
             vendor_dict = nm[ip].get("vendor", {})
             vendor = list(vendor_dict.values())[0] if vendor_dict else None
 
+            existing = conn.execute("SELECT mac, hostname FROM hosts WHERE ip=?", (ip,)).fetchone()
+            changes.record_meta(conn, ip, existing is not None,
+                                existing["mac"] if existing else None, mac,
+                                existing["hostname"] if existing else None, hostname)
+
             conn.execute("""
                 UPDATE hosts SET
                     mac       = COALESCE(?, mac),
@@ -355,6 +387,15 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
             host_row = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
             if host_row:
                 host_id = host_row["id"]
+                old_open = {r["port"] for r in conn.execute(
+                    "SELECT port FROM ports WHERE host_id=? AND protocol='tcp' AND state='open'", (host_id,))}
+                new_open = set()
+                for proto in nm[ip].all_protocols():
+                    for port, svc in nm[ip][proto].items():
+                        if proto == "tcp" and svc["state"] == "open":
+                            new_open.add(port)
+                changes.record_ports(conn, ip, host_id, old_open, new_open, changes.scanned_ports(probe_o))
+                conn.commit()
                 for proto in nm[ip].all_protocols():
                     for port, svc in nm[ip][proto].items():
                         conn.execute("""

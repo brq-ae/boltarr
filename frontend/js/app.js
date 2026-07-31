@@ -531,6 +531,7 @@ async function showHostDetail(ip) {
       <button class="detail-tab" data-tab="services" onclick="switchDetailTab('services')">Services (${(host.services||[]).length})</button>
       <button class="detail-tab" data-tab="analysis" onclick="switchDetailTab('analysis')">Analysis</button>
       <button class="detail-tab" data-tab="ssh" onclick="switchDetailTab('ssh');loadHostSshSection('${ip}')">SSH</button>
+      <button class="detail-tab" data-tab="changes" onclick="switchDetailTab('changes');loadHostChanges('${ip}')">Changes</button>
     </div>
 
     <div class="detail-body">
@@ -612,6 +613,11 @@ async function showHostDetail(ip) {
 
       <!-- SSH tab -->
       <div class="detail-tab-panel" id="dtab-ssh" style="padding:10px 0"></div>
+
+      <!-- Changes tab -->
+      <div class="detail-tab-panel" id="dtab-changes" style="padding:10px 0">
+        <div id="hostChanges-${ip.replace(/\./g,'_')}"><span style="font-size:11px;color:var(--text-3)">Loading…</span></div>
+      </div>
 
       <!-- Analysis tab -->
       <div class="detail-tab-panel" id="dtab-analysis">
@@ -993,8 +999,64 @@ function setScanTab(tab) {
   currentScanTab = tab;
   document.getElementById("scan-panel-run").style.display     = tab === "run"     ? "" : "none";
   document.getElementById("scan-panel-history").style.display = tab === "history" ? "" : "none";
+  document.getElementById("scan-panel-changes").style.display = tab === "changes" ? "" : "none";
   document.querySelectorAll("#panel-scans .svc-subtab").forEach(b => b.classList.remove("active"));
   document.getElementById(`scanTabBtn-${tab}`)?.classList.add("active");
+  if (tab === "changes") loadChanges();
+}
+
+// ── Change-tracking feed ──────────────────────────────────────────────────────
+
+const _CHANGE_META = {
+  host_new:         { icon: "✦", cls: "chg-new",    text: () => "New host discovered" },
+  port_opened:      { icon: "▲", cls: "chg-open",   text: e => `Port ${e.port} opened` },
+  port_closed:      { icon: "▼", cls: "chg-closed", text: e => `Port ${e.port} closed` },
+  mac_changed:      { icon: "⇄", cls: "chg-id",     text: e => `MAC changed: ${e.old_value||"?"} → ${e.new_value||"?"}` },
+  hostname_changed: { icon: "⇄", cls: "chg-id",     text: e => `Hostname: ${e.old_value||"?"} → ${e.new_value||"?"}` },
+};
+
+function changeEventHTML(e, showIp = true) {
+  const m = _CHANGE_META[e.type] || { icon: "•", cls: "", text: () => e.type };
+  const when = (e.ts || "").replace("T", " ").substring(0, 16);
+  // In the global feed the row is clickable → jump to that host's panel.
+  const click = showIp ? ` style="cursor:pointer" onclick="showHostDetail('${e.ip}')" title="Open ${e.ip}"` : "";
+  const ipPart = showIp ? `<span style="color:var(--accent)">${e.ip}</span> · ` : "";
+  return `<div class="chg-row"${click}>
+    <span class="chg-icon ${m.cls}">${m.icon}</span>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:12px">${m.text(e)}</div>
+      <div class="mono" style="font-size:10px;color:var(--text-3);margin-top:1px">${ipPart}${when}</div>
+    </div>
+  </div>`;
+}
+
+async function loadChanges() {
+  const el = document.getElementById("changesList");
+  const cnt = document.getElementById("changesCount");
+  try {
+    const evs = await api("GET", "/api/change-events?limit=300");
+    if (cnt) cnt.textContent = `${evs.length} change${evs.length === 1 ? "" : "s"}`;
+    el.innerHTML = evs.length
+      ? evs.map(e => changeEventHTML(e, true)).join("")
+      : `<div style="padding:40px;text-align:center;color:var(--text-3);font-size:12px">No changes recorded yet — run a scan.</div>`;
+  } catch { el.innerHTML = ""; }
+}
+
+async function clearChanges() {
+  if (!confirm("Clear the entire change log?")) return;
+  await api("DELETE", "/api/change-events");
+  loadChanges();
+}
+
+async function loadHostChanges(ip) {
+  const el = document.getElementById(`hostChanges-${ip.replace(/\./g, "_")}`);
+  if (!el) return;
+  try {
+    const evs = await api("GET", `/api/change-events?ip=${encodeURIComponent(ip)}&limit=30`);
+    el.innerHTML = evs.length
+      ? evs.map(e => changeEventHTML(e, false)).join("")
+      : `<span style="font-size:11px;color:var(--text-3)">No changes recorded.</span>`;
+  } catch { el.innerHTML = ""; }
 }
 
 function populateScanTarget() {
@@ -2580,7 +2642,7 @@ const PROVIDER_KEY_PLACEHOLDER = {
 
 async function openSettings() {
   try {
-    const { llm, notifications, statuspage } = await api("GET", "/api/settings");
+    const { llm, notifications, statuspage, change_tracking } = await api("GET", "/api/settings");
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
@@ -2607,6 +2669,15 @@ async function openSettings() {
     document.getElementById("setSpUrl").value   = sp.url   || "";
     document.getElementById("setSpToken").value = sp.token || "";
     document.getElementById("setSpTestResult").style.display = "none";
+
+    const ct = change_tracking || {};
+    document.getElementById("setCtEnabled").checked          = !!ct.enabled;
+    document.getElementById("setCtHostNew").checked          = ct.host_new         !== false;
+    document.getElementById("setCtPortOpened").checked       = ct.port_opened      !== false;
+    document.getElementById("setCtPortClosed").checked       = ct.port_closed      !== false;
+    document.getElementById("setCtMacChanged").checked       = ct.mac_changed      !== false;
+    document.getElementById("setCtHostnameChanged").checked  = ct.hostname_changed !== false;
+    document.getElementById("setCtRetention").value          = ct.retention_days ?? 90;
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
 }
@@ -2662,10 +2733,20 @@ async function saveSettings() {
     url:     document.getElementById("setSpUrl").value.trim(),
     token:   document.getElementById("setSpToken").value,
   };
+  const ctPayload = {
+    enabled:          document.getElementById("setCtEnabled").checked,
+    host_new:         document.getElementById("setCtHostNew").checked,
+    port_opened:      document.getElementById("setCtPortOpened").checked,
+    port_closed:      document.getElementById("setCtPortClosed").checked,
+    mac_changed:      document.getElementById("setCtMacChanged").checked,
+    hostname_changed: document.getElementById("setCtHostnameChanged").checked,
+    retention_days:   parseInt(document.getElementById("setCtRetention").value) || 90,
+  };
   try {
     await api("PUT", "/api/settings", payload);
     await api("PUT", "/api/settings/notifications", ntfyPayload);
     await api("PUT", "/api/settings/statuspage", spPayload);
+    await api("PUT", "/api/settings/change-tracking", ctPayload);
     closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
