@@ -84,6 +84,26 @@ def build_command(opts: dict | None, target: str = "") -> str:
     return " ".join(["nmap"] + _detail_args(o) + tgt)
 
 
+def is_subnet_scanning(subnet_id) -> bool:
+    """True if a scan of this subnet is currently live (for the overlap guard)."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id FROM scan_runs WHERE subnet_id=? AND status='running'", (subnet_id,)).fetchall()
+    for r in rows:
+        job = scan_jobs.get(r["id"])
+        if job and job.get("status") not in ("completed", "error", "cancelled"):
+            return True
+    return False
+
+
+def reconcile_orphaned_runs() -> None:
+    """A fresh process means any 'running' scan_runs died with the old one."""
+    with get_conn() as conn:
+        conn.execute("UPDATE scan_runs SET status='error', note=COALESCE(note,'interrupted'), "
+                     "completed_at=COALESCE(completed_at, datetime('now')) WHERE status='running'")
+        conn.commit()
+
+
 def cancel_scan(run_id: int) -> bool:
     with _lock:
         job = scan_jobs.get(run_id)
@@ -131,7 +151,10 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
 
         update(status="discovering", progress=0)
 
-        xml = _run_nmap(["-sn", f"-{o['timing']}", "--min-parallelism", "10", cidr], job)
+        # `cidr` may be a single CIDR ("192.168.1.0/24") or a space-separated list
+        # of specific IPs (host-filtered scheduled scans) — nmap takes many targets.
+        targets = cidr.split()
+        xml = _run_nmap(["-sn", f"-{o['timing']}", "--min-parallelism", "10"] + targets, job)
         if xml is None or is_cancelled():
             mark_cancelled()
             return

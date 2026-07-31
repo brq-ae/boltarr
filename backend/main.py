@@ -21,6 +21,7 @@ from .config import get_config, get_llm_config, get_notifications_config, save_c
 from . import notify
 from . import monitor
 from . import liveness
+from . import scheduler
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
@@ -39,6 +40,7 @@ def startup():
     init_db()
     monitor.start_monitor()
     liveness.start_liveness()
+    scheduler.start_scheduler()
 
 
 @app.get("/api/version")
@@ -154,6 +156,104 @@ def trigger_scan(subnet_id: int, opts: Optional[ScanOptions] = None):
     return {"run_id": run_id, "status": "started"}
 
 
+# ── Scan schedules (automated scans) ──────────────────────────────────────────
+
+class ScanScheduleIn(BaseModel):
+    name:           str
+    enabled:        bool = True
+    subnet_id:      Optional[int] = None       # None = all subnets
+    host_filter:    str = "all"                # all | static | dynamic | unknown
+    profile_id:     Optional[int] = None
+    timing_type:    str = "interval"           # interval | weekly
+    interval_hours: Optional[float] = None
+    days_of_week:   Optional[str] = None       # CSV of 0-6 (Mon=0..Sun=6)
+    at_time:        Optional[str] = None       # 'HH:MM'
+
+
+def _sched_row(r) -> dict:
+    return dict(r)
+
+
+@app.get("/api/scan-schedules")
+def list_scan_schedules():
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT sc.*, s.name AS subnet_name, p.name AS profile_name
+            FROM scan_schedules sc
+            LEFT JOIN subnets s       ON sc.subnet_id = s.id
+            LEFT JOIN scan_profiles p ON sc.profile_id = p.id
+            ORDER BY sc.name
+        """).fetchall()
+    out = []
+    for r in rows:
+        d = _sched_row(r)
+        d["next_run"] = scheduler.next_run_utc(d)
+        out.append(d)
+    return out
+
+
+def _validate_sched(d: ScanScheduleIn):
+    if d.host_filter not in ("all", "static", "dynamic", "unknown"):
+        raise HTTPException(422, "invalid host_filter")
+    if d.timing_type not in ("interval", "weekly"):
+        raise HTTPException(422, "invalid timing_type")
+    if d.timing_type == "interval" and (not d.interval_hours or d.interval_hours <= 0):
+        raise HTTPException(422, "interval_hours must be > 0")
+    if d.timing_type == "weekly":
+        if not d.at_time:
+            raise HTTPException(422, "at_time required for weekly")
+        days = [x for x in (d.days_of_week or "").split(",") if x.strip() != ""]
+        if not days:
+            raise HTTPException(422, "pick at least one day for weekly")
+
+
+@app.post("/api/scan-schedules", status_code=201)
+def create_scan_schedule(data: ScanScheduleIn):
+    _validate_sched(data)
+    with get_conn() as conn:
+        cur = conn.execute("""
+            INSERT INTO scan_schedules
+                (name, enabled, subnet_id, host_filter, profile_id, timing_type, interval_hours, days_of_week, at_time)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (data.name.strip(), 1 if data.enabled else 0, data.subnet_id, data.host_filter,
+              data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time))
+        conn.commit()
+        return {"id": cur.lastrowid}
+
+
+@app.put("/api/scan-schedules/{sid}")
+def update_scan_schedule(sid: int, data: ScanScheduleIn):
+    _validate_sched(data)
+    with get_conn() as conn:
+        if not conn.execute("SELECT id FROM scan_schedules WHERE id=?", (sid,)).fetchone():
+            raise HTTPException(404, "Schedule not found")
+        conn.execute("""
+            UPDATE scan_schedules SET
+                name=?, enabled=?, subnet_id=?, host_filter=?, profile_id=?,
+                timing_type=?, interval_hours=?, days_of_week=?, at_time=?
+            WHERE id=?
+        """, (data.name.strip(), 1 if data.enabled else 0, data.subnet_id, data.host_filter,
+              data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time, sid))
+        conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/scan-schedules/{sid}")
+def delete_scan_schedule(sid: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM scan_schedules WHERE id=?", (sid,))
+        conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/scan-schedules/{sid}/run")
+def run_scan_schedule(sid: int):
+    result = scheduler.run_schedule(sid, mark_last_run=False)
+    if result.get("error"):
+        raise HTTPException(404, "Schedule not found")
+    return result
+
+
 # ── Scan profiles (reusable saved scan configs) ───────────────────────────────
 
 class ScanProfileIn(BaseModel):
@@ -266,13 +366,26 @@ def cancel_scan_endpoint(run_id: int):
 def list_scans():
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT sr.*, s.name AS subnet_name, s.cidr
+            SELECT sr.*, s.name AS subnet_name, s.cidr, sc.name AS schedule_name
             FROM scan_runs sr
-            LEFT JOIN subnets s ON sr.subnet_id = s.id
+            LEFT JOIN subnets s        ON sr.subnet_id = s.id
+            LEFT JOIN scan_schedules sc ON sr.schedule_id = sc.id
             ORDER BY sr.started_at DESC
             LIMIT 100
         """).fetchall()
-        return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        # Merge live progress for in-flight runs (DB status stays 'running' until
+        # the scan finishes; scan_jobs holds the live sub-status + percentage).
+        if d["status"] == "running":
+            job = scan_jobs.get(d["id"])
+            if job:
+                d["live_status"] = job.get("status")          # discovering | scanning | ...
+                d["progress"]    = job.get("progress", 0)
+                d["total"]       = job.get("total", 0)
+        out.append(d)
+    return out
 
 
 @app.delete("/api/scans/{run_id}")
@@ -1269,7 +1382,8 @@ def get_settings():
     sp["token"] = _MASKED if sp.get("token") else ""
     ca = dict(cfg["change_alerts"])
     ca.pop("last_digest", None)   # runtime state, not a user setting
-    return {"llm": llm, "notifications": ntfy, "statuspage": sp,
+    return {"general": dict(cfg["general"]),
+            "llm": llm, "notifications": ntfy, "statuspage": sp,
             "change_tracking": dict(cfg["change_tracking"]),
             "change_alerts": ca,
             "liveness": dict(cfg["liveness"])}
@@ -1307,6 +1421,27 @@ class LivenessIn(BaseModel):
     enabled:          Optional[bool] = None
     interval_minutes: Optional[int]  = None
     offline_after:    Optional[int]  = None
+
+
+class GeneralIn(BaseModel):
+    timezone: Optional[str] = None
+
+
+@app.put("/api/settings/general")
+def update_general(data: GeneralIn):
+    if data.timezone:
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(data.timezone)   # validate the IANA name
+        except Exception:
+            raise HTTPException(422, f"Unknown timezone: {data.timezone}")
+    cfg = get_config()
+    g = cfg.get("general", {})
+    if data.timezone is not None:
+        g["timezone"] = data.timezone
+    cfg["general"] = g
+    save_config(cfg)
+    return {"ok": True, "general": g}
 
 
 @app.put("/api/settings/liveness")

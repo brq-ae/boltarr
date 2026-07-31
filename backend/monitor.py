@@ -22,7 +22,7 @@ from datetime import datetime, timezone, time as time_of_day
 import httpx
 
 from .database import get_conn
-from .config import get_monitoring_config, get_statuspage_config
+from .config import get_monitoring_config, get_statuspage_config, local_now
 from . import notify
 
 CHECK_INTERVAL = 60          # seconds between sweeps
@@ -174,7 +174,7 @@ def _process(conn, svc: dict, new: str) -> str:
         return prev
 
     # Quiet window uses local wall-clock time (container TZ), not UTC
-    suppress = in_quiet_window(datetime.now().time())
+    suppress = in_quiet_window(local_now().time())
     r = evaluate(prev, new, svc.get("monitor_fail_since"),
                  svc.get("monitor_alerted") or 0, _grace_seconds(), now_dt, suppress=suppress)
 

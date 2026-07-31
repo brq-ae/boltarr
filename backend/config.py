@@ -1,11 +1,22 @@
 import os
 from pathlib import Path
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except Exception:   # pragma: no cover
+    ZoneInfo = None
 import yaml
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 CONFIG_PATH = _DATA_DIR / "config.yaml"
 
 _DEFAULTS: dict = {
+    # General app settings. `timezone` is an IANA name (e.g. "Asia/Dubai"); empty
+    # means the server's own clock. It drives all time-of-day logic — schedule
+    # fire times, quiet hours, the daily digest — and how times are displayed.
+    "general": {
+        "timezone": "",
+    },
     "llm": {
         "provider": "none",   # none | ollama | openai | anthropic
         "base_url": "",       # ollama: http://localhost:11434  openai-compat: https://api.openai.com/v1
@@ -80,6 +91,7 @@ _DEFAULTS: dict = {
 
 def get_config() -> dict:
     cfg: dict = {
+        "general": dict(_DEFAULTS["general"]),
         "llm": dict(_DEFAULTS["llm"]),
         "notifications": dict(_DEFAULTS["notifications"]),
         "monitoring": dict(_DEFAULTS["monitoring"]),
@@ -91,6 +103,8 @@ def get_config() -> dict:
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
             raw = yaml.safe_load(f) or {}
+        if "general" in raw:
+            cfg["general"].update({k: v for k, v in raw["general"].items() if v is not None})
         if "llm" in raw:
             cfg["llm"].update({k: v for k, v in raw["llm"].items() if v is not None})
         if "notifications" in raw:
@@ -182,6 +196,23 @@ def get_liveness_config() -> dict:
 
 def get_notifications_config() -> dict:
     return get_config()["notifications"]
+
+
+def get_timezone():
+    """Configured IANA timezone as a ZoneInfo, or None to use the server clock."""
+    name = (get_config().get("general", {}) or {}).get("timezone", "")
+    if name and ZoneInfo is not None:
+        try:
+            return ZoneInfo(name)
+        except Exception:
+            pass
+    return None
+
+
+def local_now() -> datetime:
+    """Now in the configured timezone (aware); naive server-local if unset."""
+    tz = get_timezone()
+    return datetime.now(tz) if tz else datetime.now()
 
 
 def save_config(cfg: dict) -> None:

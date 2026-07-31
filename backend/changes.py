@@ -10,7 +10,7 @@ import ipaddress
 from datetime import datetime, timezone, timedelta, time as _time
 from typing import Optional
 
-from .config import get_change_tracking_config, get_change_alerts_config, get_config, save_config
+from .config import get_change_tracking_config, get_change_alerts_config, get_config, save_config, local_now
 from .database import get_conn
 from . import notify
 
@@ -242,7 +242,7 @@ def send_scan_summary(run_id: int, target_label: str = "") -> None:
         return
     try:   # quiet hours (lazy import avoids a module cycle)
         from .monitor import in_quiet_window
-        if in_quiet_window(datetime.now().time()):
+        if in_quiet_window(local_now().time()):
             return
     except Exception:
         pass
@@ -258,7 +258,7 @@ def alert_transition(conn, ip: str, event_type: str) -> None:
         return
     try:
         from .monitor import in_quiet_window
-        if in_quiet_window(datetime.now().time()):
+        if in_quiet_window(local_now().time()):
             return
     except Exception:
         pass
@@ -292,7 +292,7 @@ def maybe_send_digest() -> None:
         target = _time(int(hh), int(mm))
     except Exception:
         return
-    now_local = datetime.now()
+    now_local = local_now()
     today = now_local.strftime("%Y-%m-%d")
     if now_local.time() < target or (a.get("last_digest") or "") == today:
         return

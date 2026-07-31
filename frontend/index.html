@@ -156,6 +156,7 @@
         <div class="svc-toolbar">
           <div class="svc-subtabs">
             <button class="svc-subtab active" id="scanTabBtn-run" onclick="setScanTab('run')">Run</button>
+            <button class="svc-subtab" id="scanTabBtn-schedules" onclick="setScanTab('schedules')">Schedules</button>
             <button class="svc-subtab" id="scanTabBtn-history" onclick="setScanTab('history')">History</button>
             <button class="svc-subtab" id="scanTabBtn-changes" onclick="setScanTab('changes')">Changes</button>
           </div>
@@ -225,6 +226,16 @@
             <span style="flex:1"></span>
             <button class="btn btn-primary" id="scanRunBtn" onclick="runScanFromBuilder()">▶ Run scan</button>
           </div>
+        </div>
+
+        <!-- Schedules -->
+        <div id="scan-panel-schedules" style="display:none">
+          <div class="scans-toolbar" style="padding:10px 16px">
+            <span style="font-size:11px;color:var(--text-3)">Automated scans — Boltarr runs these for you; findings flow into Changes &amp; alerts.</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openScheduleEditor()">＋ New schedule</button>
+          </div>
+          <div id="schedulesWrap" style="padding:0 16px 16px"></div>
         </div>
 
         <!-- History -->
@@ -380,6 +391,87 @@
 <!-- ── Modals ──────────────────────────────────────────────────────────────── -->
 
 <!-- Add / edit subnet -->
+<!-- Scan schedule editor -->
+<div class="modal-overlay" id="scheduleModal">
+  <div class="modal">
+    <div class="modal-title" id="scheduleModalTitle">New schedule</div>
+    <input type="hidden" id="schedEditId" value="">
+    <div class="form-row">
+      <label>Name</label>
+      <input type="text" id="schedName" placeholder="e.g. Nightly deep scan">
+    </div>
+    <div class="form-row">
+      <label>Subnet</label>
+      <select id="schedSubnet"></select>
+    </div>
+    <div class="form-row">
+      <label>Hosts</label>
+      <select id="schedFilter" onchange="onSchedFilterChange()">
+        <option value="all">Whole range — all IPs (finds new devices)</option>
+        <option value="static">Static only (known hosts)</option>
+        <option value="dynamic">Dynamic only (known hosts)</option>
+        <option value="unknown">Unknown only (known hosts)</option>
+      </select>
+    </div>
+    <p id="schedFilterNote" class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0;display:none">
+      Only scans hosts Boltarr already knows in this class — it won't discover brand-new devices. Use "Whole range" for discovery.
+    </p>
+    <div class="form-row">
+      <label>Profile</label>
+      <select id="schedProfile"></select>
+    </div>
+
+    <div class="sidebar-divider" style="margin:6px 0"></div>
+    <div class="form-row">
+      <label>When</label>
+      <div style="display:flex;gap:14px;flex:1">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;text-transform:none;font-weight:400">
+          <input type="radio" name="schedTiming" value="interval" checked onchange="onSchedTimingChange()"> Every N hours
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;text-transform:none;font-weight:400">
+          <input type="radio" name="schedTiming" value="weekly" onchange="onSchedTimingChange()"> On chosen days
+        </label>
+      </div>
+    </div>
+    <div class="form-row" id="schedIntervalRow">
+      <label>Interval</label>
+      <div style="display:flex;align-items:center;gap:8px;flex:1">
+        <span style="font-size:12px;color:var(--text-3)">every</span>
+        <input type="number" id="schedInterval" min="0.25" step="0.25" value="6" style="width:80px">
+        <span style="font-size:12px;color:var(--text-3)">hours</span>
+      </div>
+    </div>
+    <div class="form-row" id="schedAnchorRow">
+      <label>Starting at <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <div style="display:flex;align-items:center;gap:8px;flex:1">
+        <input type="time" id="schedAnchor" style="width:120px">
+        <span style="font-size:11px;color:var(--text-3)">blank = start from now; a time aligns fires to the clock (cleanest for 2/3/4/6/8/12h)</span>
+      </div>
+    </div>
+    <div id="schedWeeklyRows" style="display:none">
+      <div class="form-row">
+        <label>Days</label>
+        <div class="scan-checks" id="schedDays" style="padding-left:2px"></div>
+      </div>
+      <div class="form-row">
+        <label>At time</label>
+        <input type="time" id="schedAtTime" value="03:00" style="width:120px">
+      </div>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="schedEnabled" checked style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">Enabled</span>
+      </label>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn" onclick="closeScheduleEditor()">Cancel</button>
+      <button class="btn btn-primary" id="schedSaveBtn" onclick="saveSchedule()">Create</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="subnetModal">
   <div class="modal">
     <div class="modal-title" id="subnetModalTitle">Add Subnet</div>
@@ -901,6 +993,23 @@
       <button class="icon-btn" onclick="closeSettings()">✕</button>
     </div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">🌍 General</span>
+      </div>
+      <div class="form-row">
+        <label>Timezone</label>
+        <div style="display:flex;gap:8px;flex:1;align-items:center">
+          <select id="setTimezone" onchange="updateTzPreview()" style="flex:1"></select>
+        </div>
+      </div>
+      <p class="text-3" style="font-size:11px;line-height:1.5;margin:-6px 0 0">
+        Boltarr uses this for schedule times, quiet hours, the digest, and how times are shown. <span id="setTzPreview" style="color:var(--text-2)"></span>
+      </p>
+
+      <div class="sidebar-divider" style="margin:2px 0"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">🤖 AI</span>
+      </div>
       <p class="text-3" style="font-size:11px;line-height:1.6">
         Settings are saved to <code>data/config.yaml</code>.<br>
         Environment variables (<code>LLM_PROVIDER</code>, <code>LLM_BASE_URL</code>,

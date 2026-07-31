@@ -202,6 +202,25 @@ def init_db():
             "ALTER TABLE hosts ADD COLUMN online INTEGER",
             "ALTER TABLE hosts ADD COLUMN miss_count INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE hosts ADD COLUMN no_offline_alert INTEGER NOT NULL DEFAULT 0",
+            # Scheduled scans. A schedule = target (subnet all/one × host filter) +
+            # timing (interval hours OR weekly days+time) + a scan profile. The
+            # scheduler loop runs due schedules through the normal scan engine.
+            """CREATE TABLE IF NOT EXISTS scan_schedules (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                name           TEXT NOT NULL,
+                enabled        INTEGER NOT NULL DEFAULT 1,
+                subnet_id      INTEGER REFERENCES subnets(id) ON DELETE CASCADE,  -- NULL = all subnets
+                host_filter    TEXT NOT NULL DEFAULT 'all',   -- all | static | dynamic | unknown
+                profile_id     INTEGER REFERENCES scan_profiles(id) ON DELETE SET NULL,
+                timing_type    TEXT NOT NULL DEFAULT 'interval',  -- interval | weekly
+                interval_hours REAL,                          -- for timing_type=interval
+                days_of_week   TEXT,                           -- weekly: CSV of 0-6 (Mon=0..Sun=6)
+                at_time        TEXT,                           -- weekly: 'HH:MM' local
+                last_run       TEXT,                           -- ISO of last fire
+                created_at     TEXT DEFAULT (datetime('now'))
+            )""",
+            "ALTER TABLE scan_runs ADD COLUMN schedule_id INTEGER",   # which schedule triggered it (NULL = manual)
+            "ALTER TABLE scan_runs ADD COLUMN note TEXT",             # e.g. skip reason
         ]:
             try:
                 conn.execute(sql)
