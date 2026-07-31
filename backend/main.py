@@ -10,35 +10,6 @@ from pathlib import Path
 from typing import Optional
 
 
-def classify_host(ip_str: str, subnets: list[dict], override: Optional[str]) -> str:
-    """static | dynamic | unknown.
-
-    Override ('static'/'dynamic') wins. Otherwise: find the subnet whose CIDR
-    contains the IP; if that subnet has a DHCP range, IP inside it = dynamic,
-    outside = static; if the subnet has no range (or no subnet matches) =
-    unknown. One DHCP range per subnet for now — multi-pool can be added later.
-    """
-    if override in ("static", "dynamic"):
-        return override
-    try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
-        return "unknown"
-    for s in subnets:
-        try:
-            net = ipaddress.ip_network(s.get("cidr", ""), strict=False)
-        except ValueError:
-            continue
-        if ip in net:
-            start, end = s.get("dhcp_start"), s.get("dhcp_end")
-            if start and end:
-                try:
-                    return "dynamic" if ipaddress.ip_address(start) <= ip <= ipaddress.ip_address(end) else "static"
-                except ValueError:
-                    return "unknown"
-            return "unknown"   # subnet has no DHCP range defined
-    return "unknown"           # no matching subnet
-
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -49,6 +20,7 @@ from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_comm
 from .config import get_config, get_llm_config, get_notifications_config, save_config
 from . import notify
 from . import monitor
+from .changes import classify_host
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
     build_host_prompt, build_network_prompt, infer_device_type, LLMError, LONG_TIMEOUT,
@@ -503,6 +475,7 @@ class HostUpdate(BaseModel):
     set_dhcp:    bool = False
     static_override:     Optional[str] = None   # 'static' | 'dynamic' | '' / 'auto'
     set_static_override: bool = False
+    no_mac_alert:        Optional[bool] = None
 
 
 @app.put("/api/hosts/{ip}")
@@ -537,6 +510,8 @@ def update_host(ip: str, data: HostUpdate):
         if data.set_static_override:
             ov = data.static_override if data.static_override in ("static", "dynamic") else None
             conn.execute("UPDATE hosts SET static_override=? WHERE ip=?", (ov, ip))
+        if data.no_mac_alert is not None:
+            conn.execute("UPDATE hosts SET no_mac_alert=? WHERE ip=?", (1 if data.no_mac_alert else 0, ip))
         conn.commit()
         row = conn.execute("SELECT * FROM hosts WHERE ip=?", (ip,)).fetchone()
         return dict(row)
@@ -1287,8 +1262,11 @@ def get_settings():
 
     sp = dict(cfg["statuspage"])
     sp["token"] = _MASKED if sp.get("token") else ""
+    ca = dict(cfg["change_alerts"])
+    ca.pop("last_digest", None)   # runtime state, not a user setting
     return {"llm": llm, "notifications": ntfy, "statuspage": sp,
-            "change_tracking": dict(cfg["change_tracking"])}
+            "change_tracking": dict(cfg["change_tracking"]),
+            "change_alerts": ca}
 
 
 class ChangeTrackingIn(BaseModel):
@@ -1314,6 +1292,36 @@ def update_change_tracking(data: ChangeTrackingIn):
     cfg["change_tracking"] = ct
     save_config(cfg)
     return {"ok": True, "change_tracking": ct}
+
+
+class ChangeAlertsIn(BaseModel):
+    enabled:          Optional[bool] = None
+    host_new:         Optional[bool] = None
+    port_opened:      Optional[bool] = None
+    port_closed:      Optional[bool] = None
+    mac_changed:      Optional[bool] = None
+    hostname_changed: Optional[bool] = None
+    on_scan:          Optional[bool] = None
+    digest_enabled:   Optional[bool] = None
+    digest_time:      Optional[str]  = None
+
+
+@app.put("/api/settings/change-alerts")
+def update_change_alerts(data: ChangeAlertsIn):
+    cfg = get_config()
+    ca = cfg.get("change_alerts", {})
+    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
+              "hostname_changed", "on_scan", "digest_enabled"):
+        v = getattr(data, f)
+        if v is not None:
+            ca[f] = v
+    if data.digest_time is not None:
+        ca["digest_time"] = data.digest_time.strip()
+    cfg["change_alerts"] = ca
+    save_config(cfg)
+    ca_out = dict(ca)
+    ca_out.pop("last_digest", None)
+    return {"ok": True, "change_alerts": ca_out}
 
 
 @app.put("/api/settings")

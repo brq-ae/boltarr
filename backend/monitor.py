@@ -442,6 +442,12 @@ def _loop() -> None:
                 push_status()
             except Exception:
                 pass
+            # daily change-alert digest (fires once/day past the configured time)
+            try:
+                from . import changes
+                changes.maybe_send_digest()
+            except Exception:
+                pass
             # prune roughly once a day
             if _now_dt().timestamp() - last_prune > 86400:
                 prune_events()

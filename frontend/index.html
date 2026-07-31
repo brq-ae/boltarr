@@ -553,6 +553,12 @@
     </div>
     <div class="form-row">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="editNoMacAlert" style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">Don't alert on MAC change for this host</span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editTierL1" style="accent-color:var(--accent);width:14px;height:14px">
         <span><strong style="color:var(--text)">Gateway (Level 1)</strong> — root of network hierarchy</span>
       </label>
@@ -1018,6 +1024,29 @@
         <label>Keep history for</label>
         <input id="setCtRetention" type="number" min="1" style="width:70px" value="90">
         <span style="font-size:11px;color:var(--text-3)">days</span>
+      </div>
+
+      <div class="sidebar-divider" style="margin:4px 0"></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">🔔 Change alerts</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="setCaEnabled"> Enabled
+        </label>
+      </div>
+      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+        Notify (ntfy) about recorded changes. New-host & MAC alerts fire only for static IPs. Needs notifications set up above.
+      </p>
+      <div class="scan-checks" style="padding-left:2px">
+        <label><input type="checkbox" id="setCaHostNew"> New host</label>
+        <label><input type="checkbox" id="setCaPortOpened"> Port opened</label>
+        <label><input type="checkbox" id="setCaPortClosed"> Port closed</label>
+        <label><input type="checkbox" id="setCaMacChanged"> MAC changed</label>
+        <label><input type="checkbox" id="setCaHostnameChanged"> Hostname changed</label>
+      </div>
+      <div class="scan-checks" style="padding-left:2px">
+        <label><input type="checkbox" id="setCaOnScan"> Summary after each scan</label>
+        <label><input type="checkbox" id="setCaDigest"> Daily digest at</label>
+        <input id="setCaDigestTime" type="time" value="08:00" style="width:110px">
       </div>
     </div>
     <div class="modal-actions">

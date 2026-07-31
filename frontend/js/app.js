@@ -807,6 +807,7 @@ async function openEditHost(ip) {
   document.getElementById("editIsDhcp").checked   = !!host.is_dhcp;
   document.getElementById("editDhcpPool").value   = host.dhcp_pool || "";
   document.getElementById("editStaticOverride").value = host.static_override || "";
+  document.getElementById("editNoMacAlert").checked   = !!host.no_mac_alert;
   document.getElementById("editDhcpPoolRow").style.display = host.is_dhcp ? "" : "none";
   const sel = document.getElementById("editDeviceType");
   sel.innerHTML = DEVICE_TYPES.map(t =>
@@ -884,6 +885,7 @@ async function saveHostEdit() {
     dhcp_pool:   document.getElementById("editDhcpPool").value.trim() || null,
     set_static_override: true,
     static_override:     document.getElementById("editStaticOverride").value || null,
+    no_mac_alert:        document.getElementById("editNoMacAlert").checked,
   };
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);
@@ -2642,7 +2644,7 @@ const PROVIDER_KEY_PLACEHOLDER = {
 
 async function openSettings() {
   try {
-    const { llm, notifications, statuspage, change_tracking } = await api("GET", "/api/settings");
+    const { llm, notifications, statuspage, change_tracking, change_alerts } = await api("GET", "/api/settings");
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
@@ -2678,6 +2680,17 @@ async function openSettings() {
     document.getElementById("setCtMacChanged").checked       = ct.mac_changed      !== false;
     document.getElementById("setCtHostnameChanged").checked  = ct.hostname_changed !== false;
     document.getElementById("setCtRetention").value          = ct.retention_days ?? 90;
+
+    const ca = change_alerts || {};
+    document.getElementById("setCaEnabled").checked          = !!ca.enabled;
+    document.getElementById("setCaHostNew").checked          = ca.host_new         !== false;
+    document.getElementById("setCaPortOpened").checked       = ca.port_opened      !== false;
+    document.getElementById("setCaPortClosed").checked       = !!ca.port_closed;
+    document.getElementById("setCaMacChanged").checked       = !!ca.mac_changed;
+    document.getElementById("setCaHostnameChanged").checked  = !!ca.hostname_changed;
+    document.getElementById("setCaOnScan").checked           = ca.on_scan          !== false;
+    document.getElementById("setCaDigest").checked           = ca.digest_enabled   !== false;
+    document.getElementById("setCaDigestTime").value         = ca.digest_time || "08:00";
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
 }
@@ -2742,11 +2755,23 @@ async function saveSettings() {
     hostname_changed: document.getElementById("setCtHostnameChanged").checked,
     retention_days:   parseInt(document.getElementById("setCtRetention").value) || 90,
   };
+  const caPayload = {
+    enabled:          document.getElementById("setCaEnabled").checked,
+    host_new:         document.getElementById("setCaHostNew").checked,
+    port_opened:      document.getElementById("setCaPortOpened").checked,
+    port_closed:      document.getElementById("setCaPortClosed").checked,
+    mac_changed:      document.getElementById("setCaMacChanged").checked,
+    hostname_changed: document.getElementById("setCaHostnameChanged").checked,
+    on_scan:          document.getElementById("setCaOnScan").checked,
+    digest_enabled:   document.getElementById("setCaDigest").checked,
+    digest_time:      document.getElementById("setCaDigestTime").value,
+  };
   try {
     await api("PUT", "/api/settings", payload);
     await api("PUT", "/api/settings/notifications", ntfyPayload);
     await api("PUT", "/api/settings/statuspage", spPayload);
     await api("PUT", "/api/settings/change-tracking", ctPayload);
+    await api("PUT", "/api/settings/change-alerts", caPayload);
     closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");

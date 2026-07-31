@@ -157,7 +157,8 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                 existing = conn.execute("SELECT mac, hostname FROM hosts WHERE ip=?", (ip,)).fetchone()
                 changes.record_meta(conn, ip, existed=(existing is not None or arow is not None),
                                     old_mac=(existing["mac"] if existing else None), new_mac=d_mac,
-                                    old_host=(existing["hostname"] if existing else None), new_host=d_host)
+                                    old_host=(existing["hostname"] if existing else None), new_host=d_host,
+                                    run_id=run_id)
                 if arow:
                     conn.execute("UPDATE hosts SET last_seen=datetime('now') WHERE id=?", (arow["host_id"],))
                 else:
@@ -208,7 +209,7 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                         if hr:
                             old_open = {r["port"] for r in conn.execute(
                                 "SELECT port FROM ports WHERE host_id=? AND protocol='tcp' AND state='open'", (hr["id"],))}
-                            changes.record_ports(conn, ip, hr["id"], old_open, set(), changes.scanned_ports(o))
+                            changes.record_ports(conn, ip, hr["id"], old_open, set(), changes.scanned_ports(o), run_id=run_id)
                             conn.commit()
                     except Exception:
                         pass
@@ -259,7 +260,7 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                     for port, svc in nm2[ip][proto].items():
                         if proto == "tcp" and svc["state"] == "open":
                             new_open.add(port)
-                changes.record_ports(conn, ip, host_id, old_open, new_open, changes.scanned_ports(o))
+                changes.record_ports(conn, ip, host_id, old_open, new_open, changes.scanned_ports(o), run_id=run_id)
                 conn.commit()
 
                 for proto in nm2[ip].all_protocols():
@@ -296,6 +297,10 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
         conn.commit()
         conn.close()
         update(status="completed", progress=100)
+        try:
+            changes.send_scan_summary(run_id, cidr)
+        except Exception:
+            pass
 
     except Exception as e:
         with _lock:
@@ -370,7 +375,7 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
             existing = conn.execute("SELECT mac, hostname FROM hosts WHERE ip=?", (ip,)).fetchone()
             changes.record_meta(conn, ip, existing is not None,
                                 existing["mac"] if existing else None, mac,
-                                existing["hostname"] if existing else None, hostname)
+                                existing["hostname"] if existing else None, hostname, run_id=run_id)
 
             conn.execute("""
                 UPDATE hosts SET
@@ -394,7 +399,7 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
                     for port, svc in nm[ip][proto].items():
                         if proto == "tcp" and svc["state"] == "open":
                             new_open.add(port)
-                changes.record_ports(conn, ip, host_id, old_open, new_open, changes.scanned_ports(probe_o))
+                changes.record_ports(conn, ip, host_id, old_open, new_open, changes.scanned_ports(probe_o), run_id=run_id)
                 conn.commit()
                 for proto in nm[ip].all_protocols():
                     for port, svc in nm[ip][proto].items():
@@ -409,6 +414,10 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
                               svc.get("name"), svc.get("version") or None))
                 conn.commit()
 
+        try:
+            changes.send_scan_summary(run_id, ip)
+        except Exception:
+            pass
         conn.execute("""
             UPDATE scan_runs
             SET status='completed', completed_at=datetime('now'), hosts_found=1

@@ -49,6 +49,21 @@ _DEFAULTS: dict = {
         "hostname_changed": True,
         "retention_days": 90,
     },
+    # Change alerts: which recorded changes also notify (ntfy). New-host and
+    # MAC-change alerts are scoped to static IPs. Delivered as a per-scan summary
+    # and/or a daily digest.
+    "change_alerts": {
+        "enabled": True,
+        "host_new": True,          # per-type alert toggles
+        "port_opened": True,
+        "port_closed": False,
+        "mac_changed": False,
+        "hostname_changed": False,
+        "on_scan": True,           # send a summary when a scan finishes
+        "digest_enabled": True,    # daily morning digest
+        "digest_time": "08:00",
+        "last_digest": "",         # runtime: last digest sent (ISO)
+    },
 }
 
 
@@ -59,6 +74,7 @@ def get_config() -> dict:
         "monitoring": dict(_DEFAULTS["monitoring"]),
         "statuspage": dict(_DEFAULTS["statuspage"]),
         "change_tracking": dict(_DEFAULTS["change_tracking"]),
+        "change_alerts": dict(_DEFAULTS["change_alerts"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -73,6 +89,8 @@ def get_config() -> dict:
             cfg["statuspage"].update({k: v for k, v in raw["statuspage"].items() if v is not None})
         if "change_tracking" in raw:
             cfg["change_tracking"].update({k: v for k, v in raw["change_tracking"].items() if v is not None})
+        if "change_alerts" in raw:
+            cfg["change_alerts"].update({k: v for k, v in raw["change_alerts"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -138,6 +156,10 @@ def get_statuspage_config() -> dict:
 
 def get_change_tracking_config() -> dict:
     return get_config()["change_tracking"]
+
+
+def get_change_alerts_config() -> dict:
+    return get_config()["change_alerts"]
 
 
 def get_notifications_config() -> dict:
