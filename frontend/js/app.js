@@ -12,6 +12,7 @@ let pollTimer       = null;
 let sortCol         = "ip";
 let sortDir         = 1;
 let filterText      = "";
+let classFilterVal  = "";   // "" | static | dynamic | unknown
 let activeDetailTab = "info";
 let currentSvcTab     = "list";
 let svcHostFilterVal  = "";
@@ -85,6 +86,7 @@ function renderSubnetList() {
         <div class="subnet-cidr mono">${s.cidr}</div>
       </div>
       <button class="btn-icon subnet-eye" onclick="event.stopPropagation(); toggleSubnetVisibility(${s.id})" title="${hidden ? "Show" : "Hide"} in topology">${hidden ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>` : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`}</button>
+      <button class="btn-icon" onclick="event.stopPropagation(); openEditSubnet(${s.id})" title="Edit subnet (name, DHCP range)" style="color:var(--text-3);font-size:12px;padding:2px 5px">✎</button>
       <button class="btn-scan" onclick="event.stopPropagation(); triggerScan(${s.id})" title="Scan ${s.cidr}">▶</button>
       <button class="btn-icon" onclick="event.stopPropagation(); deleteSubnet(${s.id},'${s.name}')" title="Remove subnet" style="color:var(--text-3);font-size:13px;padding:2px 5px">✕</button>
     </div>`;
@@ -110,24 +112,52 @@ function selectSubnetNodes(subnetId) {
   if (typeof selectNodesInSubnet === "function") selectNodesInSubnet(subnetId);
 }
 
+function _subnetFields(s) {
+  document.getElementById("subnetEditId").value    = s ? s.id : "";
+  document.getElementById("subnetName").value      = s ? (s.name || "") : "";
+  document.getElementById("subnetCidr").value      = s ? (s.cidr || "") : "";
+  document.getElementById("subnetDesc").value      = s ? (s.description || "") : "";
+  document.getElementById("subnetDhcpStart").value = s ? (s.dhcp_start || "") : "";
+  document.getElementById("subnetDhcpEnd").value   = s ? (s.dhcp_end || "") : "";
+  document.getElementById("subnetModalTitle").textContent = s ? "Edit Subnet" : "Add Subnet";
+  document.getElementById("subnetSaveBtn").textContent    = s ? "Save" : "Add Subnet";
+}
+
 function openAddSubnet() {
   closeSidebar();
+  _subnetFields(null);
   document.getElementById("subnetModal").classList.add("open");
   setTimeout(() => document.getElementById("subnetName").focus(), 50);
+}
+function openEditSubnet(id) {
+  const s = subnets.find(x => x.id === id);
+  if (!s) return;
+  closeSidebar();
+  _subnetFields(s);
+  document.getElementById("subnetModal").classList.add("open");
 }
 function closeAddSubnet() {
   document.getElementById("subnetModal").classList.remove("open");
 }
 async function saveSubnet() {
+  const id   = document.getElementById("subnetEditId").value;
   const name = document.getElementById("subnetName").value.trim();
   const cidr = document.getElementById("subnetCidr").value.trim();
   const desc = document.getElementById("subnetDesc").value.trim();
+  const dhcp_start = document.getElementById("subnetDhcpStart").value.trim();
+  const dhcp_end   = document.getElementById("subnetDhcpEnd").value.trim();
   if (!name || !cidr) return alert("Name and CIDR are required.");
+  if ((dhcp_start && !dhcp_end) || (!dhcp_start && dhcp_end))
+    return alert("Enter both ends of the DHCP range, or leave both empty.");
   try {
-    await api("POST", "/api/subnets", { name, cidr, description: desc });
-    ["subnetName","subnetCidr","subnetDesc"].forEach(id => document.getElementById(id).value = "");
+    if (id) {
+      await api("PUT", `/api/subnets/${id}`, { name, cidr, description: desc, dhcp_start, dhcp_end });
+    } else {
+      await api("POST", "/api/subnets", { name, cidr, description: desc, dhcp_start, dhcp_end });
+    }
     closeAddSubnet();
     await loadSubnets();
+    await loadHosts(); renderHostsTable();   // classification may have changed
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -228,13 +258,18 @@ function renderHostsTable() {
   let visible = allHosts;
   if (filterText) {
     const q = filterText.toLowerCase();
-    visible = allHosts.filter(h =>
+    visible = visible.filter(h =>
       (h.ip||"").includes(q) ||
       (h.hostname||"").toLowerCase().includes(q) ||
       (h.vendor||"").toLowerCase().includes(q) ||
       (h.device_type||"").toLowerCase().includes(q) ||
       (h.ports||[]).some(p => (p.service||"").toLowerCase().includes(q))
     );
+  }
+  if (classFilterVal) {
+    visible = classFilterVal === "unknown"
+      ? visible.filter(h => (h.classification || "unknown") === "unknown")
+      : visible.filter(h => h.classification === classFilterVal);
   }
 
   const count = document.getElementById("hostCount");
@@ -270,6 +305,12 @@ function renderHostsTable() {
       ? `<button class="alias-toggle${expanded ? " open" : ""}" onclick="event.stopPropagation();toggleAliasRow('${h.ip}')" title="${expanded ? "Hide" : "Show"} aliases">${expanded ? "▼" : "▶"} +${aliases.length}</button>`
       : "";
     const manualBadge = h.source === "manual" ? `<span class="port-badge" style="margin-left:4px;background:oklch(38% 0.1 280);color:oklch(78% 0.1 280)">manual</span>` : "";
+    const ov = h.static_override ? " ·set" : "";
+    const clsBadge = h.classification === "static"
+      ? `<span class="cls-badge cls-static" title="Static IP${ov}">static</span>`
+      : h.classification === "dynamic"
+      ? `<span class="cls-badge cls-dynamic" title="Dynamic — in DHCP range${ov}">dynamic</span>`
+      : "";
     const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip;
     const tr = document.createElement("tr");
     tr.innerHTML = `
@@ -277,7 +318,7 @@ function renderHostsTable() {
       <td class="td-host">${h.hostname || `<span style="color:var(--text-3)">—</span>`}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac||"—"}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${h.vendor||"—"}</td>
-      <td class="td-type"><span class="tag tag-${dt}">${dt}</span>${manualBadge}</td>
+      <td class="td-type"><span class="tag tag-${dt}">${dt}</span>${manualBadge}${clsBadge}</td>
       <td class="col-os" style="font-size:11px;color:var(--text-3)">${(h.os_guess||"—").substring(0,34)}</td>
       <td><div class="port-list">${portHtml}${more}</div></td>
       <td class="td-seen mono" style="color:var(--text-3)">${(h.last_seen||"—").substring(0,16)}</td>
@@ -328,6 +369,10 @@ function formatMacInput(e) {
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("tableFilter")?.addEventListener("input", e => {
     filterText = e.target.value;
+    renderHostsTable();
+  });
+  document.getElementById("classFilter")?.addEventListener("change", e => {
+    classFilterVal = e.target.value;
     renderHostsTable();
   });
   document.getElementById("addHostMac")?.addEventListener("input", formatMacInput);
@@ -741,6 +786,7 @@ async function openEditHost(ip) {
   document.getElementById("editIsDns").checked    = !!host.is_dns;
   document.getElementById("editIsDhcp").checked   = !!host.is_dhcp;
   document.getElementById("editDhcpPool").value   = host.dhcp_pool || "";
+  document.getElementById("editStaticOverride").value = host.static_override || "";
   document.getElementById("editDhcpPoolRow").style.display = host.is_dhcp ? "" : "none";
   const sel = document.getElementById("editDeviceType");
   sel.innerHTML = DEVICE_TYPES.map(t =>
@@ -816,6 +862,8 @@ async function saveHostEdit() {
     is_dhcp:     document.getElementById("editIsDhcp").checked,
     set_dhcp:    true,
     dhcp_pool:   document.getElementById("editDhcpPool").value.trim() || null,
+    set_static_override: true,
+    static_override:     document.getElementById("editStaticOverride").value || null,
   };
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);

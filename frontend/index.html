@@ -123,6 +123,12 @@
       <div class="tab-panel" id="panel-hosts">
         <div class="table-toolbar">
           <input type="text" class="search-input" id="tableFilter" placeholder="Filter by IP, hostname, service…">
+          <select id="classFilter" class="search-input" style="max-width:150px;flex-shrink:0">
+            <option value="">All IPs</option>
+            <option value="static">Static only</option>
+            <option value="dynamic">Dynamic only</option>
+            <option value="unknown">Unclassified</option>
+          </select>
           <span class="host-count" id="hostCount"></span>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;margin-left:auto" onclick="openAddHost()">+ Add Host</button>
         </div>
@@ -286,10 +292,11 @@
 
 <!-- ── Modals ──────────────────────────────────────────────────────────────── -->
 
-<!-- Add subnet -->
+<!-- Add / edit subnet -->
 <div class="modal-overlay" id="subnetModal">
   <div class="modal">
-    <div class="modal-title">Add Subnet</div>
+    <div class="modal-title" id="subnetModalTitle">Add Subnet</div>
+    <input type="hidden" id="subnetEditId" value="">
     <div class="form-row">
       <label>Name</label>
       <input type="text" id="subnetName" placeholder="e.g. Home LAN">
@@ -302,9 +309,15 @@
       <label>Description <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
       <input type="text" id="subnetDesc" placeholder="e.g. Main home network">
     </div>
+    <div class="form-row" style="flex-wrap:wrap;gap:8px">
+      <label>DHCP range <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional — IPs in this range are "dynamic")</span></label>
+      <input type="text" id="subnetDhcpStart" placeholder="192.168.1.100" class="mono" style="flex:1;min-width:120px">
+      <span style="color:var(--text-3);font-size:12px">to</span>
+      <input type="text" id="subnetDhcpEnd" placeholder="192.168.1.254" class="mono" style="flex:1;min-width:120px">
+    </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeAddSubnet()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSubnet()">Add Subnet</button>
+      <button class="btn btn-primary" id="subnetSaveBtn" onclick="saveSubnet()">Add Subnet</button>
     </div>
   </div>
 </div>
@@ -442,6 +455,14 @@
     <div class="form-row" id="editDhcpPoolRow" style="display:none">
       <label>DHCP Pool <span style="color:var(--text-3);font-weight:400;text-transform:none">(e.g. 192.168.1.100-192.168.1.254)</span></label>
       <input type="text" id="editDhcpPool" placeholder="192.168.1.100-192.168.1.254" class="mono">
+    </div>
+    <div class="form-row">
+      <label>Classification <span style="color:var(--text-3);font-weight:400;text-transform:none">(static / dynamic)</span></label>
+      <select id="editStaticOverride">
+        <option value="">Auto (from subnet DHCP range)</option>
+        <option value="static">Force static</option>
+        <option value="dynamic">Force dynamic</option>
+      </select>
     </div>
     <div class="form-row">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">

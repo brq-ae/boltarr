@@ -1396,6 +1396,14 @@ tbody td {
 @keyframes mon-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 .svc-mon-cell { display: inline-flex; align-items: center; gap: 6px; }
 
+/* static/dynamic classification badges in the hosts table */
+.cls-badge {
+  margin-left: 4px; font-size: 9px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .04em; padding: 1px 5px; border-radius: 4px; vertical-align: middle;
+}
+.cls-static  { background: oklch(30% 0.07 240); color: oklch(80% 0.09 240); }
+.cls-dynamic { background: oklch(32% 0.09 55);  color: oklch(83% 0.11 60); }
+
 /* uptime stats in the service detail panel */
 .uptime-row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
 .uptime-stat { display: flex; flex-direction: column; gap: 1px; }

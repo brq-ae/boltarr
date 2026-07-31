@@ -1,11 +1,42 @@
 import uuid
 import io
+import ipaddress
 import zipfile
 import tempfile
 import sqlite3 as _sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+
+def classify_host(ip_str: str, subnets: list[dict], override: Optional[str]) -> str:
+    """static | dynamic | unknown.
+
+    Override ('static'/'dynamic') wins. Otherwise: find the subnet whose CIDR
+    contains the IP; if that subnet has a DHCP range, IP inside it = dynamic,
+    outside = static; if the subnet has no range (or no subnet matches) =
+    unknown. One DHCP range per subnet for now — multi-pool can be added later.
+    """
+    if override in ("static", "dynamic"):
+        return override
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return "unknown"
+    for s in subnets:
+        try:
+            net = ipaddress.ip_network(s.get("cidr", ""), strict=False)
+        except ValueError:
+            continue
+        if ip in net:
+            start, end = s.get("dhcp_start"), s.get("dhcp_end")
+            if start and end:
+                try:
+                    return "dynamic" if ipaddress.ip_address(start) <= ip <= ipaddress.ip_address(end) else "static"
+                except ValueError:
+                    return "unknown"
+            return "unknown"   # subnet has no DHCP range defined
+    return "unknown"           # no matching subnet
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -46,6 +77,16 @@ class SubnetIn(BaseModel):
     name: str
     cidr: str
     description: Optional[str] = None
+    dhcp_start:  Optional[str] = None
+    dhcp_end:    Optional[str] = None
+
+
+class SubnetUpdate(BaseModel):
+    name:        Optional[str] = None
+    cidr:        Optional[str] = None
+    description: Optional[str] = None
+    dhcp_start:  Optional[str] = None   # "" clears it
+    dhcp_end:    Optional[str] = None
 
 
 @app.get("/api/subnets")
@@ -59,14 +100,41 @@ def create_subnet(data: SubnetIn):
     try:
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO subnets (name, cidr, description) VALUES (?,?,?)",
-                (data.name, data.cidr, data.description),
+                "INSERT INTO subnets (name, cidr, description, dhcp_start, dhcp_end) VALUES (?,?,?,?,?)",
+                (data.name, data.cidr, data.description,
+                 data.dhcp_start or None, data.dhcp_end or None),
             )
             conn.commit()
             row = conn.execute("SELECT * FROM subnets WHERE cidr=?", (data.cidr,)).fetchone()
             return dict(row)
     except Exception as e:
         raise HTTPException(400, str(e))
+
+
+@app.put("/api/subnets/{subnet_id}")
+def update_subnet(subnet_id: int, data: SubnetUpdate):
+    with get_conn() as conn:
+        s = conn.execute("SELECT id FROM subnets WHERE id=?", (subnet_id,)).fetchone()
+        if not s:
+            raise HTTPException(404, "Subnet not found")
+        # dhcp_start/end: empty string clears (NULL); None leaves unchanged
+        ds = None if data.dhcp_start is None else (data.dhcp_start.strip() or None)
+        de = None if data.dhcp_end   is None else (data.dhcp_end.strip()   or None)
+        try:
+            conn.execute("""
+                UPDATE subnets SET
+                    name        = COALESCE(?, name),
+                    cidr        = COALESCE(?, cidr),
+                    description = COALESCE(?, description),
+                    dhcp_start  = CASE WHEN ? IS NULL THEN dhcp_start ELSE ? END,
+                    dhcp_end    = CASE WHEN ? IS NULL THEN dhcp_end   ELSE ? END
+                WHERE id=?
+            """, (data.name, data.cidr, data.description,
+                  data.dhcp_start, ds, data.dhcp_end, de, subnet_id))
+            conn.commit()
+        except Exception as e:
+            raise HTTPException(400, str(e))
+        return dict(conn.execute("SELECT * FROM subnets WHERE id=?", (subnet_id,)).fetchone())
 
 
 @app.delete("/api/subnets/{subnet_id}")
@@ -180,6 +248,7 @@ class SshAccessIn(BaseModel):
 def list_hosts():
     with get_conn() as conn:
         hosts = [dict(h) for h in conn.execute("SELECT * FROM hosts ORDER BY ip")]
+        subnets = [dict(s) for s in conn.execute("SELECT cidr, dhcp_start, dhcp_end FROM subnets")]
         alias_rows = conn.execute("SELECT host_id, ip FROM host_aliases ORDER BY ip").fetchall()
         alias_map: dict = {}
         for a in alias_rows:
@@ -189,6 +258,7 @@ def list_hosts():
                 "SELECT * FROM ports WHERE host_id=? ORDER BY port", (h["id"],)
             )]
             h["aliases"] = alias_map.get(h["id"], [])
+            h["classification"] = classify_host(h["ip"], subnets, h.get("static_override"))
         return hosts
 
 
@@ -322,6 +392,8 @@ class HostUpdate(BaseModel):
     is_dhcp:     Optional[bool] = None
     dhcp_pool:   Optional[str] = None
     set_dhcp:    bool = False
+    static_override:     Optional[str] = None   # 'static' | 'dynamic' | '' / 'auto'
+    set_static_override: bool = False
 
 
 @app.put("/api/hosts/{ip}")
@@ -353,6 +425,9 @@ def update_host(ip: str, data: HostUpdate):
             conn.execute("UPDATE hosts SET tier=? WHERE ip=?", (data.tier, ip))
         if data.set_dhcp:
             conn.execute("UPDATE hosts SET dhcp_pool=? WHERE ip=?", (data.dhcp_pool, ip))
+        if data.set_static_override:
+            ov = data.static_override if data.static_override in ("static", "dynamic") else None
+            conn.execute("UPDATE hosts SET static_override=? WHERE ip=?", (ov, ip))
         conn.commit()
         row = conn.execute("SELECT * FROM hosts WHERE ip=?", (ip,)).fetchone()
         return dict(row)
