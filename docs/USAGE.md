@@ -163,6 +163,10 @@ From the detail panel you can:
 
 - **Edit** the host — hostname, device type, vendor, notes, MAC address (typing
   auto-inserts the `:` separators), DHCP pool, and more.
+- **Change its IP** — edit the **IP address** field in the same dialog. This is a
+  full rename: the host keeps its notes, ports, services, SSH access, history and
+  topology links, all of which follow it to the new IP. If the new IP already
+  belongs to another host, the change is blocked (use Merge instead).
 - **Merge** a multi-homed device — if the same physical machine has two IPs,
   merge them so it shows as one host with alias IPs. In the Hosts table, a
   merged host shows a collapsible **▶ +N** toggle listing its alias IPs.

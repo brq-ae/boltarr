@@ -635,6 +635,50 @@ def update_host(ip: str, data: HostUpdate):
         return dict(row)
 
 
+class HostRenameReq(BaseModel):
+    new_ip: str
+
+
+@app.post("/api/hosts/{ip}/rename")
+def rename_host_ip(ip: str, data: HostRenameReq):
+    """Change a host's primary IP, cascading to every place the IP is stored."""
+    old_ip = ip.rstrip("/")
+    new_ip = (data.new_ip or "").strip()
+    try:
+        ipaddress.ip_address(new_ip)
+    except ValueError:
+        raise HTTPException(422, f"'{new_ip}' is not a valid IP address")
+    if new_ip == old_ip:
+        return {"ok": True, "ip": new_ip}
+    with get_conn() as conn:
+        host = conn.execute("SELECT id FROM hosts WHERE ip=?", (old_ip,)).fetchone()
+        if not host:
+            raise HTTPException(404, "Host not found")
+        hid = host["id"]
+        # collision guards — never silently overwrite/merge another host
+        if conn.execute("SELECT 1 FROM hosts WHERE ip=?", (new_ip,)).fetchone():
+            raise HTTPException(409, f"{new_ip} already belongs to another host — use Merge instead")
+        al = conn.execute("SELECT host_id FROM host_aliases WHERE ip=?", (new_ip,)).fetchone()
+        if al and al["host_id"] != hid:
+            raise HTTPException(409, f"{new_ip} is an alias of another host — use Merge instead")
+        if al:                     # this host's own alias becomes the primary → drop the alias
+            conn.execute("DELETE FROM host_aliases WHERE ip=?", (new_ip,))
+        # cascade the rename to every place an IP is stored as a string
+        conn.execute("UPDATE hosts SET ip=? WHERE id=?", (new_ip, hid))
+        conn.execute("UPDATE host_aliases SET ip=? WHERE ip=?", (new_ip, old_ip))
+        conn.execute("UPDATE ssh_access SET host_ip=? WHERE host_ip=?", (new_ip, old_ip))
+        conn.execute("UPDATE services SET container_ip=? WHERE container_ip=?", (new_ip, old_ip))
+        conn.execute("UPDATE change_events SET ip=? WHERE ip=?", (new_ip, old_ip))
+        conn.execute("UPDATE scan_runs SET host_ip=? WHERE host_ip=?", (new_ip, old_ip))
+        # connections have UNIQUE(src_ip,dst_ip): update what we can, drop any leftover
+        # rows that would have become duplicate edges
+        conn.execute("UPDATE OR IGNORE connections SET src_ip=? WHERE src_ip=?", (new_ip, old_ip))
+        conn.execute("UPDATE OR IGNORE connections SET dst_ip=? WHERE dst_ip=?", (new_ip, old_ip))
+        conn.execute("DELETE FROM connections WHERE src_ip=? OR dst_ip=?", (old_ip, old_ip))
+        conn.commit()
+    return {"ok": True, "ip": new_ip}
+
+
 @app.delete("/api/hosts/{ip}")
 def delete_host(ip: str):
     with get_conn() as conn:

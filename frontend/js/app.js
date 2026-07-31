@@ -803,7 +803,12 @@ const DEVICE_TYPES = ["router","gateway","switch","unmanaged-switch","firewall",
 
 async function openEditHost(ip) {
   const host = await api("GET", `/api/hosts/${ip}`);
-  document.getElementById("editIp").value         = ip;
+  document.getElementById("editIp").value         = ip;   // original IP (the key)
+  const ipNew = document.getElementById("editIpNew");
+  const synthetic = ip.startsWith("node-");
+  ipNew.value = synthetic ? "" : ip;
+  ipNew.disabled = synthetic;                             // placeholder nodes have no real IP
+  ipNew.placeholder = synthetic ? "(placeholder node)" : "192.168.1.50";
   document.getElementById("editHostname").value   = host.hostname || "";
   document.getElementById("editMac").value        = host.mac || "";
   document.getElementById("editVendor").value     = host.vendor || "";
@@ -877,7 +882,19 @@ async function removeAlias(ip, aliasIp) {
   } catch (e) { alert("Error: " + e.message); }
 }
 async function saveHostEdit() {
-  const ip = document.getElementById("editIp").value;
+  const originalIp = document.getElementById("editIp").value;
+  const ipField    = document.getElementById("editIpNew");
+  const newIp      = ipField.disabled ? originalIp : ipField.value.trim();
+  // If the IP was changed, rename first (cascades everywhere); abort save on failure.
+  if (newIp && newIp !== originalIp) {
+    try {
+      await api("POST", `/api/hosts/${encodeURIComponent(originalIp)}/rename`, { new_ip: newIp });
+    } catch (e) {
+      alert("Couldn't change the IP: " + e.message);
+      return;
+    }
+  }
+  const ip = (newIp && newIp !== originalIp) ? newIp : originalIp;
   const payload = {
     hostname:    document.getElementById("editHostname").value.trim() || null,
     mac:         document.getElementById("editMac").value.trim() || null,
