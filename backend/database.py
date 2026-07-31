@@ -172,9 +172,32 @@ def init_db():
                 to_service_id   INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
                 UNIQUE(from_service_id, to_service_id)
             )""",
+            # Reusable scan profiles (options as JSON). Built-ins are seeded below
+            # and can't be deleted; users add their own. Used by manual scans,
+            # per-host probes, and (later) scheduled scans.
+            """CREATE TABLE IF NOT EXISTS scan_profiles (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                name     TEXT NOT NULL UNIQUE,
+                builtin  INTEGER NOT NULL DEFAULT 0,
+                options  TEXT NOT NULL DEFAULT '{}'
+            )""",
         ]:
             try:
                 conn.execute(sql)
                 conn.commit()
             except Exception:
                 pass
+
+        # Seed built-in scan profiles (idempotent).
+        import json as _json
+        for _name, _opts in [
+            ("Quick",    {"ports": "none"}),                 # discovery only (-sn)
+            ("Standard", {}),                                # top-1000 + version + OS (defaults)
+            ("Full",     {"ports": "all"}),                  # all ports + version + OS
+        ]:
+            try:
+                conn.execute("INSERT OR IGNORE INTO scan_profiles (name, builtin, options) VALUES (?, 1, ?)",
+                             (_name, _json.dumps(_opts)))
+            except Exception:
+                pass
+        conn.commit()

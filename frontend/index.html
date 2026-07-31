@@ -153,7 +153,83 @@
 
       <!-- Scans tab -->
       <div class="tab-panel" id="panel-scans">
-        <div class="scans-wrap" id="scansWrap"></div>
+        <div class="svc-toolbar">
+          <div class="svc-subtabs">
+            <button class="svc-subtab active" id="scanTabBtn-run" onclick="setScanTab('run')">Run</button>
+            <button class="svc-subtab" id="scanTabBtn-history" onclick="setScanTab('history')">History</button>
+          </div>
+        </div>
+
+        <!-- Run (nmap builder) -->
+        <div id="scan-panel-run" class="scan-builder">
+          <div class="scan-build-grid">
+            <div class="form-row">
+              <label>Target</label>
+              <select id="scanTarget"></select>
+            </div>
+            <div class="form-row">
+              <label>Profile</label>
+              <div style="display:flex;gap:6px;flex:1">
+                <select id="scanProfile" onchange="applyScanProfile()" style="flex:1"></select>
+                <button class="btn-icon" id="scanProfileDelete" onclick="deleteScanProfile()" title="Delete profile" style="display:none;color:var(--text-3)">✕</button>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Ports</label>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">
+                <select id="scanPorts" onchange="onScanFieldChange()">
+                  <option value="none">None — discovery only</option>
+                  <option value="top1000">Top 1000 (default)</option>
+                  <option value="topN">Top N…</option>
+                  <option value="all">All 65,535</option>
+                  <option value="custom">Custom range…</option>
+                </select>
+                <input type="number" id="scanTopN" value="100" min="1" max="65535" style="width:80px;display:none" oninput="updateScanPreview()">
+                <input type="text" id="scanPortRange" placeholder="22,80,443,8000-8100" class="mono" style="flex:1;min-width:140px;display:none" oninput="updateScanPreview()">
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Options</label>
+              <div class="scan-checks">
+                <label><input type="checkbox" id="scanSv" onchange="onScanFieldChange()"> Service+version (-sV)</label>
+                <label><input type="checkbox" id="scanOs" onchange="onScanFieldChange()"> OS detection (-O)</label>
+                <label><input type="checkbox" id="scanPn" onchange="updateScanPreview()"> Skip discovery (-Pn)</label>
+                <label><input type="checkbox" id="scanUdp" onchange="updateScanPreview()"> UDP (-sU)</label>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Timing</label>
+              <select id="scanTiming" onchange="updateScanPreview()" style="max-width:220px">
+                <option value="T0">T0 — paranoid (slowest/stealth)</option>
+                <option value="T1">T1 — sneaky</option>
+                <option value="T2">T2 — polite (gentle)</option>
+                <option value="T3">T3 — normal</option>
+                <option value="T4">T4 — aggressive (default)</option>
+                <option value="T5">T5 — insane (fastest)</option>
+              </select>
+            </div>
+            <div class="form-row" id="scanScriptsRow">
+              <label>NSE scripts <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+              <input type="text" id="scanScripts" placeholder="e.g. snmp-info,http-title,ssl-cert" class="mono" oninput="updateScanPreview()">
+            </div>
+          </div>
+
+          <div class="scan-preview-wrap">
+            <div class="scan-preview-label">Command preview</div>
+            <code id="scanPreview" class="scan-preview">nmap …</code>
+          </div>
+
+          <div class="scan-build-actions">
+            <button class="btn" onclick="saveScanProfile()">＋ Save as profile</button>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary" id="scanRunBtn" onclick="runScanFromBuilder()">▶ Run scan</button>
+          </div>
+        </div>
+
+        <!-- History -->
+        <div id="scan-panel-history" style="display:none">
+          <div class="scans-wrap" id="scansWrap"></div>
+        </div>
       </div>
 
       <!-- Services tab -->

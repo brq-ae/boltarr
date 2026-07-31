@@ -1396,6 +1396,32 @@ tbody td {
 @keyframes mon-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 .svc-mon-cell { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ── Scan builder ─────────────────────────────────────────────────────────── */
+.scan-builder { padding: 14px 16px; max-width: 760px; overflow-y: auto; }
+.scan-build-grid { display: flex; flex-direction: column; gap: 12px; }
+.scan-build-grid .form-row { margin: 0; align-items: center; }
+.scan-preview-wrap {
+  margin: 16px 0; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.scan-preview-label {
+  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--text-3); margin-bottom: 5px;
+}
+.scan-preview {
+  font-family: var(--font-mono); font-size: 12px; color: var(--accent);
+  white-space: pre-wrap; word-break: break-all; display: block;
+}
+.scan-build-actions { display: flex; align-items: center; gap: 8px; }
+/* checkbox group — override the .form-row label/input rules */
+.scan-checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+.scan-checks label {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  margin: 0; font-size: 12px; font-weight: 400; text-transform: none;
+  letter-spacing: 0; color: var(--text-2);
+}
+.scan-checks input { width: auto; accent-color: var(--accent); }
+
 /* static/dynamic classification badges in the hosts table */
 .cls-badge {
   margin-left: 4px; font-size: 9px; font-weight: 600; text-transform: uppercase;

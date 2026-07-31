@@ -13,6 +13,8 @@ let sortCol         = "ip";
 let sortDir         = 1;
 let filterText      = "";
 let classFilterVal  = "";   // "" | static | dynamic | unknown
+let currentScanTab  = "run";
+let scanProfiles    = [];
 let activeDetailTab = "info";
 let currentSvcTab     = "list";
 let svcHostFilterVal  = "";
@@ -39,7 +41,7 @@ async function api(method, path, body) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function boot() {
-  await Promise.all([loadSubnets(), loadModels(), loadHosts(), loadServicesData(), loadVlans()]);
+  await Promise.all([loadSubnets(), loadModels(), loadHosts(), loadServicesData(), loadVlans(), loadScanProfiles()]);
   renderHostsTable();
   await loadGraph();
   await loadScans();
@@ -183,9 +185,20 @@ async function stopScan() {
   } catch (_) {}
 }
 
+// Options for the per-host probe profile picker (excludes discovery-only "Quick").
+function _probeProfileOptions() {
+  const usable = scanProfiles.filter(p => (p.options || {}).ports !== "none");
+  return usable.map(p =>
+    `<option value="${p.id}"${p.name === "Standard" ? " selected" : ""}>${p.name}</option>`
+  ).join("") || `<option value="">Standard</option>`;
+}
+
 async function probeHost(ip) {
   try {
-    const { run_id } = await api("POST", `/api/hosts/${ip}/probe`);
+    const sel = document.getElementById("probeProfile");
+    const p = scanProfiles.find(x => String(x.id) === (sel ? sel.value : ""));
+    const opts = p ? (p.options || {}) : {};
+    const { run_id } = await api("POST", `/api/hosts/${ip}/probe`, opts);
     activeRunId = run_id;
     showToast(`Probing ${ip}…`);
     startProbePolling(run_id, ip);
@@ -504,6 +517,7 @@ async function showHostDetail(ip) {
         <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="analyzeHost('${ip}')">Analyze</button>
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openEditHost('${ip}')">Edit</button>
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openMergeHost('${ip}')">⇌ Merge</button>
+        <select id="probeProfile" title="Scan profile for the probe" style="font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)">${_probeProfileOptions()}</select>
         <button class="btn" style="font-size:11px;padding:5px 10px" onclick="probeHost('${ip}')">⟳ Probe</button>
         <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" onclick="deleteHost('${ip}')">Delete</button>
         <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:18px;padding:2px 8px">×</button>
@@ -966,6 +980,138 @@ async function loadGraph() {
 
 // ── Scans ─────────────────────────────────────────────────────────────────────
 
+// ── Scan tab: Run/History sub-tabs + nmap builder ─────────────────────────────
+
+async function loadScansTab() {
+  populateScanTarget();
+  await loadScanProfiles();
+  applyScanProfile();          // apply the currently-selected profile → fills fields + preview
+  await loadScans();
+}
+
+function setScanTab(tab) {
+  currentScanTab = tab;
+  document.getElementById("scan-panel-run").style.display     = tab === "run"     ? "" : "none";
+  document.getElementById("scan-panel-history").style.display = tab === "history" ? "" : "none";
+  document.querySelectorAll("#panel-scans .svc-subtab").forEach(b => b.classList.remove("active"));
+  document.getElementById(`scanTabBtn-${tab}`)?.classList.add("active");
+}
+
+function populateScanTarget() {
+  const sel = document.getElementById("scanTarget");
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = subnets.map(s => `<option value="${s.id}">${s.name} — ${s.cidr}</option>`).join("")
+    || `<option value="">No subnets — add one first</option>`;
+  if (cur && sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+  sel.onchange = updateScanPreview;
+}
+
+async function loadScanProfiles() {
+  scanProfiles = await api("GET", "/api/scan-profiles");
+  const sel = document.getElementById("scanProfile");
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = scanProfiles.map(p => `<option value="${p.id}">${p.name}${p.builtin ? "" : " ·custom"}</option>`).join("");
+  if (cur && sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
+  else { const std = scanProfiles.find(p => p.name === "Standard"); if (std) sel.value = String(std.id); }
+}
+
+function _scanOptsFromFields() {
+  return {
+    ports:      document.getElementById("scanPorts").value,
+    top_n:      parseInt(document.getElementById("scanTopN").value) || 100,
+    port_range: document.getElementById("scanPortRange").value.trim(),
+    sv:         document.getElementById("scanSv").checked,
+    os:         document.getElementById("scanOs").checked,
+    timing:     document.getElementById("scanTiming").value,
+    pn:         document.getElementById("scanPn").checked,
+    udp:        document.getElementById("scanUdp").checked,
+    scripts:    document.getElementById("scanScripts").value.trim(),
+  };
+}
+
+function _scanTargetCidr() {
+  const id = parseInt(document.getElementById("scanTarget").value);
+  const s = subnets.find(x => x.id === id);
+  return s ? s.cidr : "TARGET";
+}
+
+function syncScanConditional() {
+  const p = document.getElementById("scanPorts").value;
+  document.getElementById("scanTopN").style.display      = p === "topN"   ? "" : "none";
+  document.getElementById("scanPortRange").style.display = p === "custom" ? "" : "none";
+}
+function onScanFieldChange() { syncScanConditional(); updateScanPreview(); }
+
+let _scanPreviewTimer = null;
+function updateScanPreview() {
+  clearTimeout(_scanPreviewTimer);
+  _scanPreviewTimer = setTimeout(async () => {
+    try {
+      const { command } = await api("POST", `/api/scan/preview?target=${encodeURIComponent(_scanTargetCidr())}`, _scanOptsFromFields());
+      document.getElementById("scanPreview").textContent = command;
+    } catch { /* ignore */ }
+  }, 120);
+}
+
+function applyScanProfile() {
+  const sel = document.getElementById("scanProfile");
+  const p = scanProfiles.find(x => String(x.id) === sel.value);
+  document.getElementById("scanProfileDelete").style.display = (p && !p.builtin) ? "" : "none";
+  if (!p) { updateScanPreview(); return; }
+  const d = { ports:"top1000", top_n:100, port_range:"", sv:true, os:true, timing:"T4", pn:false, udp:false, scripts:"" };
+  const o = { ...d, ...(p.options || {}) };
+  document.getElementById("scanPorts").value     = o.ports;
+  document.getElementById("scanTopN").value      = o.top_n;
+  document.getElementById("scanPortRange").value = o.port_range || "";
+  document.getElementById("scanSv").checked      = !!o.sv;
+  document.getElementById("scanOs").checked      = !!o.os;
+  document.getElementById("scanTiming").value    = o.timing || "T4";
+  document.getElementById("scanPn").checked      = !!o.pn;
+  document.getElementById("scanUdp").checked     = !!o.udp;
+  document.getElementById("scanScripts").value   = o.scripts || "";
+  syncScanConditional();
+  updateScanPreview();
+}
+
+async function saveScanProfile() {
+  const name = prompt("Save these settings as a profile named:");
+  if (!name || !name.trim()) return;
+  try {
+    const p = await api("POST", "/api/scan-profiles", { name: name.trim(), options: _scanOptsFromFields() });
+    await loadScanProfiles();
+    document.getElementById("scanProfile").value = String(p.id);
+    applyScanProfile();
+    showToast("Profile saved");
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function deleteScanProfile() {
+  const sel = document.getElementById("scanProfile");
+  const p = scanProfiles.find(x => String(x.id) === sel.value);
+  if (!p || p.builtin) return;
+  if (!confirm(`Delete profile "${p.name}"?`)) return;
+  try {
+    await api("DELETE", `/api/scan-profiles/${p.id}`);
+    await loadScanProfiles();
+    applyScanProfile();
+  } catch (e) { alert("Error: " + e.message); }
+}
+
+async function runScanFromBuilder() {
+  const id = parseInt(document.getElementById("scanTarget").value);
+  if (!id) return alert("Pick a target subnet.");
+  try {
+    const { run_id } = await api("POST", `/api/scan/${id}`, _scanOptsFromFields());
+    activeRunId = run_id;
+    startPolling(id);
+    setScanTab("history");
+    await loadScans();
+    showToast("Scan started");
+  } catch (e) { alert("Error: " + e.message); }
+}
+
 async function loadScans() {
   const scans = await api("GET", "/api/scans");
   const wrap = document.getElementById("scansWrap");
@@ -1074,7 +1220,7 @@ function setTab(name) {
 
   closeSidebar();
   if (name === "topology")  loadGraph();
-  if (name === "scans")     loadScans();
+  if (name === "scans")     loadScansTab();
   if (name === "hierarchy") loadHierarchy();
   if (name === "services")  loadServicesTab();
   if (name === "sshkeys")   loadSshKeys();

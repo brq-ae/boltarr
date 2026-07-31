@@ -1,5 +1,6 @@
 import uuid
 import io
+import json
 import ipaddress
 import zipfile
 import tempfile
@@ -44,7 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .database import init_db, get_conn
-from .scanner import start_scan, scan_jobs, cancel_scan, start_probe
+from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_command
 from .config import get_config, get_llm_config, get_notifications_config, save_config
 from . import notify
 from . import monitor
@@ -147,8 +148,27 @@ def delete_subnet(subnet_id: int):
 
 # ── Scans ─────────────────────────────────────────────────────────────────────
 
+class ScanOptions(BaseModel):
+    ports:             str  = "top1000"   # none | top1000 | topN | all | custom
+    top_n:             int  = 100
+    port_range:        str  = ""
+    sv:                bool = True
+    version_intensity: int  = 5
+    os:                bool = True
+    timing:            str  = "T4"
+    pn:                bool = False
+    udp:               bool = False
+    scripts:           str  = ""
+
+
+@app.post("/api/scan/preview")
+def scan_preview(opts: ScanOptions, target: str = "TARGET"):
+    """Return the exact nmap command a scan with these options would run."""
+    return {"command": build_command(opts.dict(), target)}
+
+
 @app.post("/api/scan/{subnet_id}")
-def trigger_scan(subnet_id: int):
+def trigger_scan(subnet_id: int, opts: Optional[ScanOptions] = None):
     with get_conn() as conn:
         subnet = conn.execute("SELECT * FROM subnets WHERE id=?", (subnet_id,)).fetchone()
         if not subnet:
@@ -156,8 +176,76 @@ def trigger_scan(subnet_id: int):
         conn.execute("INSERT INTO scan_runs (subnet_id) VALUES (?)", (subnet_id,))
         conn.commit()
         run_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-    start_scan(run_id, subnet["cidr"])
+    start_scan(run_id, subnet["cidr"], (opts or ScanOptions()).dict())
     return {"run_id": run_id, "status": "started"}
+
+
+# ── Scan profiles (reusable saved scan configs) ───────────────────────────────
+
+class ScanProfileIn(BaseModel):
+    name:    str
+    options: ScanOptions
+
+
+def _profile_row(r) -> dict:
+    d = dict(r)
+    try:
+        d["options"] = json.loads(d["options"])
+    except Exception:
+        d["options"] = {}
+    d["builtin"] = bool(d["builtin"])
+    return d
+
+
+@app.get("/api/scan-profiles")
+def list_scan_profiles():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM scan_profiles ORDER BY builtin DESC, name").fetchall()
+    return [_profile_row(r) for r in rows]
+
+
+@app.post("/api/scan-profiles", status_code=201)
+def create_scan_profile(data: ScanProfileIn):
+    with get_conn() as conn:
+        try:
+            conn.execute("INSERT INTO scan_profiles (name, builtin, options) VALUES (?, 0, ?)",
+                         (data.name.strip(), json.dumps(data.options.dict())))
+            conn.commit()
+        except Exception as e:
+            msg = "A profile with that name already exists" if "UNIQUE" in str(e) else str(e)
+            raise HTTPException(400, msg)
+        return _profile_row(conn.execute("SELECT * FROM scan_profiles WHERE name=?", (data.name.strip(),)).fetchone())
+
+
+@app.put("/api/scan-profiles/{pid}")
+def update_scan_profile(pid: int, data: ScanProfileIn):
+    with get_conn() as conn:
+        row = conn.execute("SELECT builtin FROM scan_profiles WHERE id=?", (pid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Profile not found")
+        if row["builtin"]:
+            raise HTTPException(400, "Built-in profiles can't be edited")
+        try:
+            conn.execute("UPDATE scan_profiles SET name=?, options=? WHERE id=?",
+                         (data.name.strip(), json.dumps(data.options.dict()), pid))
+            conn.commit()
+        except Exception as e:
+            msg = "A profile with that name already exists" if "UNIQUE" in str(e) else str(e)
+            raise HTTPException(400, msg)
+        return _profile_row(conn.execute("SELECT * FROM scan_profiles WHERE id=?", (pid,)).fetchone())
+
+
+@app.delete("/api/scan-profiles/{pid}")
+def delete_scan_profile(pid: int):
+    with get_conn() as conn:
+        row = conn.execute("SELECT builtin FROM scan_profiles WHERE id=?", (pid,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Profile not found")
+        if row["builtin"]:
+            raise HTTPException(400, "Built-in profiles can't be deleted")
+        conn.execute("DELETE FROM scan_profiles WHERE id=?", (pid,))
+        conn.commit()
+    return {"ok": True}
 
 
 @app.get("/api/scan/{run_id}/status")
@@ -263,7 +351,7 @@ def list_hosts():
 
 
 @app.post("/api/hosts/{ip}/probe", status_code=201)
-def probe_host(ip: str):
+def probe_host(ip: str, opts: Optional[ScanOptions] = None):
     with get_conn() as conn:
         host = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
         if not host:
@@ -274,7 +362,7 @@ def probe_host(ip: str):
         )
         conn.commit()
         run_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
-    start_probe(run_id, ip)
+    start_probe(run_id, ip, (opts or ScanOptions()).dict())
     return {"run_id": run_id, "status": "started"}
 
 
