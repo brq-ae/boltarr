@@ -172,12 +172,15 @@ def prune(retention_days: int | None = None) -> None:
 
 _LABEL = {
     "host_new":         ("🆕", "new device",      "new devices"),
+    "host_offline":     ("🔴", "went offline",    "went offline"),
+    "host_online":      ("🟢", "back online",     "back online"),
     "port_opened":      ("🔓", "port opened",     "ports opened"),
     "port_closed":      ("🔒", "port closed",     "ports closed"),
     "mac_changed":      ("🔀", "MAC change",      "MAC changes"),
     "hostname_changed": ("🏷️", "hostname change", "hostname changes"),
 }
-_ORDER = ["host_new", "port_opened", "port_closed", "mac_changed", "hostname_changed"]
+_ORDER = ["host_new", "host_offline", "host_online", "port_opened", "port_closed", "mac_changed", "hostname_changed"]
+_STATIC_SCOPED = ("host_new", "mac_changed", "host_offline", "host_online")
 
 
 def _detail(ev: dict) -> str:
@@ -208,12 +211,16 @@ def is_alert_worthy(conn, ev: dict, subnets: list[dict]) -> bool:
     a = get_change_alerts_config()
     if not a.get("enabled") or not a.get(ev["type"], True):
         return False
-    if ev["type"] in ("host_new", "mac_changed"):
-        row = conn.execute("SELECT static_override, no_mac_alert FROM hosts WHERE ip=?", (ev["ip"],)).fetchone()
+    if ev["type"] in _STATIC_SCOPED:
+        row = conn.execute(
+            "SELECT static_override, no_mac_alert, no_offline_alert FROM hosts WHERE ip=?",
+            (ev["ip"],)).fetchone()
         override = row["static_override"] if row else None
-        if classify_host(ev["ip"], subnets, override) != "static":   # new-host / MAC alerts: static IPs only
+        if classify_host(ev["ip"], subnets, override) != "static":   # scoped to static IPs
             return False
         if ev["type"] == "mac_changed" and row and row["no_mac_alert"]:
+            return False
+        if ev["type"] in ("host_offline", "host_online") and row and row["no_offline_alert"]:
             return False
     return True
 
@@ -242,6 +249,26 @@ def send_scan_summary(run_id: int, target_label: str = "") -> None:
     n = len(worthy)
     title = f"{n} network change{'s' if n != 1 else ''}" + (f" on {target_label}" if target_label else "")
     notify.send(title=title, message=summarize(worthy), tags=["satellite_antenna"])
+
+
+def alert_transition(conn, ip: str, event_type: str) -> None:
+    """Immediate ntfy alert for a single offline/online transition (quiet-hours-aware)."""
+    subnets = [dict(s) for s in conn.execute("SELECT cidr, dhcp_start, dhcp_end FROM subnets")]
+    if not is_alert_worthy(conn, {"type": event_type, "ip": ip}, subnets):
+        return
+    try:
+        from .monitor import in_quiet_window
+        if in_quiet_window(datetime.now().time()):
+            return
+    except Exception:
+        pass
+    icon, sing, _ = _LABEL.get(event_type, ("•", event_type, ""))
+    host = conn.execute("SELECT hostname FROM hosts WHERE ip=?", (ip,)).fetchone()
+    label = ip + (f" ({host['hostname']})" if host and host["hostname"] else "")
+    notify.send(title=f"{label} {sing}",
+                message=f"{label} {sing}.",
+                priority="high" if event_type == "host_offline" else "default",
+                tags=["red_circle"] if event_type == "host_offline" else ["green_circle"])
 
 
 def send_digest() -> None:

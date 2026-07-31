@@ -559,6 +559,12 @@
     </div>
     <div class="form-row">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="editNoOfflineAlert" style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">Don't alert when this host goes offline/online <span style="color:var(--text-3)">(still monitored)</span></span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editTierL1" style="accent-color:var(--accent);width:14px;height:14px">
         <span><strong style="color:var(--text)">Gateway (Level 1)</strong> — root of network hierarchy</span>
       </label>
@@ -1005,6 +1011,24 @@
 
       <div class="sidebar-divider" style="margin:4px 0"></div>
       <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:13px;font-weight:600">📡 Liveness</span>
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+          <input type="checkbox" id="setLvEnabled"> Enabled
+        </label>
+      </div>
+      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+        A light background ping sweep marks each known host online/offline (the dot in the Hosts table). Offline/online transitions feed Change tracking &amp; alerts above.
+      </p>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Sweep every</label>
+        <input id="setLvInterval" type="number" min="1" style="width:64px" value="3">
+        <span style="font-size:11px;color:var(--text-3)">min · offline after</span>
+        <input id="setLvOfflineAfter" type="number" min="1" style="width:64px" value="3">
+        <span style="font-size:11px;color:var(--text-3)">missed sweeps</span>
+      </div>
+
+      <div class="sidebar-divider" style="margin:4px 0"></div>
+      <div style="display:flex;align-items:center;gap:10px">
         <span style="font-size:13px;font-weight:600">🕓 Change tracking</span>
         <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
           <input type="checkbox" id="setCtEnabled"> Enabled
@@ -1019,6 +1043,8 @@
         <label><input type="checkbox" id="setCtPortClosed"> Port closed</label>
         <label><input type="checkbox" id="setCtMacChanged"> MAC changed</label>
         <label><input type="checkbox" id="setCtHostnameChanged"> Hostname changed</label>
+        <label><input type="checkbox" id="setCtOffline"> Host offline</label>
+        <label><input type="checkbox" id="setCtOnline"> Host online</label>
       </div>
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Keep history for</label>
@@ -1042,6 +1068,8 @@
         <label><input type="checkbox" id="setCaPortClosed"> Port closed</label>
         <label><input type="checkbox" id="setCaMacChanged"> MAC changed</label>
         <label><input type="checkbox" id="setCaHostnameChanged"> Hostname changed</label>
+        <label><input type="checkbox" id="setCaOffline"> Host offline</label>
+        <label><input type="checkbox" id="setCaOnline"> Host online</label>
       </div>
       <div class="scan-checks" style="padding-left:2px">
         <label><input type="checkbox" id="setCaOnScan"> Summary after each scan</label>

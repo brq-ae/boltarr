@@ -197,6 +197,11 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_change_events_ip ON change_events(ip, ts)",
             "ALTER TABLE change_events ADD COLUMN run_id INTEGER",   # groups events by scan run
             "ALTER TABLE hosts ADD COLUMN no_mac_alert INTEGER NOT NULL DEFAULT 0",  # per-IP MAC-alert opt-out
+            # Liveness (ping tier): online = 1/0/NULL(unknown); miss_count tracks
+            # consecutive missed sweeps; no_offline_alert opts a host out of offline alerts.
+            "ALTER TABLE hosts ADD COLUMN online INTEGER",
+            "ALTER TABLE hosts ADD COLUMN miss_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE hosts ADD COLUMN no_offline_alert INTEGER NOT NULL DEFAULT 0",
         ]:
             try:
                 conn.execute(sql)

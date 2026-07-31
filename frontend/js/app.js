@@ -325,9 +325,10 @@ function renderHostsTable() {
       ? `<span class="cls-badge cls-dynamic" title="Dynamic — in DHCP range${ov}">dynamic</span>`
       : "";
     const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip;
+    const dot = isSynthetic ? "" : livenessDot(h.online);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="td-ip mono" style="color:var(--accent)">${displayIp}${aliasToggle}</td>
+      <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
       <td class="td-host">${h.hostname || `<span style="color:var(--text-3)">—</span>`}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac||"—"}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${h.vendor||"—"}</td>
@@ -350,6 +351,13 @@ function renderHostsTable() {
       tbody.appendChild(subTr);
     }
   });
+}
+
+function livenessDot(online) {
+  const s = online === 1 ? ["online",  "var(--ok, #3fb950)",  "Online"]
+          : online === 0 ? ["offline", "var(--bad, #f85149)", "Offline"]
+          :                ["unknown", "var(--text-3)",       "Liveness unknown"];
+  return `<span class="live-dot live-${s[0]}" title="${s[2]}" style="background:${s[1]}"></span>`;
 }
 
 function toggleAliasRow(ip) {
@@ -808,6 +816,7 @@ async function openEditHost(ip) {
   document.getElementById("editDhcpPool").value   = host.dhcp_pool || "";
   document.getElementById("editStaticOverride").value = host.static_override || "";
   document.getElementById("editNoMacAlert").checked   = !!host.no_mac_alert;
+  document.getElementById("editNoOfflineAlert").checked = !!host.no_offline_alert;
   document.getElementById("editDhcpPoolRow").style.display = host.is_dhcp ? "" : "none";
   const sel = document.getElementById("editDeviceType");
   sel.innerHTML = DEVICE_TYPES.map(t =>
@@ -886,6 +895,7 @@ async function saveHostEdit() {
     set_static_override: true,
     static_override:     document.getElementById("editStaticOverride").value || null,
     no_mac_alert:        document.getElementById("editNoMacAlert").checked,
+    no_offline_alert:    document.getElementById("editNoOfflineAlert").checked,
   };
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);
@@ -2644,7 +2654,7 @@ const PROVIDER_KEY_PLACEHOLDER = {
 
 async function openSettings() {
   try {
-    const { llm, notifications, statuspage, change_tracking, change_alerts } = await api("GET", "/api/settings");
+    const { llm, notifications, statuspage, change_tracking, change_alerts, liveness } = await api("GET", "/api/settings");
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
@@ -2679,7 +2689,14 @@ async function openSettings() {
     document.getElementById("setCtPortClosed").checked       = ct.port_closed      !== false;
     document.getElementById("setCtMacChanged").checked       = ct.mac_changed      !== false;
     document.getElementById("setCtHostnameChanged").checked  = ct.hostname_changed !== false;
+    document.getElementById("setCtOffline").checked          = ct.host_offline     !== false;
+    document.getElementById("setCtOnline").checked           = ct.host_online      !== false;
     document.getElementById("setCtRetention").value          = ct.retention_days ?? 90;
+
+    const lv = liveness || {};
+    document.getElementById("setLvEnabled").checked  = lv.enabled !== false;
+    document.getElementById("setLvInterval").value   = lv.interval_minutes ?? 3;
+    document.getElementById("setLvOfflineAfter").value = lv.offline_after ?? 3;
 
     const ca = change_alerts || {};
     document.getElementById("setCaEnabled").checked          = !!ca.enabled;
@@ -2688,6 +2705,8 @@ async function openSettings() {
     document.getElementById("setCaPortClosed").checked       = !!ca.port_closed;
     document.getElementById("setCaMacChanged").checked       = !!ca.mac_changed;
     document.getElementById("setCaHostnameChanged").checked  = !!ca.hostname_changed;
+    document.getElementById("setCaOffline").checked          = ca.host_offline     !== false;
+    document.getElementById("setCaOnline").checked           = ca.host_online      !== false;
     document.getElementById("setCaOnScan").checked           = ca.on_scan          !== false;
     document.getElementById("setCaDigest").checked           = ca.digest_enabled   !== false;
     document.getElementById("setCaDigestTime").value         = ca.digest_time || "08:00";
@@ -2753,7 +2772,14 @@ async function saveSettings() {
     port_closed:      document.getElementById("setCtPortClosed").checked,
     mac_changed:      document.getElementById("setCtMacChanged").checked,
     hostname_changed: document.getElementById("setCtHostnameChanged").checked,
+    host_offline:     document.getElementById("setCtOffline").checked,
+    host_online:      document.getElementById("setCtOnline").checked,
     retention_days:   parseInt(document.getElementById("setCtRetention").value) || 90,
+  };
+  const lvPayload = {
+    enabled:          document.getElementById("setLvEnabled").checked,
+    interval_minutes: parseInt(document.getElementById("setLvInterval").value) || 3,
+    offline_after:    parseInt(document.getElementById("setLvOfflineAfter").value) || 3,
   };
   const caPayload = {
     enabled:          document.getElementById("setCaEnabled").checked,
@@ -2762,6 +2788,8 @@ async function saveSettings() {
     port_closed:      document.getElementById("setCaPortClosed").checked,
     mac_changed:      document.getElementById("setCaMacChanged").checked,
     hostname_changed: document.getElementById("setCaHostnameChanged").checked,
+    host_offline:     document.getElementById("setCaOffline").checked,
+    host_online:      document.getElementById("setCaOnline").checked,
     on_scan:          document.getElementById("setCaOnScan").checked,
     digest_enabled:   document.getElementById("setCaDigest").checked,
     digest_time:      document.getElementById("setCaDigestTime").value,
@@ -2771,6 +2799,7 @@ async function saveSettings() {
     await api("PUT", "/api/settings/notifications", ntfyPayload);
     await api("PUT", "/api/settings/statuspage", spPayload);
     await api("PUT", "/api/settings/change-tracking", ctPayload);
+    await api("PUT", "/api/settings/liveness", lvPayload);
     await api("PUT", "/api/settings/change-alerts", caPayload);
     closeSettings();
     await loadModels();

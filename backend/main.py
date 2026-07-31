@@ -20,6 +20,7 @@ from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_comm
 from .config import get_config, get_llm_config, get_notifications_config, save_config
 from . import notify
 from . import monitor
+from . import liveness
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, is_configured, get_default_model,
@@ -37,6 +38,7 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 def startup():
     init_db()
     monitor.start_monitor()
+    liveness.start_liveness()
 
 
 @app.get("/api/version")
@@ -476,6 +478,7 @@ class HostUpdate(BaseModel):
     static_override:     Optional[str] = None   # 'static' | 'dynamic' | '' / 'auto'
     set_static_override: bool = False
     no_mac_alert:        Optional[bool] = None
+    no_offline_alert:    Optional[bool] = None
 
 
 @app.put("/api/hosts/{ip}")
@@ -512,6 +515,8 @@ def update_host(ip: str, data: HostUpdate):
             conn.execute("UPDATE hosts SET static_override=? WHERE ip=?", (ov, ip))
         if data.no_mac_alert is not None:
             conn.execute("UPDATE hosts SET no_mac_alert=? WHERE ip=?", (1 if data.no_mac_alert else 0, ip))
+        if data.no_offline_alert is not None:
+            conn.execute("UPDATE hosts SET no_offline_alert=? WHERE ip=?", (1 if data.no_offline_alert else 0, ip))
         conn.commit()
         row = conn.execute("SELECT * FROM hosts WHERE ip=?", (ip,)).fetchone()
         return dict(row)
@@ -1266,7 +1271,8 @@ def get_settings():
     ca.pop("last_digest", None)   # runtime state, not a user setting
     return {"llm": llm, "notifications": ntfy, "statuspage": sp,
             "change_tracking": dict(cfg["change_tracking"]),
-            "change_alerts": ca}
+            "change_alerts": ca,
+            "liveness": dict(cfg["liveness"])}
 
 
 class ChangeTrackingIn(BaseModel):
@@ -1276,6 +1282,8 @@ class ChangeTrackingIn(BaseModel):
     port_closed:      Optional[bool] = None
     mac_changed:      Optional[bool] = None
     hostname_changed: Optional[bool] = None
+    host_offline:     Optional[bool] = None
+    host_online:      Optional[bool] = None
     retention_days:   Optional[int]  = None
 
 
@@ -1283,7 +1291,8 @@ class ChangeTrackingIn(BaseModel):
 def update_change_tracking(data: ChangeTrackingIn):
     cfg = get_config()
     ct = cfg.get("change_tracking", {})
-    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed", "hostname_changed"):
+    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
+              "hostname_changed", "host_offline", "host_online"):
         v = getattr(data, f)
         if v is not None:
             ct[f] = v
@@ -1294,6 +1303,24 @@ def update_change_tracking(data: ChangeTrackingIn):
     return {"ok": True, "change_tracking": ct}
 
 
+class LivenessIn(BaseModel):
+    enabled:          Optional[bool] = None
+    interval_minutes: Optional[int]  = None
+    offline_after:    Optional[int]  = None
+
+
+@app.put("/api/settings/liveness")
+def update_liveness(data: LivenessIn):
+    cfg = get_config()
+    lv = cfg.get("liveness", {})
+    if data.enabled is not None:          lv["enabled"] = data.enabled
+    if data.interval_minutes is not None: lv["interval_minutes"] = max(1, int(data.interval_minutes))
+    if data.offline_after is not None:    lv["offline_after"] = max(1, int(data.offline_after))
+    cfg["liveness"] = lv
+    save_config(cfg)
+    return {"ok": True, "liveness": lv}
+
+
 class ChangeAlertsIn(BaseModel):
     enabled:          Optional[bool] = None
     host_new:         Optional[bool] = None
@@ -1301,6 +1328,8 @@ class ChangeAlertsIn(BaseModel):
     port_closed:      Optional[bool] = None
     mac_changed:      Optional[bool] = None
     hostname_changed: Optional[bool] = None
+    host_offline:     Optional[bool] = None
+    host_online:      Optional[bool] = None
     on_scan:          Optional[bool] = None
     digest_enabled:   Optional[bool] = None
     digest_time:      Optional[str]  = None
@@ -1311,7 +1340,7 @@ def update_change_alerts(data: ChangeAlertsIn):
     cfg = get_config()
     ca = cfg.get("change_alerts", {})
     for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
-              "hostname_changed", "on_scan", "digest_enabled"):
+              "hostname_changed", "host_offline", "host_online", "on_scan", "digest_enabled"):
         v = getattr(data, f)
         if v is not None:
             ca[f] = v

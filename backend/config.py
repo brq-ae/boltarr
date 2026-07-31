@@ -39,6 +39,13 @@ _DEFAULTS: dict = {
         "url": "",            # base URL of the status app, e.g. http://192.168.1.20:12102
         "token": "",          # shared secret; sent as Bearer on /push
     },
+    # Host liveness (ping tier): an nmap -sn sweep every interval to detect
+    # online/offline of known hosts.
+    "liveness": {
+        "enabled": True,
+        "interval_minutes": 3,
+        "offline_after": 3,     # consecutive missed sweeps before 'offline'
+    },
     # Scan change-tracking: which changes to record, and how long to keep them.
     "change_tracking": {
         "enabled": True,
@@ -47,6 +54,8 @@ _DEFAULTS: dict = {
         "port_closed": True,
         "mac_changed": True,
         "hostname_changed": True,
+        "host_offline": True,
+        "host_online": True,
         "retention_days": 90,
     },
     # Change alerts: which recorded changes also notify (ntfy). New-host and
@@ -59,6 +68,8 @@ _DEFAULTS: dict = {
         "port_closed": False,
         "mac_changed": False,
         "hostname_changed": False,
+        "host_offline": True,      # immediate, static-scoped
+        "host_online": True,
         "on_scan": True,           # send a summary when a scan finishes
         "digest_enabled": True,    # daily morning digest
         "digest_time": "08:00",
@@ -73,6 +84,7 @@ def get_config() -> dict:
         "notifications": dict(_DEFAULTS["notifications"]),
         "monitoring": dict(_DEFAULTS["monitoring"]),
         "statuspage": dict(_DEFAULTS["statuspage"]),
+        "liveness": dict(_DEFAULTS["liveness"]),
         "change_tracking": dict(_DEFAULTS["change_tracking"]),
         "change_alerts": dict(_DEFAULTS["change_alerts"]),
     }
@@ -87,6 +99,8 @@ def get_config() -> dict:
             cfg["monitoring"].update({k: v for k, v in raw["monitoring"].items() if v is not None})
         if "statuspage" in raw:
             cfg["statuspage"].update({k: v for k, v in raw["statuspage"].items() if v is not None})
+        if "liveness" in raw:
+            cfg["liveness"].update({k: v for k, v in raw["liveness"].items() if v is not None})
         if "change_tracking" in raw:
             cfg["change_tracking"].update({k: v for k, v in raw["change_tracking"].items() if v is not None})
         if "change_alerts" in raw:
@@ -160,6 +174,10 @@ def get_change_tracking_config() -> dict:
 
 def get_change_alerts_config() -> dict:
     return get_config()["change_alerts"]
+
+
+def get_liveness_config() -> dict:
+    return get_config()["liveness"]
 
 
 def get_notifications_config() -> dict:
