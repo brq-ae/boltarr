@@ -1837,6 +1837,14 @@ async def restore(file: UploadFile = File(...)):
     if "config.yaml" in names:
         (_DATA_DIR / "config.yaml").write_bytes(zf.read("config.yaml"))
 
+    # Bring the restored DB up to the current schema in place, so restoring an
+    # older backup into a newer Boltarr doesn't leave the running app on an
+    # out-of-date schema until a manual restart. init_db() is idempotent.
+    try:
+        init_db()
+    except Exception:
+        pass
+
     return {"ok": True, "tables": [t[0] for t in tables]}
 
 

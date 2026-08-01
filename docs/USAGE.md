@@ -316,7 +316,11 @@ Boltarr's data lives in `data/` (`boltarr.db` + `config.yaml`).
 - **Backup** — `GET /api/backup` streams a ZIP of the database and config; the UI
   has a download button.
 - **Restore** — upload a backup ZIP; Boltarr validates and atomically replaces
-  the live files.
+  the live files, then upgrades the restored database to the current schema, so
+  a backup from an older version restores cleanly into a newer Boltarr.
+
+The backup ZIP contains `config.yaml`, which holds your tokens and API keys —
+treat it as sensitive and don't share it.
 
 Mount `./data` as a Docker volume to persist across container restarts (the
 provided compose files do this automatically).
