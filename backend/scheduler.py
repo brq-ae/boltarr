@@ -57,6 +57,22 @@ def _interval_anchor(sched: dict, now_utc: datetime, anchor: _time, hours: float
     return ff, timedelta(hours=hours)
 
 
+def _in_window(t: _time, start: _time, end: _time) -> bool:
+    if start <= end:
+        return start <= t <= end
+    return t >= start or t <= end          # window crosses midnight
+
+
+def _within_window(sched: dict, dt_local: datetime) -> bool:
+    """True if the local datetime falls in the schedule's active window (or there
+    is no window). Only gates automatic firing — Run now ignores it."""
+    ws = _at_time(sched.get("window_start"))
+    we = _at_time(sched.get("window_end"))
+    if ws is None or we is None:
+        return True
+    return _in_window(dt_local.time(), ws, we)
+
+
 def is_due(sched: dict, now_utc: datetime | None = None) -> bool:
     """Due check. Interval math is done in UTC; weekly wall-clock (day + HH:MM)
     is evaluated in the configured timezone so '03:00' means 3am *local*."""
@@ -64,19 +80,28 @@ def is_due(sched: dict, now_utc: datetime | None = None) -> bool:
         return False
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
+    tz = get_timezone()
+    now_local = now_utc.astimezone(tz) if tz else now_utc.astimezone()
+
+    def slot_in_window(dt: datetime) -> bool:     # is a fire time inside the active window
+        return _within_window(sched, dt.astimezone(tz) if tz else dt.astimezone())
 
     if sched["timing_type"] == "interval":
         hours = sched.get("interval_hours")
         if not hours or hours <= 0:
             return False
         anchor = _at_time(sched.get("at_time"))
-        if anchor is None:                        # no anchor → count from creation/last run
+        if anchor is None:                        # no fixed phase → gate on the current time
+            if not _within_window(sched, now_local):
+                return False
             base = _parse_utc(sched.get("last_run")) or _parse_utc(sched.get("created_at")) or now_utc
             return (now_utc - base).total_seconds() >= hours * 3600
         ff, step = _interval_anchor(sched, now_utc, anchor, hours)
         if now_utc < ff:
             return False
         most_recent = ff + ((now_utc - ff) // step) * step
+        if not slot_in_window(most_recent):       # the anchored slot itself must be in-window
+            return False
         last = _parse_utc(sched.get("last_run"))
         return last is None or last < most_recent
 
@@ -84,13 +109,13 @@ def is_due(sched: dict, now_utc: datetime | None = None) -> bool:
     at = _at_time(sched.get("at_time"))
     if at is None:
         return False
-    tz = get_timezone()
-    now_local = now_utc.astimezone(tz) if tz else now_utc.astimezone()
     days = {int(d) for d in (sched.get("days_of_week") or "").split(",") if d.strip().isdigit()}
     if now_local.weekday() not in days:
         return False
     target = now_local.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
     if now_local < target:
+        return False
+    if not _within_window(sched, target):         # the fire time must be in-window
         return False
     last = _parse_utc(sched.get("last_run"))
     return last is None or last < target
@@ -98,24 +123,36 @@ def is_due(sched: dict, now_utc: datetime | None = None) -> bool:
 
 def next_run_utc(sched: dict, now_utc: datetime | None = None) -> str | None:
     """When this schedule will next fire, as a UTC ISO string. None if it won't
-    (disabled or invalid timing). Interval is UTC; weekly is in the local zone."""
+    (disabled, invalid timing, or the active window excludes every run time).
+    Respects the active window — the returned slot is always inside it."""
     if not sched.get("enabled"):
         return None
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
+    tz = get_timezone()
+
+    def in_win(dt: datetime) -> bool:
+        return _within_window(sched, dt.astimezone(tz) if tz else dt.astimezone())
 
     if sched["timing_type"] == "interval":
         hours = sched.get("interval_hours")
         if not hours or hours <= 0:
             return None
+        step = timedelta(hours=hours)
         anchor = _at_time(sched.get("at_time"))
         if anchor is None:
             base = _parse_utc(sched.get("last_run")) or _parse_utc(sched.get("created_at")) or now_utc
-            nxt = base + timedelta(hours=hours)
+            nxt = base + step
+            while nxt <= now_utc:               # advance to the first future slot
+                nxt += step
         else:
             ff, step = _interval_anchor(sched, now_utc, anchor, hours)
             nxt = ff if now_utc < ff else ff + (((now_utc - ff) // step) + 1) * step
-        return nxt.astimezone(timezone.utc).isoformat(timespec="seconds")
+        for _ in range(2000):                   # advance to the first slot inside the window
+            if in_win(nxt):
+                return nxt.astimezone(timezone.utc).isoformat(timespec="seconds")
+            nxt += step
+        return None                             # window excludes every run time
 
     at = _at_time(sched.get("at_time"))
     if at is None:
@@ -123,13 +160,12 @@ def next_run_utc(sched: dict, now_utc: datetime | None = None) -> str | None:
     days = {int(d) for d in (sched.get("days_of_week") or "").split(",") if d.strip().isdigit()}
     if not days:
         return None
-    tz = get_timezone()
     now_local = now_utc.astimezone(tz) if tz else now_utc.astimezone()
     for d in range(0, 8):
         cand = now_local + timedelta(days=d)
         if cand.weekday() in days:
             target = cand.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
-            if target > now_local:
+            if target > now_local and _within_window(sched, target):
                 return target.astimezone(timezone.utc).isoformat(timespec="seconds")
     return None
 

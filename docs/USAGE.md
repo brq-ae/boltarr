@@ -85,6 +85,11 @@ Each schedule has:
 - **Timing** — either **every N hours** (optionally *starting at* a clock time,
   e.g. "every 6 hours from 03:00", which aligns the runs to the clock), or on
   **chosen weekdays at a time**.
+- **Active window** (optional) — restrict a schedule to only run between two
+  times, e.g. a daytime "07:00–22:00" for hourly sweeps so nothing light runs
+  overnight. Outside the window a due run is silently skipped until it reopens
+  (crosses midnight fine, e.g. 22:00–06:00). It only gates automatic firing —
+  Run now and host liveness are unaffected.
 
 Each row shows an enable/disable switch, **last run** and computed **next run**
 (absolute + relative, e.g. "Aug 1, 3:00 AM · in 6h"), plus **Run now**, edit and
@@ -104,8 +109,10 @@ to that host.
 
 **Settings → Change alerts** turns recorded changes into ntfy notifications,
 delivered as a **per-scan summary** and/or a **daily digest** at a time you set.
-New-host and MAC-change alerts are scoped to **static** IPs (with a per-host
-opt-out in the host's edit dialog). All alerts respect quiet hours.
+Use **"Alert for"** to scope every alert type by host classification —
+**Static / Dynamic / All** (unknown-classified hosts never alert). This only
+controls the push; the Changes feed always keeps everything. Per-host opt-outs
+(no-MAC-alert, no-offline-alert) still apply, and all alerts respect quiet hours.
 
 *"Port closed" is only recorded for ports a scan actually covered, so a shallow
 scan never false-flags a deeper scan's ports.*

@@ -180,7 +180,6 @@ _LABEL = {
     "hostname_changed": ("🏷️", "hostname change", "hostname changes"),
 }
 _ORDER = ["host_new", "host_offline", "host_online", "port_opened", "port_closed", "mac_changed", "hostname_changed"]
-_STATIC_SCOPED = ("host_new", "mac_changed", "host_offline", "host_online")
 
 
 def _detail(ev: dict) -> str:
@@ -211,17 +210,24 @@ def is_alert_worthy(conn, ev: dict, subnets: list[dict]) -> bool:
     a = get_change_alerts_config()
     if not a.get("enabled") or not a.get(ev["type"], True):
         return False
-    if ev["type"] in _STATIC_SCOPED:
-        row = conn.execute(
-            "SELECT static_override, no_mac_alert, no_offline_alert FROM hosts WHERE ip=?",
-            (ev["ip"],)).fetchone()
-        override = row["static_override"] if row else None
-        if classify_host(ev["ip"], subnets, override) != "static":   # scoped to static IPs
-            return False
-        if ev["type"] == "mac_changed" and row and row["no_mac_alert"]:
-            return False
-        if ev["type"] in ("host_offline", "host_online") and row and row["no_offline_alert"]:
-            return False
+    row = conn.execute(
+        "SELECT static_override, no_mac_alert, no_offline_alert FROM hosts WHERE ip=?",
+        (ev["ip"],)).fetchone()
+    override = row["static_override"] if row else None
+    cls = classify_host(ev["ip"], subnets, override)
+    # Host-scope filter — applies to every alert type. 'unknown' never alerts.
+    scope = (a.get("scope") or "static").lower()
+    if scope == "static" and cls != "static":
+        return False
+    if scope == "dynamic" and cls != "dynamic":
+        return False
+    if scope == "all" and cls not in ("static", "dynamic"):
+        return False
+    # Per-host opt-outs (still honoured within the chosen scope).
+    if ev["type"] == "mac_changed" and row and row["no_mac_alert"]:
+        return False
+    if ev["type"] in ("host_offline", "host_online") and row and row["no_offline_alert"]:
+        return False
     return True
 
 

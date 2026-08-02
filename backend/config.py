@@ -74,6 +74,7 @@ _DEFAULTS: dict = {
     # and/or a daily digest.
     "change_alerts": {
         "enabled": True,
+        "scope": "static",         # which hosts alert: static | dynamic | all (unknown never alerts)
         "host_new": True,          # per-type alert toggles
         "port_opened": True,
         "port_closed": False,

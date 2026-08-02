@@ -168,6 +168,8 @@ class ScanScheduleIn(BaseModel):
     interval_hours: Optional[float] = None
     days_of_week:   Optional[str] = None       # CSV of 0-6 (Mon=0..Sun=6)
     at_time:        Optional[str] = None       # 'HH:MM'
+    window_start:   Optional[str] = None       # active window 'HH:MM' (both set or both empty)
+    window_end:     Optional[str] = None
 
 
 def _sched_row(r) -> dict:
@@ -205,6 +207,18 @@ def _validate_sched(d: ScanScheduleIn):
         days = [x for x in (d.days_of_week or "").split(",") if x.strip() != ""]
         if not days:
             raise HTTPException(422, "pick at least one day for weekly")
+    # active window: both-or-neither, valid HH:MM
+    ws, we = (d.window_start or "").strip(), (d.window_end or "").strip()
+    if bool(ws) != bool(we):
+        raise HTTPException(422, "set both the window start and end, or leave both empty")
+    for w in (ws, we):
+        if w:
+            try:
+                hh, mm = w.split(":")
+                if not (0 <= int(hh) <= 23 and 0 <= int(mm) <= 59):
+                    raise ValueError
+            except Exception:
+                raise HTTPException(422, f"invalid time: {w}")
 
 
 @app.post("/api/scan-schedules", status_code=201)
@@ -213,10 +227,12 @@ def create_scan_schedule(data: ScanScheduleIn):
     with get_conn() as conn:
         cur = conn.execute("""
             INSERT INTO scan_schedules
-                (name, enabled, subnet_id, host_filter, profile_id, timing_type, interval_hours, days_of_week, at_time)
-            VALUES (?,?,?,?,?,?,?,?,?)
+                (name, enabled, subnet_id, host_filter, profile_id, timing_type, interval_hours,
+                 days_of_week, at_time, window_start, window_end)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, (data.name.strip(), 1 if data.enabled else 0, data.subnet_id, data.host_filter,
-              data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time))
+              data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time,
+              (data.window_start or None), (data.window_end or None)))
         conn.commit()
         return {"id": cur.lastrowid}
 
@@ -230,10 +246,12 @@ def update_scan_schedule(sid: int, data: ScanScheduleIn):
         conn.execute("""
             UPDATE scan_schedules SET
                 name=?, enabled=?, subnet_id=?, host_filter=?, profile_id=?,
-                timing_type=?, interval_hours=?, days_of_week=?, at_time=?
+                timing_type=?, interval_hours=?, days_of_week=?, at_time=?,
+                window_start=?, window_end=?
             WHERE id=?
         """, (data.name.strip(), 1 if data.enabled else 0, data.subnet_id, data.host_filter,
-              data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time, sid))
+              data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time,
+              (data.window_start or None), (data.window_end or None), sid))
         conn.commit()
     return {"ok": True}
 
@@ -1502,6 +1520,7 @@ def update_liveness(data: LivenessIn):
 
 class ChangeAlertsIn(BaseModel):
     enabled:          Optional[bool] = None
+    scope:            Optional[str]  = None   # static | dynamic | all
     host_new:         Optional[bool] = None
     port_opened:      Optional[bool] = None
     port_closed:      Optional[bool] = None
@@ -1525,6 +1544,8 @@ def update_change_alerts(data: ChangeAlertsIn):
             ca[f] = v
     if data.digest_time is not None:
         ca["digest_time"] = data.digest_time.strip()
+    if data.scope is not None and data.scope in ("static", "dynamic", "all"):
+        ca["scope"] = data.scope
     cfg["change_alerts"] = ca
     save_config(cfg)
     ca_out = dict(ca)

@@ -221,6 +221,10 @@ def init_db():
             )""",
             "ALTER TABLE scan_runs ADD COLUMN schedule_id INTEGER",   # which schedule triggered it (NULL = manual)
             "ALTER TABLE scan_runs ADD COLUMN note TEXT",             # e.g. skip reason
+            # Active window: a schedule only fires between window_start and window_end
+            # (local 'HH:MM'; both NULL = always). Gates automatic firing, not Run now.
+            "ALTER TABLE scan_schedules ADD COLUMN window_start TEXT",
+            "ALTER TABLE scan_schedules ADD COLUMN window_end TEXT",
         ]:
             try:
                 conn.execute(sql)

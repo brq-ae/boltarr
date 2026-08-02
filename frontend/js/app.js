@@ -203,6 +203,7 @@ async function probeHost(ip) {
     activeRunId = run_id;
     showToast(`Probing ${ip}…`);
     startProbePolling(run_id, ip);
+    loadScans();   // show the probe in History live (like a scan), not only when done
   } catch (e) {
     alert("Probe error: " + e.message);
   }
@@ -798,7 +799,7 @@ async function saveAddHost() {
 // ── Edit host ─────────────────────────────────────────────────────────────────
 
 const DEVICE_TYPES = ["router","gateway","switch","unmanaged-switch","firewall","server","nas",
-  "workstation","pc","laptop","iot","camera","printer","phone","tablet",
+  "workstation","pc","laptop","iot","camera","printer","phone","tablet","tv",
   "container","vm","ap","unknown"];
 
 async function openEditHost(ip) {
@@ -1035,6 +1036,7 @@ function setScanTab(tab) {
   document.getElementById(`scanTabBtn-${tab}`)?.classList.add("active");
   if (tab === "changes")   loadChanges();
   if (tab === "schedules") loadSchedules();
+  if (tab === "history")   loadScans();   // always refresh (picks up running scans/probes + starts the live poll)
 }
 
 // ── Change-tracking feed ──────────────────────────────────────────────────────
@@ -1381,15 +1383,16 @@ const _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let scanSchedules = [];
 
 function _schedTimingText(s) {
+  const win = s.window_start && s.window_end ? ` · only ${s.window_start}–${s.window_end}` : "";
   if (s.timing_type === "interval") {
     const h = s.interval_hours;
     const base = `every ${h === 1 ? "hour" : h + " hours"}`;
-    return s.at_time ? `${base} from ${s.at_time}` : base;
+    return (s.at_time ? `${base} from ${s.at_time}` : base) + win;
   }
   const days = (s.days_of_week || "").split(",").filter(d => d !== "");
   const label = days.length === 7 ? "daily"
     : days.map(d => _DAY_NAMES[+d]).join(", ");
-  return `${label} at ${s.at_time || "?"}`;
+  return `${label} at ${s.at_time || "?"}${win}`;
 }
 
 function _schedTargetText(s) {
@@ -1410,6 +1413,7 @@ async function loadSchedules() {
     const last = s.last_run ? `last run ${fmtLocal(s.last_run)}` : "never run yet";
     const next = !s.enabled ? `<span style="color:var(--text-3)">next run — paused</span>`
       : s.next_run ? `next run <span style="color:var(--accent)">${fmtLocal(s.next_run)} · ${fmtRelFuture(s.next_run)}</span>`
+      : (s.window_start && s.window_end) ? `<span style="color:var(--yellow)">never — active window excludes all run times</span>`
       : `next run —`;
     return `
       <div class="scan-card" style="align-items:center">
@@ -1460,6 +1464,8 @@ function openScheduleEditor(sched) {
   const days = (s.days_of_week || "").split(",").filter(d => d !== "");
   document.querySelectorAll(".sched-day").forEach(cb => { cb.checked = days.includes(cb.value); });
   document.getElementById("schedAtTime").value = s.at_time || "03:00";
+  document.getElementById("schedWinStart").value = s.window_start || "";
+  document.getElementById("schedWinEnd").value   = s.window_end || "";
 
   onSchedFilterChange();
   onSchedTimingChange();
@@ -1501,10 +1507,13 @@ async function saveSchedule() {
     days_of_week:   timing === "weekly" ? days.join(",") : null,
     at_time:        timing === "weekly" ? document.getElementById("schedAtTime").value
                                         : (document.getElementById("schedAnchor").value || null),
+    window_start:   document.getElementById("schedWinStart").value || null,
+    window_end:     document.getElementById("schedWinEnd").value || null,
   };
   if (!payload.name) return showToast("Give the schedule a name");
   if (timing === "interval" && !(payload.interval_hours > 0)) return showToast("Interval must be greater than 0");
   if (timing === "weekly" && !days.length) return showToast("Pick at least one day");
+  if (!!payload.window_start !== !!payload.window_end) return showToast("Set both window times, or leave both empty");
   try {
     if (id) await api("PUT", `/api/scan-schedules/${id}`, payload);
     else    await api("POST", "/api/scan-schedules", payload);
@@ -3018,6 +3027,7 @@ async function openSettings() {
 
     const ca = change_alerts || {};
     document.getElementById("setCaEnabled").checked          = !!ca.enabled;
+    document.getElementById("setCaScope").value              = ca.scope || "static";
     document.getElementById("setCaHostNew").checked          = ca.host_new         !== false;
     document.getElementById("setCaPortOpened").checked       = ca.port_opened      !== false;
     document.getElementById("setCaPortClosed").checked       = !!ca.port_closed;
@@ -3101,6 +3111,7 @@ async function saveSettings() {
   };
   const caPayload = {
     enabled:          document.getElementById("setCaEnabled").checked,
+    scope:            document.getElementById("setCaScope").value,
     host_new:         document.getElementById("setCaHostNew").checked,
     port_opened:      document.getElementById("setCaPortOpened").checked,
     port_closed:      document.getElementById("setCaPortClosed").checked,

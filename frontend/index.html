@@ -458,6 +458,21 @@
         <input type="time" id="schedAtTime" value="03:00" style="width:120px">
       </div>
     </div>
+
+    <div class="sidebar-divider" style="margin:6px 0"></div>
+    <div class="form-row" style="flex-wrap:wrap;gap:8px">
+      <label>Active window <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text-3)">only run between</span>
+        <input type="time" id="schedWinStart" style="width:120px">
+        <span style="font-size:12px;color:var(--text-3)">and</span>
+        <input type="time" id="schedWinEnd" style="width:120px">
+      </div>
+    </div>
+    <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
+      Leave blank to run any time. Outside this window a due scan is silently skipped until it reopens (crosses midnight fine, e.g. 22:00–06:00). Doesn't affect Run now or liveness.
+    </p>
+
     <div class="form-row">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="schedEnabled" checked style="accent-color:var(--accent);width:14px;height:14px">
@@ -1176,8 +1191,17 @@
         </label>
       </div>
       <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Notify (ntfy) about recorded changes. New-host & MAC alerts fire only for static IPs. Needs notifications set up above.
+        Notify (ntfy) about recorded changes. Every change is always kept in the Changes feed — this only controls the push. Needs notifications set up above.
       </p>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Alert for</label>
+        <select id="setCaScope" style="max-width:220px">
+          <option value="static">Static hosts only</option>
+          <option value="dynamic">Dynamic hosts only</option>
+          <option value="all">All hosts (static + dynamic)</option>
+        </select>
+        <span style="font-size:11px;color:var(--text-3)">unknown-classified hosts never alert</span>
+      </div>
       <div class="scan-checks" style="padding-left:2px">
         <label><input type="checkbox" id="setCaHostNew"> New host</label>
         <label><input type="checkbox" id="setCaPortOpened"> Port opened</label>
