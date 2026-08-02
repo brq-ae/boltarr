@@ -1528,6 +1528,7 @@ class ChangeAlertsIn(BaseModel):
     hostname_changed: Optional[bool] = None
     host_offline:     Optional[bool] = None
     host_online:      Optional[bool] = None
+    include_mac:      Optional[bool] = None
     on_scan:          Optional[bool] = None
     digest_enabled:   Optional[bool] = None
     digest_time:      Optional[str]  = None
@@ -1538,7 +1539,7 @@ def update_change_alerts(data: ChangeAlertsIn):
     cfg = get_config()
     ca = cfg.get("change_alerts", {})
     for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
-              "hostname_changed", "host_offline", "host_online", "on_scan", "digest_enabled"):
+              "hostname_changed", "host_offline", "host_online", "include_mac", "on_scan", "digest_enabled"):
         v = getattr(data, f)
         if v is not None:
             ca[f] = v

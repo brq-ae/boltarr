@@ -113,6 +113,9 @@ Use **"Alert for"** to scope every alert type by host classification —
 **Static / Dynamic / All** (unknown-classified hosts never alert). This only
 controls the push; the Changes feed always keeps everything. Per-host opt-outs
 (no-MAC-alert, no-offline-alert) still apply, and all alerts respect quiet hours.
+**Attach device MAC** adds each host's MAC to alerts (offline/online, scan
+summary, digest) — handy for spotting a roaming device that keeps its MAC while
+its IP changes across access points.
 
 *"Port closed" is only recorded for ports a scan actually covered, so a shallow
 scan never false-flags a deeper scan's ports.*

@@ -3035,6 +3035,7 @@ async function openSettings() {
     document.getElementById("setCaHostnameChanged").checked  = !!ca.hostname_changed;
     document.getElementById("setCaOffline").checked          = ca.host_offline     !== false;
     document.getElementById("setCaOnline").checked           = ca.host_online      !== false;
+    document.getElementById("setCaIncludeMac").checked       = !!ca.include_mac;
     document.getElementById("setCaOnScan").checked           = ca.on_scan          !== false;
     document.getElementById("setCaDigest").checked           = ca.digest_enabled   !== false;
     document.getElementById("setCaDigestTime").value         = ca.digest_time || "08:00";
@@ -3119,6 +3120,7 @@ async function saveSettings() {
     hostname_changed: document.getElementById("setCaHostnameChanged").checked,
     host_offline:     document.getElementById("setCaOffline").checked,
     host_online:      document.getElementById("setCaOnline").checked,
+    include_mac:      document.getElementById("setCaIncludeMac").checked,
     on_scan:          document.getElementById("setCaOnScan").checked,
     digest_enabled:   document.getElementById("setCaDigest").checked,
     digest_time:      document.getElementById("setCaDigestTime").value,

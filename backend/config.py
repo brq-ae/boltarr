@@ -82,6 +82,7 @@ _DEFAULTS: dict = {
         "hostname_changed": False,
         "host_offline": True,      # immediate, static-scoped
         "host_online": True,
+        "include_mac": False,      # attach the device MAC to offline/online alerts
         "on_scan": True,           # send a summary when a scan finishes
         "digest_enabled": True,    # daily morning digest
         "digest_time": "08:00",

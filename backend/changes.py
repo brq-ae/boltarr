@@ -182,14 +182,27 @@ _LABEL = {
 _ORDER = ["host_new", "host_offline", "host_online", "port_opened", "port_closed", "mac_changed", "hostname_changed"]
 
 
-def _detail(ev: dict) -> str:
+def _detail(ev: dict, mac_map: dict | None = None) -> str:
     t = ev["type"]
-    if t in ("port_opened", "port_closed"):
-        return f"{ev['ip']}:{ev['port']}"
-    return ev["ip"]
+    base = f"{ev['ip']}:{ev['port']}" if t in ("port_opened", "port_closed") else ev["ip"]
+    if mac_map:
+        mac = mac_map.get(ev["ip"])
+        if mac:
+            base += f" [{mac}]"
+    return base
 
 
-def summarize(events: list[dict], cap: int = 6) -> str:
+def _mac_map(conn, events: list[dict]) -> dict:
+    """{ip: mac} for the events' hosts that have a known MAC."""
+    ips = {e["ip"] for e in events}
+    if not ips:
+        return {}
+    q = ",".join("?" * len(ips))
+    return {r["ip"]: r["mac"] for r in
+            conn.execute(f"SELECT ip, mac FROM hosts WHERE ip IN ({q})", tuple(ips)) if r["mac"]}
+
+
+def summarize(events: list[dict], cap: int = 6, mac_map: dict | None = None) -> str:
     by: dict[str, list] = {}
     for e in events:
         by.setdefault(e["type"], []).append(e)
@@ -200,7 +213,7 @@ def summarize(events: list[dict], cap: int = 6) -> str:
             continue
         icon, sing, plur = _LABEL[t]
         n = len(evs)
-        details = [_detail(e) for e in evs[:cap]]
+        details = [_detail(e, mac_map) for e in evs[:cap]]
         more = f" +{n - cap} more" if n > cap else ""
         lines.append(f"{icon} {n} {sing if n == 1 else plur}: {', '.join(details)}{more}")
     return "\n".join(lines)
@@ -244,6 +257,7 @@ def send_scan_summary(run_id: int, target_label: str = "") -> None:
         return
     with get_conn() as conn:
         worthy = _worthy_events(conn, "run_id=?", (run_id,))
+        mac_map = _mac_map(conn, worthy) if a.get("include_mac") else None
     if not worthy:
         return
     try:   # quiet hours (lazy import avoids a module cycle)
@@ -254,7 +268,7 @@ def send_scan_summary(run_id: int, target_label: str = "") -> None:
         pass
     n = len(worthy)
     title = f"{n} network change{'s' if n != 1 else ''}" + (f" on {target_label}" if target_label else "")
-    notify.send(title=title, message=summarize(worthy), tags=["satellite_antenna"])
+    notify.send(title=title, message=summarize(worthy, mac_map=mac_map), tags=["satellite_antenna"])
 
 
 def alert_transition(conn, ip: str, event_type: str) -> None:
@@ -269,10 +283,14 @@ def alert_transition(conn, ip: str, event_type: str) -> None:
     except Exception:
         pass
     icon, sing, _ = _LABEL.get(event_type, ("•", event_type, ""))
-    host = conn.execute("SELECT hostname FROM hosts WHERE ip=?", (ip,)).fetchone()
+    host = conn.execute("SELECT hostname, mac FROM hosts WHERE ip=?", (ip,)).fetchone()
     label = ip + (f" ({host['hostname']})" if host and host["hostname"] else "")
+    message = f"{label} {sing}."
+    # Optionally attach the MAC — a roaming device keeps its MAC across IPs/APs.
+    if get_change_alerts_config().get("include_mac") and host and host["mac"]:
+        message += f"\nMAC: {host['mac']}"
     notify.send(title=f"{label} {sing}",
-                message=f"{label} {sing}.",
+                message=message,
                 priority="high" if event_type == "host_offline" else "default",
                 tags=["red_circle"] if event_type == "host_offline" else ["green_circle"])
 
@@ -282,10 +300,11 @@ def send_digest() -> None:
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
     with get_conn() as conn:
         worthy = _worthy_events(conn, "ts > ?", (since,))
+        mac_map = _mac_map(conn, worthy) if get_change_alerts_config().get("include_mac") else None
     if worthy:
         n = len(worthy)
         notify.send(title=f"Daily digest: {n} network change{'s' if n != 1 else ''}",
-                    message=summarize(worthy), tags=["sunrise"])
+                    message=summarize(worthy, mac_map=mac_map), tags=["sunrise"])
 
 
 def maybe_send_digest() -> None:
