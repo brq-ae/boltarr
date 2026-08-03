@@ -679,6 +679,16 @@
     </div>
     <div class="form-row">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="editPublic" onchange="onEditPublicToggle()" style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">Show on public status page <span style="color:var(--text-3)">(only the name, up/down &amp; uptime — never the IP)</span></span>
+      </label>
+    </div>
+    <div class="form-row" id="editPublicNameRow" style="display:none">
+      <label>Public name</label>
+      <input type="text" id="editPublicName" placeholder="e.g. Home Server (shown publicly instead of the IP)">
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editTierL1" style="accent-color:var(--accent);width:14px;height:14px">
         <span><strong style="color:var(--text)">Gateway (Level 1)</strong> — root of network hierarchy</span>
       </label>
@@ -1093,6 +1103,11 @@
         <label>Alert after service down for</label>
         <input id="setAlertAfter" type="number" min="0" style="width:64px" value="5">
         <span style="font-size:11px;color:var(--text-3)">minutes (0 = alert immediately)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="When a host is offline, its services' down-alerts are held — you get one host-offline alert instead of many">
+          <input type="checkbox" id="setSuppressHostDown"> Suppress service-down alerts when the host is offline
+        </label>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">

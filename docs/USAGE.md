@@ -135,6 +135,10 @@ hosts, unless opted out — fire an immediate, quiet-hours-aware ntfy alert. Fir
 activation is silent (no alert storm); alerts only fire on a real later
 transition.
 
+**Host uptime.** A host's **Edit → Info → Liveness** section shows its current
+up/down plus **24h / 7d / 30d uptime %** and recent **outages**, built from the
+same up/down history — the host equivalent of the service uptime view.
+
 ---
 
 ## Timezone
@@ -228,6 +232,11 @@ default, so you only watch the services you care about.
 - The detail panel shows **uptime** for the last **24h / 7d / 30d**, plus a list
   of recent **outages** with durations. History is kept for a rolling ~31 days
   and pruned automatically.
+- **Host correlation** — each service's host up/down shows in the list, and a
+  down service on an offline host is tagged **"host offline"** so you can see the
+  root cause at a glance. When a host goes offline, its services' down-alerts are
+  **suppressed** (you get the one host-offline alert instead of a flood) — a
+  toggle in Settings → Notifications, on by default.
 
 Alerts are configured under Settings → Notifications (below).
 
@@ -279,10 +288,19 @@ container you run **on a separate host**. See its
 set a token, `docker compose up -d`). This section covers the **Boltarr side**
 (marking services public and configuring the push).
 
+The page has up to three sections: **Services**, **Hosts**, and **Networking**
+(router/AP/switch/firewall gear) — each only shown when it has something public.
+
 **1. Mark services public.** In a service's detail panel, tick **Public status
 page** and optionally set a **Public name** (what strangers see, e.g. "Photos"
 instead of an internal hostname). Only services that are *both* monitored and
 public appear.
+
+**1b. Mark hosts public.** In a host's **Edit** dialog, tick **Show on public
+status page** and set a **Public name**. The host's up/down + uptime appears on
+the page (under **Networking** if its device type is router/gateway/switch/
+unmanaged-switch/firewall/AP, otherwise under **Hosts**). As with services, only
+the public name, status, uptime and ticks are pushed — never the IP.
 
 **2. Configure the push** in ⚙ **Settings → Public status page**:
 

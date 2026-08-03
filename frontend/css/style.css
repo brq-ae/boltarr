@@ -1425,6 +1425,11 @@ tbody td {
 .mon-dot.checking { animation: mon-pulse 0.9s ease-in-out infinite; }
 @keyframes mon-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 .svc-mon-cell { display: inline-flex; align-items: center; gap: 6px; }
+.host-down-chip {
+  font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 5px; border-radius: 4px; vertical-align: middle;
+  background: oklch(58% 0.21 25 / 0.16); color: oklch(70% 0.19 25);
+}
 
 /* Scan sub-panels fill the remaining height and scroll internally (their parent
    #panel-scans is a fixed-height flex column with overflow hidden). */
@@ -1489,7 +1494,8 @@ tbody td {
 }
 .live-offline { box-shadow: 0 0 4px 0 #f85149; }
 
-/* uptime stats in the service detail panel */
+/* uptime stats in the service + host detail panels */
+.host-uptime-section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
 .uptime-row { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 6px; }
 .uptime-stat { display: flex; flex-direction: column; gap: 1px; }
 .uptime-stat .val { font-size: 15px; font-weight: 600; }

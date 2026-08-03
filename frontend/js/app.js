@@ -557,6 +557,14 @@ async function showHostDetail(ip) {
           <div class="info-field"><label>First Seen</label><span class="mono">${(host.first_seen||"—").substring(0,16)}</span></div>
           <div class="info-field"><label>Last Seen</label><span class="mono">${(host.last_seen||"—").substring(0,16)}</span></div>
         </div>
+        ${host.ip.startsWith("node-") ? "" : `
+        <div class="host-uptime-section">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">Liveness</span>
+            <span style="font-size:11px">${livenessDot(host.online)}${host.online===1?"online":host.online===0?"offline":"unknown"}</span>
+          </div>
+          <div id="hostUptime-${ip.replace(/\./g,'_')}"><span style="font-size:11px;color:var(--text-3)">Loading…</span></div>
+        </div>`}
         ${(host.aliases||[]).length ? `
         <div class="aliases-row" id="aliases-row-${ip.replace(/\./g,'_')}">
           <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">Additional IPs</span>
@@ -655,6 +663,30 @@ async function showHostDetail(ip) {
 
   panel.classList.add("open");
   initSheetDrag();
+  if (!host.ip.startsWith("node-")) loadHostUptime(ip);
+}
+
+async function loadHostUptime(ip) {
+  const el = document.getElementById(`hostUptime-${ip.replace(/\./g, "_")}`);
+  if (!el) return;
+  try {
+    const d = await api("GET", `/api/hosts/${ip}/uptime`);
+    const stat = (label, u) =>
+      !u ? `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${label}</span></div>`
+         : `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${label}</span></div>`;
+    const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
+    const outages = (d.outages && d.outages.length)
+      ? `<div class="outage-list">${d.outages.map(o => {
+          const start = new Date(o.start).toLocaleString();
+          return o.end
+            ? `<span class="outage-item">▾ ${start} — down ${_fmtDur(o.seconds)}</span>`
+            : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
+        }).join("")}</div>`
+      : `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
+    el.innerHTML = rows + outages;
+  } catch {
+    el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
+  }
 }
 
 function switchDetailTab(name) {
@@ -824,6 +856,9 @@ async function openEditHost(ip) {
   document.getElementById("editStaticOverride").value = host.static_override || "";
   document.getElementById("editNoMacAlert").checked   = !!host.no_mac_alert;
   document.getElementById("editNoOfflineAlert").checked = !!host.no_offline_alert;
+  document.getElementById("editPublic").checked = !!host.public;
+  document.getElementById("editPublicName").value = host.public_name || "";
+  onEditPublicToggle();
   document.getElementById("editDhcpPoolRow").style.display = host.is_dhcp ? "" : "none";
   const sel = document.getElementById("editDeviceType");
   sel.innerHTML = DEVICE_TYPES.map(t =>
@@ -833,6 +868,11 @@ async function openEditHost(ip) {
 }
 function closeEditHost() {
   document.getElementById("editModal").classList.remove("open");
+}
+
+function onEditPublicToggle() {
+  document.getElementById("editPublicNameRow").style.display =
+    document.getElementById("editPublic").checked ? "" : "none";
 }
 async function deleteHost(ip) {
   const label = ip.startsWith("node-") ? "this device" : ip;
@@ -915,6 +955,9 @@ async function saveHostEdit() {
     static_override:     document.getElementById("editStaticOverride").value || null,
     no_mac_alert:        document.getElementById("editNoMacAlert").checked,
     no_offline_alert:    document.getElementById("editNoOfflineAlert").checked,
+    set_public:          true,
+    public:              document.getElementById("editPublic").checked,
+    public_name:         document.getElementById("editPublicName").value.trim() || null,
   };
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);
@@ -1917,11 +1960,11 @@ function renderServicesTable() {
     <tr id="svc-tr-${s.id}" style="cursor:pointer" onclick="showSvcDetail(${s.id})">
       <td style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
       <td>
-        <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}${s.name}</div>
+        <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}${s.name}${svcHostDownTag(s)}</div>
         ${s.description ? `<div style="font-size:10px;color:var(--text-3)">${s.description}</div>` : ""}
       </td>
       <td class="svc-host-cell">
-        <span class="svc-host-ip">${s.ip}</span>
+        <span class="svc-host-ip">${livenessDot(s.host_online)}${s.ip}</span>
         ${s.hostname ? `<span class="svc-host-name">${s.hostname}</span>` : ""}
       </td>
       <td>
@@ -1941,6 +1984,13 @@ function monDotHTML(s) {
   const cls = st === "up" ? "mon-up" : st === "down" ? "mon-down" : "mon-unknown";
   const title = st === "up" ? "Monitored — up" : st === "down" ? "Monitored — down" : "Monitored — checking…";
   return `<span class="mon-dot ${cls}" title="${title}"></span>`;
+}
+
+// Root-cause chip: a monitored service that's down while its host is offline.
+function svcHostDownTag(s) {
+  if (s.host_online === 0 && s.monitored && (s.monitor_status || "") === "down")
+    return ` <span class="host-down-chip" title="This service is down because its host is offline">host offline</span>`;
+  return "";
 }
 
 async function deleteSvcFromTable(id) {
@@ -2998,6 +3048,7 @@ async function openSettings() {
     document.getElementById("setNtfyToken").value     = n.token  || "";
     document.getElementById("setAlertAfter").value    = n.alert_after_minutes ?? 5;
     document.getElementById("setQuietEnabled").checked = !!n.quiet_enabled;
+    document.getElementById("setSuppressHostDown").checked = n.suppress_when_host_down !== false;
     if (n.quiet_start) document.getElementById("setQuietStart").value = n.quiet_start;
     if (n.quiet_end)   document.getElementById("setQuietEnd").value   = n.quiet_end;
     onQuietToggle();
@@ -3088,6 +3139,7 @@ async function saveSettings() {
     quiet_enabled: document.getElementById("setQuietEnabled").checked,
     quiet_start:   document.getElementById("setQuietStart").value,
     quiet_end:     document.getElementById("setQuietEnd").value,
+    suppress_when_host_down: document.getElementById("setSuppressHostDown").checked,
   };
   const spPayload = {
     enabled: document.getElementById("setSpEnabled").checked,

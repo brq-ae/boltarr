@@ -42,6 +42,9 @@ _DEFAULTS: dict = {
         "quiet_enabled": False,
         "quiet_start": "",    # "HH:MM"
         "quiet_end": "",      # "HH:MM"
+        # When a host is offline, suppress its services' down-alerts (you get the
+        # single host-offline alert from liveness instead of a flood).
+        "suppress_when_host_down": True,
     },
     # Public status page push (LAN → separate status container). Real values
     # live in data/config.yaml (gitignored) — keep generic here.

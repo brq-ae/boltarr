@@ -17,6 +17,8 @@
 .ticks{display:flex;gap:2px;align-items:flex-end;height:26px}
 .tick{flex:1;min-width:2px;border-radius:1px;background:var(--unknown);height:100%}
 .tick.up{background:var(--up)}.tick.down{background:var(--down)}
+.section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:18px 0 10px}
+.section-label:first-child{margin-top:0}
 .empty{color:var(--muted);text-align:center;padding:40px}.foot{text-align:center;color:var(--muted);font-size:11px;margin-top:24px}
 </style></head><body><div class="wrap">
 <h1 id="title">Service Status</h1><div class="updated" id="updated"></div>
@@ -29,15 +31,20 @@ function esc(s){return(s||"").replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>'
 function cls(v){return ["up","down"].includes(v)?v:"unknown"}
 async function load(){let d;try{d=await(await fetch("/data",{cache:"no-store"})).json()}catch(e){return}
 document.getElementById("title").textContent=d.title||"Service Status";document.title=d.title||"Service Status";
-const svcs=d.services||[];document.getElementById("updated").textContent="Updated "+ago(d.updated_at);
-const anyDown=svcs.some(s=>s.status==="down");const b=document.getElementById("banner");
-if(svcs.length){b.className="banner "+(anyDown?"bad":"ok");b.textContent=anyDown?"Some services are down":"All systems operational"}else b.className="";
+const svcs=d.services||[];const hosts=d.hosts||[];const net=d.networking||[];
+const all=svcs.concat(hosts,net);const total=all.length;
+document.getElementById("updated").textContent="Updated "+ago(d.updated_at);
+const anyDown=all.some(x=>x.status==="down");const b=document.getElementById("banner");
+if(total){b.className="banner "+(anyDown?"bad":"ok");b.textContent=anyDown?"Some systems are down":"All systems operational"}else b.className="";
 const list=document.getElementById("list");
-if(!svcs.length){list.innerHTML='<div class="empty">No services to display yet.</div>';return}
-list.innerHTML=svcs.map(s=>{const up=(s.uptime_24h==null)?"—":Number(s.uptime_24h).toFixed(2)+"%";
-const ticks=(s.ticks||[]).map(t=>`<div class="tick ${cls(t)}"></div>`).join("");
-return `<div class="svc"><div class="svc-head"><span class="dot ${cls(s.status)}"></span>
-<span class="svc-name">${esc(s.name)}</span><span class="uptime">${up} <span style="opacity:.6">24h</span></span></div>
-<div class="ticks">${ticks}</div></div>`}).join("")}
+if(!total){list.innerHTML='<div class="empty">Nothing to display yet.</div>';return}
+const card=x=>{const up=(x.uptime_24h==null)?"—":Number(x.uptime_24h).toFixed(2)+"%";
+const ticks=(x.ticks||[]).map(t=>`<div class="tick ${cls(t)}"></div>`).join("");
+return `<div class="svc"><div class="svc-head"><span class="dot ${cls(x.status)}"></span>
+<span class="svc-name">${esc(x.name)}</span><span class="uptime">${up} <span style="opacity:.6">24h</span></span></div>
+<div class="ticks">${ticks}</div></div>`};
+const shown=[["Services",svcs],["Hosts",hosts],["Networking",net]].filter(s=>s[1].length);
+const multi=shown.length>1;
+list.innerHTML=shown.map(s=>(multi?`<div class="section-label">${esc(s[0])}</div>`:"")+s[1].map(card).join("")).join("")}
 load();setInterval(load,30000);
 </script></body></html>

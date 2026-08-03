@@ -225,6 +225,18 @@ def init_db():
             # (local 'HH:MM'; both NULL = always). Gates automatic firing, not Run now.
             "ALTER TABLE scan_schedules ADD COLUMN window_start TEXT",
             "ALTER TABLE scan_schedules ADD COLUMN window_end TEXT",
+            # Host up/down history (liveness), for host uptime %/outages — mirrors
+            # monitor_events for services. status: 'up' | 'down'.
+            """CREATE TABLE IF NOT EXISTS host_events (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+                status  TEXT NOT NULL,
+                ts      TEXT NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_host_events_host_ts ON host_events(host_id, ts)",
+            # Which hosts appear on the public status page (Phase 3).
+            "ALTER TABLE hosts ADD COLUMN public INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE hosts ADD COLUMN public_name TEXT",
         ]:
             try:
                 conn.execute(sql)

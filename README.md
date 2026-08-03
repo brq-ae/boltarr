@@ -15,13 +15,13 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 - **Scheduled scans** — run scans automatically on an interval (optionally clock-anchored) or on chosen weekdays, with an optional active-hours window; target all subnets or one, and the whole range or just static/dynamic hosts
 - **Change tracking** — records what each scan finds different vs. before (new hosts, opened/closed ports, MAC/hostname changes), with a per-type retention window
 - **Change alerts** — ntfy notifications for recorded changes as a per-scan summary and/or a daily digest; scope alerts by host classification (static / dynamic / all) with per-host opt-outs
-- **Host liveness** — a light background ping tier marks hosts online/offline and alerts on transitions
+- **Host liveness & uptime** — a light background ping tier marks hosts online/offline, tracks per-host uptime %/outages, alerts on transitions, and correlates service outages to a down host (with alert suppression)
 - **Timezone-aware** — a configurable timezone drives schedule times, quiet hours, the digest, and how times are displayed
 - **DHCP-aware classification** — per-subnet DHCP range classifies hosts as static or dynamic
 - **Device management** — add/edit/delete hosts, merge multi-homed devices, annotate with notes
 - **Services registry** — track running services per host, with a services topology and dependencies
 - **Service uptime monitor** — up/down checks, ntfy alerts with a grace period, quiet hours, and 24h/7d/30d uptime history
-- **Public status page** — push a sanitized status summary to a separate, internet-facing page over your LAN
+- **Public status page** — push a sanitized status summary (services, hosts, and networking gear) to a separate, internet-facing page over your LAN — public names only, never internal IPs
 - **VLAN management** — define VLANs, assign them to connections, visualize on topology
 - **AI analysis** — per-host and network-wide analysis; AI chat assistant with full network context
 - **AI optional** — works without AI; supports Ollama, OpenAI-compatible APIs, and Anthropic

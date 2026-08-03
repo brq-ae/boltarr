@@ -533,6 +533,22 @@ def get_authorized_keys(ip: str, user: str = "root"):
     return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
 
 
+@app.get("/api/hosts/{ip:path}/uptime")
+def host_uptime_endpoint(ip: str):
+    """Host up/down uptime %/outages from liveness history — mirrors service uptime."""
+    ip = ip.rstrip("/")
+    with get_conn() as conn:
+        host = _resolve_host(conn, ip)
+        if not host:
+            raise HTTPException(404, "Host not found")
+        hid = host["id"]
+    windows = {"24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}
+    return {
+        "uptime": {k: monitor.host_uptime(hid, secs) for k, secs in windows.items()},
+        "outages": monitor.host_outages(hid, 30 * 86400, limit=10),
+    }
+
+
 @app.get("/api/hosts/{ip:path}")
 def get_host(ip: str):
     ip = ip.rstrip("/")
@@ -610,6 +626,9 @@ class HostUpdate(BaseModel):
     set_static_override: bool = False
     no_mac_alert:        Optional[bool] = None
     no_offline_alert:    Optional[bool] = None
+    public:              Optional[bool] = None   # show on the public status page
+    public_name:         Optional[str]  = None
+    set_public:          bool = False
 
 
 @app.put("/api/hosts/{ip}")
@@ -648,9 +667,17 @@ def update_host(ip: str, data: HostUpdate):
             conn.execute("UPDATE hosts SET no_mac_alert=? WHERE ip=?", (1 if data.no_mac_alert else 0, ip))
         if data.no_offline_alert is not None:
             conn.execute("UPDATE hosts SET no_offline_alert=? WHERE ip=?", (1 if data.no_offline_alert else 0, ip))
+        if data.set_public:
+            conn.execute("UPDATE hosts SET public=?, public_name=? WHERE ip=?",
+                         (1 if data.public else 0, (data.public_name or "").strip() or None, ip))
         conn.commit()
         row = conn.execute("SELECT * FROM hosts WHERE ip=?", (ip,)).fetchone()
-        return dict(row)
+    if data.set_public:                     # keep the public page in sync
+        try:
+            monitor.push_status()
+        except Exception:
+            pass
+    return dict(row)
 
 
 class HostRenameReq(BaseModel):
@@ -858,7 +885,7 @@ class ServiceUpdate(BaseModel):
 def list_all_services():
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT s.*, h.ip, h.hostname
+            SELECT s.*, h.ip, h.hostname, h.online AS host_online
             FROM services s
             JOIN hosts h ON s.host_id = h.id
             ORDER BY h.ip, s.name
@@ -1416,6 +1443,7 @@ class NotificationSettingsIn(BaseModel):
     quiet_enabled:        Optional[bool] = None
     quiet_start:          Optional[str]  = None
     quiet_end:            Optional[str]  = None
+    suppress_when_host_down: Optional[bool] = None
 
 
 class StatusPageSettingsIn(BaseModel):
@@ -1439,6 +1467,7 @@ def get_settings():
     ntfy["quiet_enabled"] = mon.get("quiet_enabled", False)
     ntfy["quiet_start"]   = mon.get("quiet_start", "")
     ntfy["quiet_end"]     = mon.get("quiet_end", "")
+    ntfy["suppress_when_host_down"] = mon.get("suppress_when_host_down", True)
 
     sp = dict(cfg["statuspage"])
     sp["token"] = _MASKED if sp.get("token") else ""
@@ -1594,6 +1623,8 @@ def update_notification_settings(data: NotificationSettingsIn):
         mon["quiet_start"] = data.quiet_start.strip()
     if data.quiet_end is not None:
         mon["quiet_end"] = data.quiet_end.strip()
+    if data.suppress_when_host_down is not None:
+        mon["suppress_when_host_down"] = data.suppress_when_host_down
     save_config(cfg)
     result = dict(ntfy)
     result["token"] = _MASKED if ntfy.get("token") else ""

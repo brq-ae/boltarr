@@ -34,7 +34,7 @@ _stop = threading.Event()
 
 _SELECT = """
     SELECT s.id, s.name, s.url, s.port, s.monitor_status,
-           s.monitor_fail_since, s.monitor_alerted, h.ip, h.hostname
+           s.monitor_fail_since, s.monitor_alerted, h.ip, h.hostname, h.online
     FROM services s JOIN hosts h ON s.host_id = h.id
 """
 
@@ -175,6 +175,11 @@ def _process(conn, svc: dict, new: str) -> str:
 
     # Quiet window uses local wall-clock time (container TZ), not UTC
     suppress = in_quiet_window(local_now().time())
+    # Root-cause suppression: if the service's host is offline, hold the
+    # service-down alert — liveness already sends one host-offline alert, so we
+    # don't flood with a service-down for every service on that host.
+    if get_monitoring_config().get("suppress_when_host_down", True) and svc.get("online") == 0:
+        suppress = True
     r = evaluate(prev, new, svc.get("monitor_fail_since"),
                  svc.get("monitor_alerted") or 0, _grace_seconds(), now_dt, suppress=suppress)
 
@@ -267,22 +272,13 @@ def _events(conn, service_id: int):
     ).fetchall()]
 
 
-def uptime(service_id: int, window_seconds: int, now: datetime | None = None) -> dict | None:
-    """Uptime over [now-window, now] from the event timeline.
-    Returns {pct, up_seconds, monitored_seconds} or None if no data in range."""
-    now = now or _now_dt()
+def _compute_uptime(evs: list[dict], anchor_status: str | None,
+                    window_seconds: int, now: datetime) -> dict | None:
+    """Uptime % over [now-window, now] from a status/ts event timeline."""
     start = now.timestamp() - window_seconds
-    with get_conn() as conn:
-        evs = _events(conn, service_id)
-        anchor = conn.execute(
-            "SELECT status, ts FROM monitor_events WHERE service_id=? AND ts < ? "
-            "ORDER BY ts DESC LIMIT 1",
-            (service_id, datetime.fromtimestamp(start, timezone.utc).isoformat(timespec="seconds")),
-        ).fetchone()
-    # Build (timestamp, state) points from window start to now
     points: list[tuple[float, str]] = []
-    if anchor:
-        points.append((start, anchor["status"]))
+    if anchor_status is not None:
+        points.append((start, anchor_status))
     for e in evs:
         t = _parse(e["ts"])
         if not t:
@@ -292,9 +288,6 @@ def uptime(service_id: int, window_seconds: int, now: datetime | None = None) ->
             points.append((ts, e["status"]))
     if not points:
         return None
-    # If the first data point is after window start (monitoring began mid-window),
-    # only measure from that first point — don't count un-monitored time.
-    seg_start = points[0][0]
     up = 0.0
     total = 0.0
     for i, (ts, state) in enumerate(points):
@@ -308,12 +301,8 @@ def uptime(service_id: int, window_seconds: int, now: datetime | None = None) ->
     return {"pct": round(up / total * 100, 3), "up_seconds": int(up), "monitored_seconds": int(total)}
 
 
-def outages(service_id: int, window_seconds: int, limit: int = 10, now: datetime | None = None) -> list[dict]:
-    """Recent down periods within the window: {start, end|None, seconds}."""
-    now = now or _now_dt()
+def _compute_outages(evs: list[dict], window_seconds: int, limit: int, now: datetime) -> list[dict]:
     start_dt = now.timestamp() - window_seconds
-    with get_conn() as conn:
-        evs = _events(conn, service_id)
     out: list[dict] = []
     cur_down_start = None
     for e in evs:
@@ -332,6 +321,51 @@ def outages(service_id: int, window_seconds: int, limit: int = 10, now: datetime
         out.append({"start": _iso(datetime.fromtimestamp(cur_down_start, timezone.utc)),
                     "end": None, "seconds": int(now.timestamp() - cur_down_start)})
     return list(reversed(out))[:limit]
+
+
+def _anchor_status(conn, table: str, key_col: str, key, start: float) -> str | None:
+    start_iso = datetime.fromtimestamp(start, timezone.utc).isoformat(timespec="seconds")
+    row = conn.execute(
+        f"SELECT status FROM {table} WHERE {key_col}=? AND ts < ? ORDER BY ts DESC LIMIT 1",
+        (key, start_iso)).fetchone()
+    return row["status"] if row else None
+
+
+def uptime(service_id: int, window_seconds: int, now: datetime | None = None) -> dict | None:
+    now = now or _now_dt()
+    with get_conn() as conn:
+        evs = _events(conn, service_id)
+        anchor = _anchor_status(conn, "monitor_events", "service_id", service_id, now.timestamp() - window_seconds)
+    return _compute_uptime(evs, anchor, window_seconds, now)
+
+
+def outages(service_id: int, window_seconds: int, limit: int = 10, now: datetime | None = None) -> list[dict]:
+    now = now or _now_dt()
+    with get_conn() as conn:
+        evs = _events(conn, service_id)
+    return _compute_outages(evs, window_seconds, limit, now)
+
+
+# ── Host uptime (same engine, fed by liveness host_events) ────────────────────
+
+def _host_events(conn, host_id: int):
+    return [dict(r) for r in conn.execute(
+        "SELECT status, ts FROM host_events WHERE host_id=? ORDER BY ts", (host_id,)).fetchall()]
+
+
+def host_uptime(host_id: int, window_seconds: int, now: datetime | None = None) -> dict | None:
+    now = now or _now_dt()
+    with get_conn() as conn:
+        evs = _host_events(conn, host_id)
+        anchor = _anchor_status(conn, "host_events", "host_id", host_id, now.timestamp() - window_seconds)
+    return _compute_uptime(evs, anchor, window_seconds, now)
+
+
+def host_outages(host_id: int, window_seconds: int, limit: int = 10, now: datetime | None = None) -> list[dict]:
+    now = now or _now_dt()
+    with get_conn() as conn:
+        evs = _host_events(conn, host_id)
+    return _compute_outages(evs, window_seconds, limit, now)
 
 
 def prune_events(retention_days: int = RETENTION_DAYS) -> None:
@@ -353,25 +387,25 @@ def prune_events(retention_days: int = RETENTION_DAYS) -> None:
             if anchor:
                 conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
                              (sid, anchor["status"], cutoff))
+        # Same rolling-window prune for host up/down history
+        host_ids = [r[0] for r in conn.execute(
+            "SELECT DISTINCT host_id FROM host_events WHERE ts < ?", (cutoff,)).fetchall()]
+        for hid in host_ids:
+            anchor = conn.execute(
+                "SELECT status FROM host_events WHERE host_id=? AND ts < ? "
+                "ORDER BY ts DESC LIMIT 1", (hid, cutoff)).fetchone()
+            conn.execute("DELETE FROM host_events WHERE host_id=? AND ts < ?", (hid, cutoff))
+            if anchor:
+                conn.execute("INSERT INTO host_events (host_id, status, ts) VALUES (?,?,?)",
+                             (hid, anchor["status"], cutoff))
         conn.commit()
 
 
 # ── Public status page: ticks, payload, push ──────────────────────────────────
 
-def ticks(service_id: int, minutes: int = 60, now: datetime | None = None) -> list[str]:
-    """Per-minute up/down/unknown for the last `minutes`, oldest→newest,
-    derived from the event timeline."""
-    now = now or _now_dt()
+def _compute_ticks(evs: list[dict], anchor_status: str | None, minutes: int, now: datetime) -> list[str]:
     since = now.timestamp() - minutes * 60
-    since_iso = _iso(datetime.fromtimestamp(since, timezone.utc))
-    with get_conn() as conn:
-        anchor = conn.execute(
-            "SELECT status FROM monitor_events WHERE service_id=? AND ts < ? "
-            "ORDER BY ts DESC LIMIT 1", (service_id, since_iso)).fetchone()
-        evs = [dict(r) for r in conn.execute(
-            "SELECT status, ts FROM monitor_events WHERE service_id=? AND ts >= ? ORDER BY ts",
-            (service_id, since_iso)).fetchall()]
-    points: list[tuple[float, str]] = [(since, anchor["status"] if anchor else "unknown")]
+    points: list[tuple[float, str]] = [(since, anchor_status or "unknown")]
     for e in evs:
         t = _parse(e["ts"])
         if t:
@@ -387,6 +421,27 @@ def ticks(service_id: int, minutes: int = 60, now: datetime | None = None) -> li
                 break
         out.append(state if state in ("up", "down") else "unknown")
     return out
+
+
+def _ticks_for(table: str, key_col: str, key, minutes: int, now: datetime) -> list[str]:
+    since_iso = _iso(datetime.fromtimestamp(now.timestamp() - minutes * 60, timezone.utc))
+    with get_conn() as conn:
+        anchor = conn.execute(
+            f"SELECT status FROM {table} WHERE {key_col}=? AND ts < ? ORDER BY ts DESC LIMIT 1",
+            (key, since_iso)).fetchone()
+        evs = [dict(r) for r in conn.execute(
+            f"SELECT status, ts FROM {table} WHERE {key_col}=? AND ts >= ? ORDER BY ts",
+            (key, since_iso)).fetchall()]
+    return _compute_ticks(evs, anchor["status"] if anchor else None, minutes, now)
+
+
+def ticks(service_id: int, minutes: int = 60, now: datetime | None = None) -> list[str]:
+    """Per-minute up/down/unknown for the last `minutes`, oldest→newest."""
+    return _ticks_for("monitor_events", "service_id", service_id, minutes, now or _now_dt())
+
+
+def host_ticks(host_id: int, minutes: int = 60, now: datetime | None = None) -> list[str]:
+    return _ticks_for("host_events", "host_id", host_id, minutes, now or _now_dt())
 
 
 def build_status_payload() -> dict:
@@ -407,8 +462,29 @@ def build_status_payload() -> dict:
             "uptime_24h": up["pct"] if up else None,
             "ticks": ticks(r["id"], 60),
         })
+    # Public hosts — SANITIZED: only a public name (never the IP), status,
+    # uptime and ticks leave the LAN. Networking gear goes in its own section.
+    NETWORKING = {"router", "gateway", "switch", "unmanaged-switch", "firewall", "ap"}
+    with get_conn() as conn:
+        host_rows = [dict(r) for r in conn.execute("""
+            SELECT id, public_name, hostname, online, device_type
+            FROM hosts
+            WHERE public = 1 AND ip NOT LIKE 'node-%'
+            ORDER BY COALESCE(NULLIF(TRIM(public_name), ''), hostname, '')
+        """).fetchall()]
+    hosts, networking = [], []
+    for r in host_rows:
+        up = host_uptime(r["id"], 86400)
+        item = {
+            "key": f"host-{r['id']}",
+            "name": (r.get("public_name") or "").strip() or (r.get("hostname") or "").strip() or "Host",
+            "status": "up" if r["online"] == 1 else "down" if r["online"] == 0 else "unknown",
+            "uptime_24h": up["pct"] if up else None,
+            "ticks": host_ticks(r["id"], 60),
+        }
+        (networking if (r.get("device_type") or "") in NETWORKING else hosts).append(item)
     return {"updated_at": _iso(_now_dt()), "title": "Service Status",
-            "services": services, "announcements": []}
+            "services": services, "hosts": hosts, "networking": networking, "announcements": []}
 
 
 def push_status() -> tuple[bool, str]:
