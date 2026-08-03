@@ -13,6 +13,10 @@
 # Usage:
 #   curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.lxc.yml
 #   docker compose -f docker-compose.lxc.yml up -d
+#
+# NOTE: this uses bridge networking — nmap CANNOT scan your LAN from here. For
+# scanning, add `network_mode: host` + `cap_add: [NET_RAW, NET_ADMIN]` (see
+# docker-compose.host.yml) alongside the apparmor override below.
 
 services:
   boltarr:

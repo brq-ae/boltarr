@@ -28,17 +28,28 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 
 ## Quick start (Docker)
 
+> [!IMPORTANT]
+> **Network scanning needs host networking.** Boltarr scans your LAN with nmap
+> (host discovery, MAC addresses, the liveness ping tier). Docker's default
+> **bridge** network sandboxes the container, so nmap can't reach your LAN — you
+> get **no host discovery, no MAC addresses, and degraded liveness**. Use the
+> **host-networking** compose below for a real deployment; the plain bridge
+> `docker-compose.yml` is only fine if you don't need LAN scanning.
+
 ```bash
-curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.yml
-docker compose up -d
+curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.host.yml
+docker compose -f docker-compose.host.yml up -d
 ```
 
-Open **http://localhost:12100**
+Open **http://\<host-ip\>:12100** (with host networking Boltarr binds `:12100`
+directly on the host — there's no port mapping).
 
-> Or if you prefer to clone the full repo:
+> **Tip:** run Boltarr on its own box, separate from any internet-facing service
+> (e.g. the public status page) — it holds your network map and SSH keys.
+
+> Bridge-only (no LAN scanning) or cloning the repo:
 > ```bash
-> git clone https://github.com/brq-ae/boltarr.git
-> cd boltarr
+> curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.yml
 > docker compose up -d
 > ```
 
@@ -138,7 +149,7 @@ Install via **Community Applications** (search `boltarr`) once the template is l
 3. Set your data path (default: `/mnt/user/appdata/boltarr`) and optionally fill in AI settings
 4. Click **Apply**
 
-Data persists in the mapped appdata folder. AI is optional — configure it from the ⚙ AI Settings button in the app.
+The template sets **Network Type: Host** (and adds `--cap-add=NET_RAW --cap-add=NET_ADMIN`) so nmap can scan your LAN — leave that as-is. Data persists in the mapped appdata folder. AI is optional — configure it from the ⚙ AI Settings button in the app.
 
 ## Manual install (without Docker)
 

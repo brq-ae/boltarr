@@ -1,6 +1,11 @@
 # Starts Boltarr alongside a bundled Ollama instance.
 # Usage: docker compose -f docker-compose.ollama.yml up -d
 #
+# NOTE: this uses bridge networking (so Boltarr can reach Ollama by name), which
+# means nmap CANNOT scan your LAN from here. If you need both LAN scanning AND
+# Ollama, run Ollama separately and use docker-compose.host.yml with
+# LLM_BASE_URL pointing at your Ollama host.
+#
 # After first start, pull a model:
 #   docker exec boltarr-ollama-1 ollama pull llama3.2
 # Then set the model in Boltarr's ⚙ AI Settings (or via LLM_MODEL env var).

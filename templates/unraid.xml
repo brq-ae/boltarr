@@ -3,7 +3,9 @@
   <Name>boltarr</Name>
   <Repository>brqae/boltarr:latest</Repository>
   <Registry>https://hub.docker.com/r/brqae/boltarr</Registry>
-  <Network>bridge</Network>
+  <!-- HOST networking is required for LAN scanning: nmap can't ARP/discover your
+       LAN or read MAC addresses from Docker's default bridge network. -->
+  <Network>host</Network>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
   <Support>https://github.com/brq-ae/boltarr/issues</Support>
@@ -18,7 +20,7 @@
   <WebUI>http://[IP]:[PORT:12100]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/brq-ae/boltarr/master/templates/unraid.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/brq-ae/boltarr/master/frontend/img/BoltarrLogo.png</Icon>
-  <ExtraParams></ExtraParams>
+  <ExtraParams>--cap-add=NET_RAW --cap-add=NET_ADMIN</ExtraParams>
   <PostArgs></PostArgs>
   <CPUset></CPUset>
   <DonateText></DonateText>

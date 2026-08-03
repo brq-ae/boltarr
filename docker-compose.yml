@@ -1,3 +1,6 @@
+# NOTE: this uses bridge networking, which sandboxes the container's network —
+# nmap CANNOT scan your LAN from here (no host discovery, no MAC addresses,
+# degraded liveness). For network scanning use docker-compose.host.yml instead.
 services:
   boltarr:
     image: brqae/boltarr:latest
