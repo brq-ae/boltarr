@@ -346,6 +346,15 @@ Boltarr's data lives in `data/` (`boltarr.db` + `config.yaml`).
 - **Restore** — upload a backup ZIP; Boltarr validates and atomically replaces
   the live files, then upgrades the restored database to the current schema, so
   a backup from an older version restores cleanly into a newer Boltarr.
+  **Restart Boltarr afterwards** (e.g. `docker restart boltarr`) to finish — the
+  running process needs to re-open the restored database.
+- **Factory reset** — **Settings → 🗄 Data → ↺ Factory reset** wipes all network
+  data (hosts, services, subnets, scans, schedules, history, VLANs, SSH keys).
+  Tick *Keep settings* to preserve ntfy/status-page/timezone/AI, or untick for a
+  full reset; you must type `DELETE` to confirm.
+
+**Bulk delete:** the Hosts and Services tables have a checkbox column + *Select
+all* + *Delete selected* for clearing many at once.
 
 The backup ZIP contains `config.yaml`, which holds your tokens and API keys —
 treat it as sensitive and don't share it.

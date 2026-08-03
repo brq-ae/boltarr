@@ -66,6 +66,31 @@
     </div>
   </aside>
 
+<!-- Factory reset -->
+<div class="modal-overlay" id="factoryResetModal">
+  <div class="modal" style="max-width:460px">
+    <div class="modal-title" style="color:var(--red)">↺ Factory reset</div>
+    <p class="text-3" style="font-size:12px;line-height:1.6;margin:0 0 12px">
+      This permanently deletes <strong>all network data</strong> — hosts, ports, services, subnets, scans,
+      schedules, change history, uptime history, connections, VLANs, and SSH keys. It cannot be undone.
+    </p>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="resetKeepSettings" checked style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">Keep settings <span style="color:var(--text-3)">(ntfy, status page, timezone, AI). Uncheck to reset everything to a fresh install.</span></span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Type <code>DELETE</code> to confirm</label>
+      <input type="text" id="resetConfirm" placeholder="DELETE" class="mono" oninput="onResetConfirmInput()" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeFactoryReset()">Cancel</button>
+      <button class="btn btn-danger" id="resetConfirmBtn" onclick="doFactoryReset()" disabled>Reset</button>
+    </div>
+  </div>
+</div>
+
   <!-- ── Top bar ────────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <button class="btn-menu" id="menuBtn" onclick="toggleSidebar()">☰</button>
@@ -130,12 +155,14 @@
             <option value="unknown">Unclassified</option>
           </select>
           <span class="host-count" id="hostCount"></span>
-          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;margin-left:auto" onclick="openAddHost()">+ Add Host</button>
+          <button class="btn btn-danger" id="hostsDeleteBtn" style="font-size:11px;padding:5px 11px;margin-left:auto;display:none" onclick="hostsDeleteSelected()">Delete selected</button>
+          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px" onclick="openAddHost()">+ Add Host</button>
         </div>
         <div class="table-wrap">
           <table id="hostsTable">
             <thead>
               <tr>
+                <th class="td-check"><input type="checkbox" id="hostsSelectAll" onchange="hostsToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
                 <th class="td-ip" onclick="sortTable('ip')">IP</th>
                 <th class="td-host" onclick="sortTable('hostname')">Hostname</th>
                 <th class="td-mac col-mac" onclick="sortTable('mac')">MAC</th>
@@ -266,6 +293,7 @@
           </select>
           <input type="text" class="search-input" id="serviceFilter" placeholder="Filter by name, port…" style="flex:1;max-width:260px">
           <span class="host-count" id="serviceCount"></span>
+          <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" onclick="svcDeleteSelected()">Delete selected</button>
           <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openBulkAddContainers()">⊕ Bulk</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openAddService()">+ Service</button>
         </div>
@@ -273,6 +301,7 @@
           <table id="servicesTable">
             <thead>
               <tr>
+                <th class="td-check"><input type="checkbox" id="svcSelectAll" onchange="svcToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
                 <th style="width:44px"></th>
                 <th onclick="sortServices('name')">Service</th>
                 <th onclick="sortServices('ip')">Host</th>
@@ -1024,10 +1053,10 @@
       <span>⚙ Settings</span>
       <button class="icon-btn" onclick="closeSettings()">✕</button>
     </div>
-    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px">
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">🌍 General</span>
-      </div>
+    <div class="modal-body">
+      <details class="settings-section" open>
+        <summary>🌍 General</summary>
+        <div class="acc-body">
       <div class="form-row">
         <label>Timezone</label>
         <div style="display:flex;gap:8px;flex:1;align-items:center">
@@ -1038,10 +1067,10 @@
         Boltarr uses this for schedule times, quiet hours, the digest, and how times are shown. <span id="setTzPreview" style="color:var(--text-2)"></span>
       </p>
 
-      <div class="sidebar-divider" style="margin:2px 0"></div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">🤖 AI</span>
-      </div>
+      </div></details>
+      <details class="settings-section">
+        <summary>🤖 AI</summary>
+        <div class="acc-body">
       <p class="text-3" style="font-size:11px;line-height:1.6">
         Settings are saved to <code>data/config.yaml</code>.<br>
         Environment variables (<code>LLM_PROVIDER</code>, <code>LLM_BASE_URL</code>,
@@ -1075,14 +1104,14 @@
         <input id="setLongTimeout" type="number" style="width:80px" min="30" value="600">
       </div>
       <div id="setTestResult" class="settings-test-result" style="display:none"></div>
-
-      <div class="sidebar-divider" style="margin:4px 0"></div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">📱 Notifications (ntfy)</span>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+      <button class="btn" style="font-size:12px;align-self:flex-start" onclick="testLLMConnection()">⚡ Test AI</button>
+      </div></details>
+      <details class="settings-section">
+        <summary>📱 Notifications (ntfy)</summary>
+        <div class="acc-body">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
           <input type="checkbox" id="setNtfyEnabled"> Enabled
         </label>
-      </div>
       <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
         Boltarr sends alerts to your phone via <a href="https://ntfy.sh" target="_blank" style="color:var(--accent)">ntfy</a>.
         Subscribe to your topic in the ntfy app to receive them.
@@ -1128,13 +1157,13 @@
         <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
 
-      <div class="sidebar-divider" style="margin:4px 0"></div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">🌐 Public status page</span>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+      </div></details>
+      <details class="settings-section">
+        <summary>🌐 Public status page</summary>
+        <div class="acc-body">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
           <input type="checkbox" id="setSpEnabled"> Enabled
         </label>
-      </div>
       <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
         Boltarr pushes a sanitized status of services you mark "public" to a separate status app over your LAN.
       </p>
@@ -1155,13 +1184,13 @@
         <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
 
-      <div class="sidebar-divider" style="margin:4px 0"></div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">📡 Liveness</span>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+      </div></details>
+      <details class="settings-section">
+        <summary>📡 Liveness</summary>
+        <div class="acc-body">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
           <input type="checkbox" id="setLvEnabled"> Enabled
         </label>
-      </div>
       <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
         A light background ping sweep marks each known host online/offline (the dot in the Hosts table). Offline/online transitions feed Change tracking &amp; alerts above.
       </p>
@@ -1173,15 +1202,18 @@
         <span style="font-size:11px;color:var(--text-3)">missed sweeps</span>
       </div>
 
-      <div class="sidebar-divider" style="margin:4px 0"></div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">🕓 Change tracking</span>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+      </div></details>
+      <details class="settings-section">
+        <summary>🔔 Changes</summary>
+        <div class="acc-body">
+      <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Everything is recorded to the Changes feed; alerts are the subset that push to ntfy.</p>
+      <div class="acc-subhead">Record
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;font-weight:400">
           <input type="checkbox" id="setCtEnabled"> Enabled
         </label>
       </div>
       <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Records what each scan finds changed vs. before (new hosts, opened/closed ports, MAC/hostname changes).
+        What each scan finds changed vs. before (new hosts, opened/closed ports, MAC/hostname changes).
       </p>
       <div class="scan-checks" style="padding-left:2px">
         <label><input type="checkbox" id="setCtHostNew"> New host</label>
@@ -1198,15 +1230,13 @@
         <span style="font-size:11px;color:var(--text-3)">days</span>
       </div>
 
-      <div class="sidebar-divider" style="margin:4px 0"></div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:13px;font-weight:600">🔔 Change alerts</span>
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+      <div class="acc-subhead" style="margin-top:12px">Alerts
+        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;font-weight:400">
           <input type="checkbox" id="setCaEnabled"> Enabled
         </label>
       </div>
       <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Notify (ntfy) about recorded changes. Every change is always kept in the Changes feed — this only controls the push. Needs notifications set up above.
+        Which recorded changes push to ntfy. Needs Notifications set up. Everything stays in the feed regardless.
       </p>
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Alert for</label>
@@ -1234,10 +1264,17 @@
         <label><input type="checkbox" id="setCaDigest"> Daily digest at</label>
         <input id="setCaDigestTime" type="time" value="08:00" style="width:110px">
       </div>
+      </div></details>
+
+      <details class="settings-section">
+        <summary>🗄 Data</summary>
+        <div class="acc-body">
+          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup &amp; Restore are in the sidebar (bottom-left). Factory reset permanently wipes all network data — use with care.</p>
+          <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" onclick="openFactoryReset()">↺ Factory reset</button>
+        </div>
+      </details>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="testLLMConnection()">⚡ Test AI</button>
-      <span style="flex:1"></span>
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save</button>
     </div>

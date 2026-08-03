@@ -736,6 +736,23 @@ def delete_host(ip: str):
     return {"ok": True}
 
 
+class HostBulkDelete(BaseModel):
+    ips: list[str]
+
+
+@app.delete("/api/hosts")
+def bulk_delete_hosts(data: HostBulkDelete):
+    if not data.ips:
+        return {"ok": True, "deleted": 0}
+    with get_conn() as conn:
+        ph = ",".join("?" * len(data.ips))
+        conn.execute(f"DELETE FROM hosts WHERE ip IN ({ph})", data.ips)
+        conn.execute(f"DELETE FROM connections WHERE src_ip IN ({ph}) OR dst_ip IN ({ph})",
+                     data.ips + data.ips)
+        conn.commit()
+    return {"ok": True, "deleted": len(data.ips)}
+
+
 class MergeReq(BaseModel):
     merge_ip: str
 
@@ -1020,6 +1037,21 @@ def delete_service_endpoint(svc_id: int):
         conn.execute("DELETE FROM services WHERE id=?", (svc_id,))
         conn.commit()
     return {"ok": True}
+
+
+class ServiceBulkDelete(BaseModel):
+    ids: list[int]
+
+
+@app.delete("/api/services")
+def bulk_delete_services(data: ServiceBulkDelete):
+    if not data.ids:
+        return {"ok": True, "deleted": 0}
+    with get_conn() as conn:
+        ph = ",".join("?" * len(data.ids))
+        conn.execute(f"DELETE FROM services WHERE id IN ({ph})", data.ids)
+        conn.commit()
+    return {"ok": True, "deleted": len(data.ids)}
 
 
 # ── Service dependencies ──────────────────────────────────────────────────────
@@ -1899,6 +1931,27 @@ async def restore(file: UploadFile = File(...)):
         pass
 
     return {"ok": True, "tables": [t[0] for t in tables]}
+
+
+class FactoryResetIn(BaseModel):
+    keep_settings: bool = True   # keep config.yaml (ntfy/statuspage/timezone/LLM)
+
+
+@app.post("/api/factory-reset")
+def factory_reset(data: FactoryResetIn):
+    """Wipe all network data. Row-deletes (no file swap) so no restart needed.
+    keep_settings=False also resets config.yaml to defaults."""
+    with get_conn() as conn:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+        for t in tables:
+            conn.execute(f"DELETE FROM {t}")
+        conn.commit()
+    init_db()   # re-ensure schema + re-seed the built-in scan profiles
+    if not data.keep_settings:
+        (_DATA_DIR / "config.yaml").unlink(missing_ok=True)   # back to defaults
+    return {"ok": True, "settings_kept": data.keep_settings}
 
 
 # ── Static files (must be last) ───────────────────────────────────────────────

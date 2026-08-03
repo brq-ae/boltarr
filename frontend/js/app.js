@@ -301,7 +301,7 @@ function renderHostsTable() {
   });
 
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${filterText ? "No matches." : "No hosts yet — add a subnet and scan."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${filterText ? "No matches." : "No hosts yet — add a subnet and scan."}</td></tr>`;
     return;
   }
 
@@ -330,6 +330,7 @@ function renderHostsTable() {
     const dot = isSynthetic ? "" : livenessDot(h.online);
     const tr = document.createElement("tr");
     tr.innerHTML = `
+      <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${h.ip}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="hostsUpdateBulkBtn()"></td>
       <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
       <td class="td-host">${h.hostname || `<span style="color:var(--text-3)">—</span>`}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac||"—"}</td>
@@ -344,7 +345,7 @@ function renderHostsTable() {
     if (aliases.length && expanded) {
       const subTr = document.createElement("tr");
       subTr.className = "alias-sub-row";
-      subTr.innerHTML = `<td colspan="8" class="alias-sub-cell">
+      subTr.innerHTML = `<td colspan="9" class="alias-sub-cell">
         <div class="alias-chips-row">
           <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Aliases</span>
           ${aliases.map(a => `<span class="alias-chip-inline mono">${a}</span>`).join("")}
@@ -353,6 +354,33 @@ function renderHostsTable() {
       tbody.appendChild(subTr);
     }
   });
+  hostsUpdateBulkBtn();   // re-render clears selection → sync the toolbar button
+}
+
+function hostsToggleAll(checked) {
+  document.querySelectorAll(".host-checkbox").forEach(cb => cb.checked = checked);
+  hostsUpdateBulkBtn();
+}
+
+function hostsUpdateBulkBtn() {
+  const boxes = document.querySelectorAll(".host-checkbox");
+  const checked = document.querySelectorAll(".host-checkbox:checked").length;
+  const btn = document.getElementById("hostsDeleteBtn");
+  if (btn) btn.style.display = checked ? "" : "none";
+  const all = document.getElementById("hostsSelectAll");
+  if (all) {
+    all.checked = checked === boxes.length && boxes.length > 0;
+    all.indeterminate = checked > 0 && checked < boxes.length;
+  }
+}
+
+async function hostsDeleteSelected() {
+  const ips = Array.from(document.querySelectorAll(".host-checkbox:checked")).map(cb => cb.dataset.ip);
+  if (!ips.length) return showToast("Nothing selected");
+  if (!confirm(`Delete ${ips.length} host${ips.length > 1 ? "s" : ""}? This can't be undone.`)) return;
+  await api("DELETE", "/api/hosts", { ips });
+  await loadHosts(); renderHostsTable(); await loadGraph();
+  showToast(`Deleted ${ips.length} host${ips.length > 1 ? "s" : ""}`);
 }
 
 function livenessDot(online) {
@@ -1981,12 +2009,13 @@ function renderServicesTable() {
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(s => `
     <tr id="svc-tr-${s.id}" style="cursor:pointer" onclick="showSvcDetail(${s.id})">
+      <td class="td-check"><input type="checkbox" class="svc-checkbox" data-id="${s.id}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="svcUpdateBulkBtn()"></td>
       <td style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
       <td>
         <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}${s.name}${svcHostDownTag(s)}</div>
@@ -2004,6 +2033,34 @@ function renderServicesTable() {
       </td>
     </tr>
   `).join("");
+  svcUpdateBulkBtn();
+}
+
+function svcToggleAll(checked) {
+  document.querySelectorAll(".svc-checkbox").forEach(cb => cb.checked = checked);
+  svcUpdateBulkBtn();
+}
+
+function svcUpdateBulkBtn() {
+  const boxes = document.querySelectorAll(".svc-checkbox");
+  const checked = document.querySelectorAll(".svc-checkbox:checked").length;
+  const btn = document.getElementById("svcDeleteBtn");
+  if (btn) btn.style.display = checked ? "" : "none";
+  const all = document.getElementById("svcSelectAll");
+  if (all) {
+    all.checked = checked === boxes.length && boxes.length > 0;
+    all.indeterminate = checked > 0 && checked < boxes.length;
+  }
+}
+
+async function svcDeleteSelected() {
+  const ids = Array.from(document.querySelectorAll(".svc-checkbox:checked")).map(cb => parseInt(cb.dataset.id));
+  if (!ids.length) return showToast("Nothing selected");
+  if (!confirm(`Delete ${ids.length} service${ids.length > 1 ? "s" : ""}?`)) return;
+  await api("DELETE", "/api/services", { ids });
+  allServices = allServices.filter(s => !ids.includes(s.id));
+  renderServicesTable();
+  showToast(`Deleted ${ids.length} service${ids.length > 1 ? "s" : ""}`);
 }
 
 // Small up/down dot shown in the services table for monitored services.
@@ -3576,11 +3633,34 @@ async function restoreBackup(input) {
     const res = await fetch("/api/restore", { method: "POST", body: form });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || "Restore failed");
-    showToast("Restore complete — reloading…");
-    setTimeout(() => location.reload(), 1200);
+    alert("✅ Restore complete.\n\nRestart Boltarr to finish loading the restored data — e.g.\n    docker restart boltarr\n(or restart the service). Until you do, some pages may error, because the app is still holding the old database open.");
   } catch (e) {
     alert("Restore failed: " + e.message);
   }
+}
+
+function openFactoryReset() {
+  document.getElementById("resetKeepSettings").checked = true;
+  document.getElementById("resetConfirm").value = "";
+  onResetConfirmInput();
+  document.getElementById("factoryResetModal").classList.add("open");
+}
+function closeFactoryReset() {
+  document.getElementById("factoryResetModal").classList.remove("open");
+}
+function onResetConfirmInput() {
+  document.getElementById("resetConfirmBtn").disabled =
+    document.getElementById("resetConfirm").value.trim() !== "DELETE";
+}
+async function doFactoryReset() {
+  if (document.getElementById("resetConfirm").value.trim() !== "DELETE") return;
+  const keep = document.getElementById("resetKeepSettings").checked;
+  try {
+    await api("POST", "/api/factory-reset", { keep_settings: keep });
+    closeFactoryReset();
+    alert("Factory reset complete." + (keep ? "" : " Settings were reset to defaults too."));
+    location.reload();
+  } catch (e) { alert("Reset failed: " + e.message); }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

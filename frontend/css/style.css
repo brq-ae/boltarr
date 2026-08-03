@@ -303,6 +303,40 @@ body {
 .test-ok   { border-color: var(--green);  color: var(--green); }
 .test-fail { border-color: var(--red);    color: var(--red);   }
 
+/* ── Settings accordion (native <details>) ─────────────────────────────────── */
+.settings-section { margin-bottom: 8px; }
+.settings-section > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; font-size: 13px; font-weight: 600;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.settings-section[open] > summary {
+  border-color: var(--accent);
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+}
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section > summary::before {
+  content: "+"; font-size: 17px; font-weight: 700; line-height: 1;
+  color: var(--accent); width: 15px; text-align: center; flex: none;
+}
+.settings-section[open] > summary::before { content: "−"; }
+.settings-section > summary:hover { border-color: var(--accent); color: var(--accent); }
+.acc-body {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 13px 16px;
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+.acc-subhead {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .05em;
+  padding-bottom: 2px; border-bottom: 1px solid var(--border);
+}
+
 /* ── Toast ─────────────────────────────────────────────────────────────────── */
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
@@ -625,6 +659,8 @@ tbody td {
   max-width: 0;
 }
 
+.td-check { width: 30px; text-align: center; padding-left: 10px !important; padding-right: 0 !important; }
+.td-check input { cursor: pointer; vertical-align: middle; }
 .td-ip   { width: 120px; }
 .td-host { min-width: 120px; }
 .td-mac  { width: 140px; }
