@@ -3,8 +3,8 @@
 #
 # NOTE: this uses bridge networking (so Boltarr can reach Ollama by name), which
 # means nmap CANNOT scan your LAN from here. If you need both LAN scanning AND
-# Ollama, run Ollama separately and use docker-compose.host.yml with
-# LLM_BASE_URL pointing at your Ollama host.
+# Ollama, run Ollama separately and use the main docker-compose.yml (host
+# networking) with LLM_BASE_URL pointing at your Ollama host.
 #
 # After first start, pull a model:
 #   docker exec boltarr-ollama-1 ollama pull llama3.2

@@ -1,20 +1,45 @@
-# NOTE: this uses bridge networking, which sandboxes the container's network —
-# nmap CANNOT scan your LAN from here (no host discovery, no MAC addresses,
-# degraded liveness). For network scanning use docker-compose.host.yml instead.
+# Boltarr — single deployment file.
+#
+# Defaults to HOST networking so Boltarr can scan your LAN with nmap (host
+# discovery, MAC addresses, the liveness ping tier). Two optional toggles below
+# cover unprivileged LXC and (if you really don't scan) bridge networking.
+#
+#   docker compose up -d
+#
+# With host networking there is no port mapping — Boltarr binds :12100 directly
+# on the host, so reach it at http://<host-ip>:12100/
+#
+# Tip: run Boltarr on its own box, separate from any internet-facing service
+# (e.g. the public status page) — it holds your network map and SSH keys.
+
 services:
   boltarr:
     image: brqae/boltarr:latest
     container_name: boltarr
-    ports:
-      - "12100:12100"
+    network_mode: host          # scan/ping the real LAN (shares the host's network + IP)
+    cap_add:
+      - NET_RAW                  # raw sockets for nmap (ARP / ping / SYN)
+      - NET_ADMIN
     volumes:
-      - ./data:/app/data   # persists DB and config.yaml
+      - ./data:/app/data         # persists the database and config.yaml
     restart: unless-stopped
 
-    # Optional: configure AI via environment variables instead of the UI.
-    # These override data/config.yaml when set.
+    # ── Toggle 1: unprivileged LXC (Docker inside a Proxmox LXC) ───────────────
+    # Uncomment if you hit "docker-default profile could not be loaded". Safe —
+    # Proxmox applies its own AppArmor profile to the whole LXC.
+    # security_opt:
+    #   - apparmor=unconfined
+
+    # ── Toggle 2: bridge networking — ONLY if you DON'T need LAN scanning ───────
+    # On bridge, Boltarr gets a private Docker IP and CANNOT discover hosts or
+    # read MACs. To use it: remove `network_mode: host` and the two `cap_add`
+    # lines above, then add a port mapping:
+    # ports:
+    #   - "12100:12100"
+
+    # ── Optional: configure AI via environment (overrides config.yaml) ─────────
     # environment:
-    #   LLM_PROVIDER: ollama          # none | ollama | openai | anthropic
+    #   LLM_PROVIDER: ollama
     #   LLM_BASE_URL: http://my-ollama-host:11434
     #   LLM_MODEL: llama3.2
-    #   LLM_API_KEY: ""               # only needed for openai / anthropic
+    #   LLM_API_KEY: ""

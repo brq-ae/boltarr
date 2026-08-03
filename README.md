@@ -28,35 +28,39 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 
 ## Quick start (Docker)
 
-> [!IMPORTANT]
-> **Network scanning needs host networking.** Boltarr scans your LAN with nmap
-> (host discovery, MAC addresses, the liveness ping tier). Docker's default
-> **bridge** network sandboxes the container, so nmap can't reach your LAN — you
-> get **no host discovery, no MAC addresses, and degraded liveness**. Use the
-> **host-networking** compose below for a real deployment; the plain bridge
-> `docker-compose.yml` is only fine if you don't need LAN scanning.
+> [!NOTE]
+> **Deployment is now a single file.** `docker-compose.yml` uses **host networking
+> by default** so scanning works out of the box, with commented one-line toggles
+> for unprivileged **LXC** (AppArmor) and **bridge**-only. If you previously used
+> `docker-compose.host.yml` or `docker-compose.lxc.yml`, switch to
+> `docker-compose.yml` — see the table below.
 
 ```bash
-curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.host.yml
-docker compose -f docker-compose.host.yml up -d
+curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.yml
+docker compose up -d
 ```
 
-Open **http://\<host-ip\>:12100** (with host networking Boltarr binds `:12100`
-directly on the host — there's no port mapping).
+Open **http://\<host-ip\>:12100** — with host networking Boltarr binds `:12100`
+directly on the host (no port mapping).
 
-> Running Docker **inside an unprivileged LXC** (e.g. Proxmox)? If you hit an
-> AppArmor error (`docker-default profile could not be loaded`), uncomment the
-> `security_opt: [apparmor=unconfined]` block in `docker-compose.host.yml` — it's
-> safe (Proxmox applies AppArmor to the whole LXC).
+**Why host networking?** Boltarr scans your LAN with nmap (host discovery, MAC
+addresses, the liveness ping tier). Docker's default **bridge** network sandboxes
+the container, so nmap can't reach your LAN — you'd get no host discovery, no MAC
+addresses, and degraded liveness. So host networking is the default; bridge is a
+commented toggle for the "I only track things manually" case.
+
+**Pick your setup** (all in the one `docker-compose.yml`):
+
+| Your environment | Want LAN scanning? | What to do |
+|---|---|---|
+| Normal Docker host | Yes (recommended) | Use it as-is |
+| Unprivileged **LXC** (Proxmox) | Yes | Uncomment the `security_opt: apparmor=unconfined` toggle |
+| Anywhere | No (manual only) | Switch to the commented bridge toggle |
 
 > **Tip:** run Boltarr on its own box, separate from any internet-facing service
 > (e.g. the public status page) — it holds your network map and SSH keys.
 
-> Bridge-only (no LAN scanning) or cloning the repo:
-> ```bash
-> curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.yml
-> docker compose up -d
-> ```
+> Prefer to clone the full repo? `git clone … && cd boltarr && docker compose up -d`.
 
 ### With bundled Ollama (local AI)
 
@@ -117,23 +121,19 @@ llm:
 
 ## Proxmox / LXC
 
-A ready-made compose file is provided for unprivileged LXC containers:
-
-```bash
-curl -O https://raw.githubusercontent.com/brq-ae/boltarr/master/docker-compose.lxc.yml
-docker compose -f docker-compose.lxc.yml up -d
-```
-
-### What's different from the standard compose?
-
-Unprivileged LXC containers cannot load AppArmor profiles into the host kernel, so Docker's default profile fails. The LXC compose file adds:
+Running Docker inside an **unprivileged LXC**? Use the standard `docker-compose.yml`
+and **uncomment the AppArmor toggle** in it:
 
 ```yaml
 security_opt:
   - apparmor=unconfined
 ```
 
-This is safe because Proxmox applies its own AppArmor profile to the entire LXC, and user-namespace mapping ensures root inside the container has no privileges on the Proxmox host.
+Without it you'll hit `docker-default profile could not be loaded` — unprivileged
+LXC containers can't load AppArmor profiles into the host kernel. Uncommenting it
+is safe: Proxmox applies its own AppArmor profile to the entire LXC, and
+user-namespace mapping ensures root inside the container has no privileges on the
+Proxmox host. (Keep `network_mode: host` for LAN scanning.)
 
 ### LXC pre-requisites (Proxmox UI → your LXC → Options)
 
