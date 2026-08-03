@@ -3,6 +3,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py index.html ./
+COPY static ./static
 RUN mkdir -p /data
 EXPOSE 12102
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "12102"]
