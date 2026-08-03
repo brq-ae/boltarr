@@ -508,6 +508,7 @@ async function showHostDetail(ip) {
     ? `${host.ip} · ${host.hostname}` : (host.ip.startsWith('node-') ? (host.hostname || '(no IP)') : host.ip);
 
   panel.innerHTML = `
+    <div class="panel-resize-grip" title="Drag to resize"></div>
     <div class="sheet-handle" id="sheetHandle">
       <div class="sheet-pill"></div>
       <div class="sheet-handle-row">
@@ -663,6 +664,7 @@ async function showHostDetail(ip) {
 
   panel.classList.add("open");
   initSheetDrag();
+  makeDesktopResizable(panel, "host");
   if (!host.ip.startsWith("node-")) loadHostUptime(ip);
 }
 
@@ -721,6 +723,33 @@ function cycleSheetState() {
   else if (panel.classList.contains("sheet-half")) setSheetState("full");
   else                                              setSheetState("half");
 }
+
+// ── Desktop: drag the top grip to resize a detail panel (remembered) ──────────
+let _panelResize = null;
+function makeDesktopResizable(panel, key, cssVar) {
+  if (!panel || window.innerWidth <= 799) return;   // mobile has its own sheet drag
+  const saved = localStorage.getItem("boltarr-panel-h-" + key);
+  if (saved) panel.style.height = saved;
+  const grip = panel.querySelector(".panel-resize-grip");
+  if (!grip) return;
+  grip.onmousedown = e => {
+    e.preventDefault();
+    _panelResize = { panel, key, startY: e.clientY, startH: panel.getBoundingClientRect().height };
+    document.body.style.userSelect = "none";
+  };
+}
+document.addEventListener("mousemove", e => {
+  if (!_panelResize) return;
+  const { panel, startY, startH } = _panelResize;
+  const h = Math.max(220, Math.min(startH + (startY - e.clientY), window.innerHeight * 0.92));
+  panel.style.height = h + "px";   // dragging up grows the panel
+});
+document.addEventListener("mouseup", () => {
+  if (!_panelResize) return;
+  localStorage.setItem("boltarr-panel-h-" + _panelResize.key, _panelResize.panel.style.height);
+  _panelResize = null;
+  document.body.style.userSelect = "";
+});
 
 function initSheetDrag() {
   if (window.innerWidth > 799) return;
@@ -2397,6 +2426,7 @@ function showSvcDetail(id) {
   loadSvcUptime(id, !!s.monitored);
 
   document.getElementById("svcDetailPanel").classList.add("open");
+  makeDesktopResizable(document.getElementById("svcDetailPanel"), "svc");
 }
 
 function _uptimeClass(pct) {

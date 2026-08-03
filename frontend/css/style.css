@@ -805,12 +805,27 @@ tbody td {
   bottom: 0; left: 0; right: 0;
   background: var(--surface);
   border-top: 1px solid var(--border2);
-  max-height: 54%;
+  height: var(--detail-h, 50vh);   /* fixed on desktop → tabs scroll inside, frame never jumps */
+  max-height: 92vh;
+  min-height: 220px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   z-index: 20;
   display: none;
+}
+
+/* Drag-to-resize grip at the top of a detail panel (desktop only). */
+.panel-resize-grip { display: none; flex: none; }
+@media (min-width: 800px) {
+  .panel-resize-grip {
+    display: block; height: 11px; cursor: ns-resize; position: relative;
+  }
+  .panel-resize-grip::before {
+    content: ""; position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+    width: 44px; height: 3px; border-radius: 3px; background: var(--border2); transition: background .12s;
+  }
+  .panel-resize-grip:hover::before { background: var(--accent); }
 }
 .detail-panel.open { display: flex; }
 
@@ -1515,6 +1530,9 @@ tbody td {
   right: 0;
   background: var(--surface2);
   border-top: 2px solid var(--accent);
+  height: var(--svc-detail-h, 55vh);   /* fixed → body scrolls, frame stays put */
+  max-height: 92vh;
+  min-height: 220px;
   z-index: 46;
   display: none;
   flex-direction: column;
