@@ -44,6 +44,11 @@ docker compose -f docker-compose.host.yml up -d
 Open **http://\<host-ip\>:12100** (with host networking Boltarr binds `:12100`
 directly on the host — there's no port mapping).
 
+> Running Docker **inside an unprivileged LXC** (e.g. Proxmox)? If you hit an
+> AppArmor error (`docker-default profile could not be loaded`), uncomment the
+> `security_opt: [apparmor=unconfined]` block in `docker-compose.host.yml` — it's
+> safe (Proxmox applies AppArmor to the whole LXC).
+
 > **Tip:** run Boltarr on its own box, separate from any internet-facing service
 > (e.g. the public status page) — it holds your network map and SSH keys.
 

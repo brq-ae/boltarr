@@ -23,6 +23,11 @@ services:
     cap_add:
       - NET_RAW                  # raw sockets for nmap (ARP / ping / SYN)
       - NET_ADMIN
+    # On an UNPRIVILEGED LXC (e.g. Docker inside a Proxmox LXC) the container
+    # can't load Docker's default AppArmor profile — uncomment this. It's safe:
+    # Proxmox applies its own AppArmor profile to the whole LXC.
+    # security_opt:
+    #   - apparmor=unconfined
     volumes:
       - ./data:/app/data         # persists the database and config.yaml
     restart: unless-stopped
