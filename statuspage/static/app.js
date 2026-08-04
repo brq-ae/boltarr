@@ -43,13 +43,27 @@ function toLocalInput(iso){
 function fromLocalInput(v){ if(!v) return null; const d = new Date(v); return isNaN(d) ? null : d.toISOString(); }
 
 // ── status list + banners ────────────────────────────────────────────────────
+function dayClass(pct){
+  if(pct == null) return "unknown";
+  if(pct >= 99.5) return "up";
+  if(pct >= 90) return "maint";      // partial-outage day
+  return "down";
+}
 function card(x){
   const up = (x.uptime_24h == null) ? "—" : Number(x.uptime_24h).toFixed(2) + "%";
-  const ticks = (x.ticks||[]).map(t => `<div class="tick ${cls(t)}"></div>`).join("");
+  let bars;
+  if(x.history && x.history.length){
+    bars = `<div class="days">${x.history.map(day => {
+      const t = `${esc(day.date)}: ${day.pct == null ? "no data" : Number(day.pct).toFixed(1) + "%"}`;
+      return `<div class="day ${dayClass(day.pct)}" title="${t}"></div>`;
+    }).join("")}</div>`;
+  } else {  // fallback for an older Boltarr that still pushes last-hour ticks
+    bars = `<div class="ticks">${(x.ticks||[]).map(t => `<div class="tick ${cls(t)}"></div>`).join("")}</div>`;
+  }
   return `<div class="svc"><div class="svc-head"><span class="dot ${cls(x.status)}"></span>
     <span class="svc-name">${esc(x.name)}</span>
     <span class="uptime">${up} <span class="u24">24h</span></span></div>
-    <div class="ticks">${ticks}</div></div>`;
+    ${bars}</div>`;
 }
 function renderList(d){
   const privates = new Set(d.private_sections || []);
@@ -86,6 +100,7 @@ function applyBranding(b){
     document.body.classList.remove("has-stripe");
   }
   $("brandLogo").src = b.logo || "/static/boltarr-logo.svg";
+  const fav = $("favicon"); if(fav) fav.href = b.logo || "/static/boltarr-logo.svg";
   const name = b.brand_name || "Service Status";
   $("title").textContent = name;
   document.title = name;

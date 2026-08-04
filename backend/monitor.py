@@ -487,6 +487,54 @@ def host_ticks(host_id: int, minutes: int = 60, now: datetime | None = None) -> 
     return _ticks_for("host_events", "host_id", host_id, minutes, now or _now_dt())
 
 
+def _daily_history(evs, anchor_status, days, now):
+    """Per-day uptime % over the last `days`, oldest→newest. 'unknown' periods
+    (before any monitoring) count as no-data (pct=None), not downtime."""
+    end = now.timestamp()
+    start = end - days * 86400
+    points = [(start, anchor_status or "unknown")]
+    for e in evs:
+        t = _parse(e["ts"])
+        if t and t.timestamp() >= start:
+            points.append((t.timestamp(), e["status"]))
+    out = []
+    for i in range(days):
+        d0 = start + i * 86400
+        d1 = d0 + 86400
+        up = tot = 0.0
+        for j, (ts, state) in enumerate(points):
+            seg_end = points[j + 1][0] if j + 1 < len(points) else end
+            lo, hi = max(ts, d0), min(seg_end, d1)
+            if hi > lo and state in ("up", "down"):
+                tot += hi - lo
+                if state == "up":
+                    up += hi - lo
+        pct = round(up / tot * 100, 2) if tot > 0 else None
+        out.append({"date": datetime.fromtimestamp(d0 + 43200, timezone.utc).strftime("%b %d"),
+                    "pct": pct})
+    return out
+
+
+def _daily_for(table, key_col, key, days, now):
+    since_iso = _iso(datetime.fromtimestamp(now.timestamp() - days * 86400, timezone.utc))
+    with get_conn() as conn:
+        anchor = conn.execute(
+            f"SELECT status FROM {table} WHERE {key_col}=? AND ts < ? ORDER BY ts DESC LIMIT 1",
+            (key, since_iso)).fetchone()
+        evs = [dict(r) for r in conn.execute(
+            f"SELECT status, ts FROM {table} WHERE {key_col}=? AND ts >= ? ORDER BY ts",
+            (key, since_iso)).fetchall()]
+    return _daily_history(evs, anchor["status"] if anchor else None, days, now)
+
+
+def daily_history(service_id, days=90, now=None):
+    return _daily_for("monitor_events", "service_id", service_id, days, now or _now_dt())
+
+
+def host_daily_history(host_id, days=90, now=None):
+    return _daily_for("host_events", "host_id", host_id, days, now or _now_dt())
+
+
 def build_status_payload() -> dict:
     with get_conn() as conn:
         rows = [dict(r) for r in conn.execute("""
@@ -503,7 +551,7 @@ def build_status_payload() -> dict:
             "name": (r.get("public_name") or "").strip() or r["name"],
             "status": r.get("monitor_status") or "unknown",
             "uptime_24h": up["pct"] if up else None,
-            "ticks": ticks(r["id"], 60),
+            "history": daily_history(r["id"]),
         })
     # Public hosts — SANITIZED: only a public name (never the IP), status,
     # uptime and ticks leave the LAN. Networking gear goes in its own section.
@@ -523,7 +571,7 @@ def build_status_payload() -> dict:
             "name": (r.get("public_name") or "").strip() or (r.get("hostname") or "").strip() or "Host",
             "status": "up" if r["online"] == 1 else "down" if r["online"] == 0 else "unknown",
             "uptime_24h": up["pct"] if up else None,
-            "ticks": host_ticks(r["id"], 60),
+            "history": host_daily_history(r["id"]),
         }
         (networking if (r.get("device_type") or "") in NETWORKING else hosts).append(item)
     return {"updated_at": _iso(_now_dt()), "title": "Service Status",

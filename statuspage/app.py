@@ -784,6 +784,11 @@ def static_css():
     return _static(STATIC_DIR / "style.css", "text/css")
 
 
+@app.get("/static/boltarr-logo.svg")
+def static_logo():
+    return _static(STATIC_DIR / "boltarr-logo.svg", "image/svg+xml")
+
+
 @app.get("/healthz", response_class=PlainTextResponse)
 def healthz():
     return "ok"
