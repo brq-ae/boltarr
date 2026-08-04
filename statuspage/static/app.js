@@ -256,7 +256,9 @@ function renderAdmin(d){
     : '<div class="muted">No maintenance events yet.</div>';
 
   const cf = (key, label) =>
-    `<label class="color-fld">${label}<input type="color" data-brand="${key}" value="${BRAND[key] || '#000000'}"></label>`;
+    `<label class="color-fld">${label}<span class="color-pair">` +
+    `<input type="color" class="color-swatch" data-brand="${key}" value="${BRAND[key] || '#000000'}">` +
+    `<input type="text" class="color-hex" data-hex="${key}" value="${BRAND[key] || '#000000'}" maxlength="7" spellcheck="false"></span></label>`;
   const brandingBody = `
     <div class="logo-row">
       <img id="brandLogoPrev" class="logo-preview" src="${BRAND.logo || '/static/boltarr-logo.svg'}" alt="">
@@ -302,6 +304,16 @@ function renderAdmin(d){
   $("brandSave").addEventListener("click", saveBranding);
   $("brandLogoDefault").addEventListener("click", () => { BRAND.logo = ""; $("brandLogoPrev").src = "/static/boltarr-logo.svg"; });
   $("brandLogoFile").addEventListener("change", onLogoFile);
+  panel.querySelectorAll(".color-swatch").forEach(sw => {
+    const hex = panel.querySelector(`.color-hex[data-hex="${sw.getAttribute("data-brand")}"]`);
+    if(!hex) return;
+    sw.addEventListener("input", () => { hex.value = sw.value; });
+    hex.addEventListener("input", () => {
+      let v = hex.value.trim();
+      if(/^#[0-9a-fA-F]{3}$/.test(v)) v = "#" + v.slice(1).split("").map(c => c + c).join("");
+      if(/^#[0-9a-fA-F]{6}$/.test(v)) sw.value = v;   // sync swatch (what Save reads)
+    });
+  });
   panel.querySelectorAll("[data-aedit]").forEach(b => b.addEventListener("click", () => openAnnModal(+b.getAttribute("data-aedit"))));
   panel.querySelectorAll("[data-atoggle]").forEach(b => b.addEventListener("click", () => toggleAnn(+b.getAttribute("data-atoggle"))));
   panel.querySelectorAll("[data-adel]").forEach(b => b.addEventListener("click", () => deleteAnn(+b.getAttribute("data-adel"))));
