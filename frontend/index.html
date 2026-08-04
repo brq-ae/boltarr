@@ -307,6 +307,18 @@
           </select>
           <input type="text" class="search-input" id="serviceFilter" placeholder="Filter by name, port…" style="flex:1;max-width:260px">
           <span class="host-count" id="serviceCount"></span>
+          <div class="col-menu-wrap">
+            <button class="btn" id="svcColMenuBtn" style="font-size:11px;padding:5px 11px">Columns ▾</button>
+            <div id="svcColMenu" class="col-menu">
+              <label><input type="checkbox" data-col="icon" checked> Icon</label>
+              <label><input type="checkbox" data-col="desc" checked> Description</label>
+              <label><input type="checkbox" data-col="host" checked> Host</label>
+              <label><input type="checkbox" data-col="ps" checked> Port / Status</label>
+              <label><input type="checkbox" data-col="mon" checked> Monitor</label>
+              <label><input type="checkbox" data-col="pub" checked> Public</label>
+              <label><input type="checkbox" data-col="url" checked> URL</label>
+            </div>
+          </div>
           <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" onclick="svcDeleteSelected()">Delete selected</button>
           <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openBulkAddContainers()">⊕ Bulk</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openAddService()">+ Service</button>
@@ -316,10 +328,13 @@
             <thead>
               <tr>
                 <th class="td-check"><input type="checkbox" id="svcSelectAll" onchange="svcToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
-                <th style="width:44px"></th>
+                <th class="col-svc-icon" style="width:44px"></th>
                 <th onclick="sortServices('name')">Service</th>
-                <th onclick="sortServices('ip')">Host</th>
-                <th onclick="sortServices('port')">Port / Status</th>
+                <th class="col-svc-host" onclick="sortServices('ip')">Host</th>
+                <th class="col-svc-ps" onclick="sortServices('port')">Port / Status</th>
+                <th class="col-svc-mon">Monitor</th>
+                <th class="col-svc-pub">Public</th>
+                <th class="col-svc-url" onclick="sortServices('url')">URL</th>
               </tr>
             </thead>
             <tbody></tbody>

@@ -173,6 +173,10 @@ def _process(conn, svc: dict, new: str) -> str:
         conn.commit()
         return prev
 
+    # Monitored services show running/stopped driven by the live probe result,
+    # so the manual status label stays in sync with reality on its own.
+    status_val = "running" if new == "up" else "stopped"
+
     # Quiet window uses local wall-clock time (container TZ), not UTC
     suppress = in_quiet_window(local_now().time())
     # Root-cause suppression: if the service's host is offline, hold the
@@ -185,17 +189,17 @@ def _process(conn, svc: dict, new: str) -> str:
 
     if new != prev:
         conn.execute(
-            "UPDATE services SET monitor_status=?, monitor_last_check=?, monitor_last_change=?, "
+            "UPDATE services SET monitor_status=?, status=?, monitor_last_check=?, monitor_last_change=?, "
             "monitor_fail_since=?, monitor_alerted=? WHERE id=?",
-            (new, now, now, r["fail_since"], r["alerted"], svc["id"]))
+            (new, status_val, now, now, r["fail_since"], r["alerted"], svc["id"]))
         # Record the transition for uptime history
         conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
                      (svc["id"], new, now))
     else:
         conn.execute(
-            "UPDATE services SET monitor_status=?, monitor_last_check=?, "
+            "UPDATE services SET monitor_status=?, status=?, monitor_last_check=?, "
             "monitor_fail_since=?, monitor_alerted=? WHERE id=?",
-            (new, now, r["fail_since"], r["alerted"], svc["id"]))
+            (new, status_val, now, r["fail_since"], r["alerted"], svc["id"]))
         # Seed a starting event if this monitored service has no history yet
         # (e.g. it was already 'up' and stable, so no transition ever fired).
         has_events = conn.execute(

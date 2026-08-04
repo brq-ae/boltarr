@@ -1952,14 +1952,99 @@ const STATUS_CYCLE = { running: "stopped", stopped: "unknown", unknown: "running
 
 async function cycleServiceStatus(id, current, hostIp) {
   const next = STATUS_CYCLE[current] || "unknown";
-  const svc  = await api("PUT", `/api/services/${id}`, { status: next });
-  allServices = allServices.map(s => s.id === id ? { ...s, ...svc } : s);
-  const row = document.getElementById(`svc-row-${id}`);
-  if (row) {
-    const btn = row.querySelector(".svc-status");
-    if (btn) { btn.className = `svc-status ${next}`; btn.textContent = next; btn.onclick = () => cycleServiceStatus(id, next, hostIp); }
-  }
+  // Route through saveSvcField so description/port/url are carried along
+  // (the update endpoint writes those without COALESCE).
+  await saveSvcField(id, "status", next);
+}
+
+function svcMonToggle(s) {
+  const on = !!s.monitored;
+  return `<button class="svc-toggle ${on ? 'on' : ''}" onclick="event.stopPropagation();svcRowToggleMonitor(${s.id})" title="${on ? 'Monitoring on — status is set automatically' : 'Monitoring off — status is manual'}">${on ? 'On' : 'Off'}</button>`;
+}
+async function svcRowToggleMonitor(id) {
+  const s = allServices.find(x => x.id === id);
+  if (!s) return;
+  const on = !s.monitored;
+  s.monitored = on ? 1 : 0;
   renderServicesTable();
+  try {
+    const r = await api("POST", `/api/services/${id}/monitor`, { enabled: on });
+    if (r && r.monitor_status !== undefined) s.monitor_status = r.monitor_status;
+    renderServicesTable();
+  } catch (e) { await loadServicesData(); renderServicesTable(); }
+}
+
+function svcPubToggle(s) {
+  const on = !!s.public;
+  return `<button class="svc-toggle ${on ? 'on' : ''}" onclick="event.stopPropagation();svcRowTogglePublic(${s.id})" title="${on ? 'Shown on the public status page' : 'Not public'}">${on ? 'On' : 'Off'}</button>`;
+}
+async function svcRowTogglePublic(id) {
+  const s = allServices.find(x => x.id === id);
+  if (!s) return;
+  const on = !s.public;
+  const name = s.public_name || s.name;
+  s.public = on ? 1 : 0;
+  if (on && !s.public_name) s.public_name = name;
+  renderServicesTable();
+  try {
+    await api("POST", `/api/services/${id}/public`, { enabled: on, name });
+  } catch (e) { await loadServicesData(); renderServicesTable(); }
+}
+
+function svcPortProtoPencil(id) {
+  return `<button class="cell-edit" title="Edit port / protocol" onclick="event.stopPropagation();editSvcPortProto(${id},this)">✎</button>`;
+}
+function editSvcPortProto(id, btn) {
+  const s = allServices.find(x => x.id === id);
+  const cell = btn.closest(".svc-port-status");
+  const target = cell && cell.querySelector(".svc-portproto");
+  if (!target) return;
+  const wrap = document.createElement("span");
+  wrap.className = "type-edit";
+  const pin = document.createElement("input");
+  pin.type = "number"; pin.min = 1; pin.max = 65535; pin.className = "cell-input"; pin.placeholder = "port";
+  pin.style.width = "62px";
+  pin.value = (s && s.port) ? s.port : "";
+  const psel = document.createElement("select");
+  psel.className = "cell-select";
+  psel.innerHTML = '<option value="tcp">tcp</option><option value="udp">udp</option>';
+  psel.value = (s && s.protocol) || "tcp";
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    if (save) {
+      const pv = pin.value.trim();
+      const port = pv === "" ? null : parseInt(pv, 10);
+      if (port !== null && (isNaN(port) || port < 1 || port > 65535)) { pin.classList.add("invalid"); pin.focus(); return; }
+      done = true; saveSvcPortProto(id, port, psel.value);
+    } else { done = true; renderServicesTable(); }
+  };
+  pin.addEventListener("click", e => e.stopPropagation());
+  psel.addEventListener("click", e => e.stopPropagation());
+  pin.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  psel.addEventListener("change", () => finish(true));
+  const away = (e) => { if (!wrap.contains(e.target)) { document.removeEventListener("click", away, true); finish(false); } };
+  setTimeout(() => document.addEventListener("click", away, true), 0);
+  wrap.appendChild(pin); wrap.appendChild(psel);
+  target.replaceWith(wrap);
+  pin.focus(); pin.select();
+}
+async function saveSvcPortProto(id, port, proto) {
+  const s = allServices.find(x => x.id === id);
+  const prevPort = s ? s.port : null, prevProto = s ? s.protocol : null;
+  if (s) { s.port = port; s.protocol = proto; }
+  renderServicesTable();
+  const payload = { description: s ? s.description : null, url: s ? s.url : null, port, protocol: proto };
+  try {
+    await api("PUT", `/api/services/${id}`, payload);
+  } catch (e) {
+    if (s) { s.port = prevPort; s.protocol = prevProto; }
+    await loadServicesData(); renderServicesTable();
+  }
 }
 
 async function addServiceToHost(ip) {
@@ -2193,28 +2278,34 @@ function renderServicesTable() {
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
     return;
   }
 
   tbody.innerHTML = rows.map(s => `
     <tr id="svc-tr-${s.id}" style="cursor:pointer" onclick="showSvcDetail(${s.id})">
       <td class="td-check"><input type="checkbox" class="svc-checkbox" data-id="${s.id}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="svcUpdateBulkBtn()"></td>
-      <td style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
+      <td class="col-svc-icon" style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
       <td>
-        <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}${s.name}${svcHostDownTag(s)}</div>
-        ${s.description ? `<div style="font-size:10px;color:var(--text-3)">${s.description}</div>` : ""}
+        <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}<span class="svc-name-txt">${escHtml(s.name)}</span>${svcHostDownTag(s)}${svcEditPencil(s.id,'name')}</div>
+        <div class="svc-desc-line">${s.description ? `<span class="svc-desc-txt">${escHtml(s.description)}</span>` : '<span class="note-add">＋ description</span>'}${svcEditPencil(s.id,'description')}</div>
       </td>
-      <td class="svc-host-cell">
+      <td class="svc-host-cell col-svc-host">
         <span class="svc-host-ip">${livenessDot(s.host_online)}${s.ip}</span>
         ${s.hostname ? `<span class="svc-host-name">${s.hostname}</span>` : ""}
       </td>
-      <td>
+      <td class="col-svc-ps">
         <div class="svc-port-status">
-          ${s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}
-          <button class="svc-status ${s.status}" onclick="event.stopPropagation();cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button>
+          <span class="svc-portproto">${s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}</span>
+          ${s.monitored
+            ? `<span class="svc-status ${s.status} locked" title="Set automatically by the monitor">${s.status}</span>`
+            : `<button class="svc-status ${s.status}" onclick="event.stopPropagation();cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button>`}
+          ${svcPortProtoPencil(s.id)}
         </div>
       </td>
+      <td class="col-svc-mon">${svcMonToggle(s)}</td>
+      <td class="col-svc-pub">${svcPubToggle(s)}</td>
+      <td class="col-svc-url">${svcUrlCell(s)}</td>
     </tr>
   `).join("");
   svcUpdateBulkBtn();
@@ -2224,6 +2315,107 @@ function svcToggleAll(checked) {
   document.querySelectorAll(".svc-checkbox").forEach(cb => cb.checked = checked);
   svcUpdateBulkBtn();
 }
+
+// ── Services inline editing (mirrors the Hosts table) ────────────────────────
+function svcEditPencil(id, field) {
+  return `<button class="cell-edit" title="Edit ${field}" onclick="event.stopPropagation();editSvcField(${id},'${field}',this)">✎</button>`;
+}
+
+function svcUrlCell(s) {
+  const raw = s.url || "";
+  if (!raw) return `<span class="note-add">＋ url</span>${svcEditPencil(s.id, 'url')}`;
+  const full = escHtml(raw);
+  const trunc = escHtml(raw.length > 40 ? raw.slice(0, 40) + "…" : raw);
+  return `<a class="note-link svc-url-txt" href="${full}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${full}">${trunc}</a>${svcEditPencil(s.id, 'url')}`;
+}
+
+function editSvcField(id, field, btn) {
+  const s = allServices.find(x => x.id === id);
+  const cell = btn.closest("td");
+  const target =
+    field === "name" ? cell.querySelector(".svc-name-txt")
+    : field === "url" ? (cell.querySelector(".svc-url-txt") || cell.querySelector(".note-add"))
+    : (cell.querySelector(".svc-desc-txt") || cell.querySelector(".note-add"));
+  if (!target) return;
+  const inp = document.createElement("input");
+  inp.type = "text"; inp.className = "cell-input"; inp.maxLength = field === "name" ? 80 : 200;
+  inp.value = (s && s[field]) || "";
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    if (save) {
+      const v = inp.value.trim();
+      if (field === "name" && !v) { done = true; renderServicesTable(); return; }  // name can't be empty
+      done = true; saveSvcField(id, field, v);
+    } else { done = true; renderServicesTable(); }
+  };
+  inp.addEventListener("click", e => e.stopPropagation());
+  inp.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  inp.addEventListener("blur", () => finish(true));
+  target.replaceWith(inp);
+  inp.focus(); inp.select();
+}
+
+async function saveSvcField(id, field, value) {
+  const s = allServices.find(x => x.id === id);
+  const prev = s ? s[field] : null;
+  if (s) s[field] = value;
+  renderServicesTable();
+  // description/port/url are written without COALESCE server-side — carry them so
+  // editing one field can't blank the others.
+  const payload = {
+    description: s ? s.description : null,
+    port:        s ? s.port : null,
+    url:         s ? s.url : null,
+  };
+  payload[field] = value;
+  try {
+    await api("PUT", `/api/services/${id}`, payload);
+  } catch (e) {
+    if (s) s[field] = prev;
+    await loadServicesData(); renderServicesTable();
+  }
+}
+
+// ── Services column show/hide (persisted per browser) ────────────────────────
+const SVC_COLS = ["icon", "desc", "host", "ps", "mon", "pub", "url"];
+function getSvcHiddenCols() {
+  try { return JSON.parse(localStorage.getItem("boltarr.svcHiddenCols") || "[]"); }
+  catch (e) { return []; }
+}
+function applySvcHiddenCols() {
+  const t = document.getElementById("servicesTable");
+  if (!t) return;
+  const hidden = getSvcHiddenCols();
+  SVC_COLS.forEach(c => t.classList.toggle("hide-svc-" + c, hidden.includes(c)));
+}
+function setSvcColumn(key, visible) {
+  let hidden = getSvcHiddenCols();
+  if (visible) hidden = hidden.filter(k => k !== key);
+  else if (!hidden.includes(key)) hidden.push(key);
+  localStorage.setItem("boltarr.svcHiddenCols", JSON.stringify(hidden));
+  applySvcHiddenCols();
+}
+function initSvcColumnMenu() {
+  const btn = document.getElementById("svcColMenuBtn");
+  const menu = document.getElementById("svcColMenu");
+  if (!btn || !menu) return;
+  const hidden = getSvcHiddenCols();
+  menu.querySelectorAll("input[data-col]").forEach(cb => {
+    cb.checked = !hidden.includes(cb.getAttribute("data-col"));
+    cb.addEventListener("change", () => setSvcColumn(cb.getAttribute("data-col"), cb.checked));
+  });
+  btn.addEventListener("click", e => { e.stopPropagation(); menu.classList.toggle("open"); });
+  document.addEventListener("click", e => {
+    if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove("open");
+  });
+  applySvcHiddenCols();
+}
+document.addEventListener("DOMContentLoaded", initSvcColumnMenu);
 
 function svcUpdateBulkBtn() {
   const boxes = document.querySelectorAll(".svc-checkbox");

@@ -1952,8 +1952,26 @@ tbody td {
   background: none; border: none; color: var(--text-3); cursor: pointer;
   font-size: 11px; padding: 0 3px; margin-left: 4px; vertical-align: middle; opacity: 0;
 }
-#hostsTable tbody tr:hover .cell-edit { opacity: .5; }
+#hostsTable tbody tr:hover .cell-edit,
+#servicesTable tbody tr:hover .cell-edit { opacity: .5; }
 .cell-edit:hover { opacity: 1; color: var(--accent); }
+.svc-desc-line { font-size: 10px; color: var(--text-3); }
+#servicesTable .col-svc-url { max-width: 220px; }
+#servicesTable.hide-svc-icon .col-svc-icon,
+#servicesTable.hide-svc-host .col-svc-host,
+#servicesTable.hide-svc-ps   .col-svc-ps,
+#servicesTable.hide-svc-mon  .col-svc-mon,
+#servicesTable.hide-svc-pub  .col-svc-pub,
+#servicesTable.hide-svc-url  .col-svc-url { display: none; }
+#servicesTable.hide-svc-desc .svc-desc-line { display: none; }
+.svc-toggle {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text-3);
+  border-radius: 20px; font-size: 10px; font-weight: 700; padding: 2px 10px;
+  cursor: pointer; text-transform: uppercase; letter-spacing: .04em;
+}
+.svc-toggle.on { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.svc-status.locked { cursor: default; }
+@media (max-width: 799px) { #servicesTable { min-width: 640px; } }
 .cell-input {
   width: 100%; box-sizing: border-box; background: var(--surface2);
   border: 1px solid var(--accent); color: var(--text);
