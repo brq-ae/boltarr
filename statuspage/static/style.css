@@ -106,7 +106,7 @@ body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;
   align-items:center;justify-content:center;padding:16px;z-index:50}
 .modal-card{background:var(--card);border:1px solid var(--border);border-radius:12px;
-  padding:24px;width:100%;max-width:360px}
+  padding:24px;width:100%;max-width:360px;max-height:calc(100vh - 32px);overflow-y:auto}
 .modal-card h2{margin:0 0 16px;font-size:18px}
 .modal-card input{width:100%;background:var(--bg);border:1px solid var(--border);
   color:var(--text);border-radius:8px;padding:10px 12px;font-size:14px;margin-bottom:12px}
