@@ -544,15 +544,21 @@ def build_status_payload() -> dict:
             ORDER BY COALESCE(NULLIF(TRIM(s.public_name), ''), s.name)
         """).fetchall()]
     services = []
+    incidents = []
+    WINDOW = 90 * 86400
     for r in rows:
         up = uptime(r["id"], 86400)
+        name = (r.get("public_name") or "").strip() or r["name"]
         services.append({
             "key": f"svc-{r['id']}",
-            "name": (r.get("public_name") or "").strip() or r["name"],
+            "name": name,
             "status": r.get("monitor_status") or "unknown",
             "uptime_24h": up["pct"] if up else None,
             "history": daily_history(r["id"]),
         })
+        for o in outages(r["id"], WINDOW, limit=25):
+            incidents.append({"name": name, "section": "services", "start": o["start"],
+                              "end": o["end"], "seconds": o["seconds"], "ongoing": o["end"] is None})
     # Public hosts — SANITIZED: only a public name (never the IP), status,
     # uptime and ticks leave the LAN. Networking gear goes in its own section.
     NETWORKING = {"router", "gateway", "switch", "unmanaged-switch", "firewall", "ap"}
@@ -566,16 +572,23 @@ def build_status_payload() -> dict:
     hosts, networking = [], []
     for r in host_rows:
         up = host_uptime(r["id"], 86400)
+        name = (r.get("public_name") or "").strip() or (r.get("hostname") or "").strip() or "Host"
+        sect = "networking" if (r.get("device_type") or "") in NETWORKING else "hosts"
         item = {
             "key": f"host-{r['id']}",
-            "name": (r.get("public_name") or "").strip() or (r.get("hostname") or "").strip() or "Host",
+            "name": name,
             "status": "up" if r["online"] == 1 else "down" if r["online"] == 0 else "unknown",
             "uptime_24h": up["pct"] if up else None,
             "history": host_daily_history(r["id"]),
         }
-        (networking if (r.get("device_type") or "") in NETWORKING else hosts).append(item)
+        (networking if sect == "networking" else hosts).append(item)
+        for o in host_outages(r["id"], WINDOW, limit=25):
+            incidents.append({"name": name, "section": sect, "start": o["start"],
+                              "end": o["end"], "seconds": o["seconds"], "ongoing": o["end"] is None})
+    incidents.sort(key=lambda x: x["start"], reverse=True)
     return {"updated_at": _iso(_now_dt()), "title": "Service Status",
-            "services": services, "hosts": hosts, "networking": networking, "announcements": []}
+            "services": services, "hosts": hosts, "networking": networking,
+            "incidents": incidents[:25], "announcements": []}
 
 
 def push_status() -> tuple[bool, str]:

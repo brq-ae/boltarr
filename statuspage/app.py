@@ -576,6 +576,10 @@ def data(request: Request):
     # A private section is simply absent from an anonymous response.
     for s in SECTIONS:
         out[s] = STATE.get(s, []) if (admin or vis[s] == "public") else []
+    # Incidents inherit their section's visibility (a private host's outage
+    # never shows to the public).
+    out["incidents"] = [i for i in STATE.get("incidents", [])
+                        if admin or vis.get(i.get("section", "services"), "public") == "public"]
     if admin:
         out["visibility"] = vis
         out["private_sections"] = [s for s in SECTIONS if vis[s] == "private"]

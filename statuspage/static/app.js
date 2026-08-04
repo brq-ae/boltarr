@@ -472,6 +472,33 @@ async function saveEvent(){
 }
 
 // ── load loop ────────────────────────────────────────────────────────────────
+function fmtDur(sec){
+  if(sec < 60) return sec + "s";
+  if(sec < 3600) return Math.round(sec/60) + "m";
+  if(sec < 86400) return Math.round(sec/3600) + "h";
+  return Math.round(sec/86400) + "d";
+}
+function renderIncidents(d){
+  const items = d.incidents || [];
+  const wrap = $("incidents");
+  if(!items.length){ wrap.innerHTML = ""; return; }
+  const order = [], groups = {};
+  items.forEach(inc => {
+    const day = new Date(inc.start).toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" });
+    if(!groups[day]){ groups[day] = []; order.push(day); }
+    groups[day].push(inc);
+  });
+  wrap.innerHTML = `<div class="section-label">Past incidents</div>` + order.map(day =>
+    `<div class="inc-day"><div class="inc-date">${esc(day)}</div>` +
+    groups[day].map(inc => {
+      const t = new Date(inc.start).toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
+      const dur = inc.ongoing ? `ongoing (${fmtDur(inc.seconds)})` : `down ${fmtDur(inc.seconds)}`;
+      return `<div class="inc-item${inc.ongoing ? " ongoing" : ""}"><span class="inc-dot"></span>` +
+        `<span class="inc-name">${esc(inc.name)}</span>` +
+        `<span class="inc-meta">${esc(t)} · ${dur}</span></div>`;
+    }).join("") + `</div>`).join("");
+}
+
 async function load(skipAdmin){
   let d;
   try{ d = await (await fetch("/data", {cache:"no-store"})).json(); }
@@ -485,6 +512,7 @@ async function load(skipAdmin){
   renderHealth(d);
   renderList(d);
   renderMaintenance(d);
+  renderIncidents(d);
 }
 
 // ── login modal ──────────────────────────────────────────────────────────────

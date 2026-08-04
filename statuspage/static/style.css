@@ -52,6 +52,17 @@ h1{font-size:22px;margin:0 0 4px}
 .empty{color:var(--muted);text-align:center;padding:40px}
 .foot{text-align:center;color:var(--muted);font-size:11px;margin-top:24px}
 
+/* Past incidents timeline */
+#incidents{margin-top:24px}
+.inc-day{margin-bottom:14px}
+.inc-date{font-size:12px;font-weight:700;color:var(--text);margin:0 0 4px}
+.inc-item{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:13px;border-top:1px solid var(--border)}
+.inc-item:first-of-type{border-top:none}
+.inc-dot{width:8px;height:8px;border-radius:50%;background:var(--down);flex-shrink:0}
+.inc-name{font-weight:600;flex:1;min-width:0}
+.inc-meta{font-size:12px;color:var(--muted);white-space:nowrap}
+.inc-item.ongoing .inc-meta{color:var(--down);font-weight:600}
+
 /* ── Branding: header, legend, signature cues ── */
 .brand{display:flex;align-items:flex-start;gap:14px}
 .brand-logo{width:40px;height:40px;flex-shrink:0;object-fit:contain}
