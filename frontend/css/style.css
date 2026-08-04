@@ -597,6 +597,7 @@ select { cursor: pointer; }
 .table-toolbar {
   padding: 10px 14px 0;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   flex-shrink: 0;
@@ -610,6 +611,7 @@ select { cursor: pointer; }
   font-size: 11px;
   color: var(--text-3);
   font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 .table-wrap {
@@ -1256,9 +1258,13 @@ tbody td {
 
   .graph-legend { display: none; }
 
-  #hostsTable .col-mac,
-  #hostsTable .col-os,
-  #hostsTable .col-vendor { display: none; }
+  /* wide table scrolls sideways on mobile instead of squishing columns */
+  #hostsTable { min-width: 760px; }
+}
+
+/* touch devices have no hover — keep the inline-edit pencils visible */
+@media (hover: none) {
+  .cell-edit { opacity: .5; }
 }
 
 @media (min-width: 800px) {
@@ -1930,3 +1936,57 @@ tbody td {
   .svc-status { background: transparent !important; color: #333 !important; border-color: #999 !important; }
   .svc-icon { border: 1px solid #ccc; background: #eee !important; color: #333 !important; }
 }
+
+/* Hosts table — Notes column (Phase A) */
+#hostsTable .col-notes { max-width: 210px; }
+.note-text, .note-link {
+  display: inline-block; max-width: 170px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; font-size: 11px;
+}
+.note-text { color: var(--text-2); }
+.note-link { color: var(--accent); text-decoration: none; }
+.note-link:hover { text-decoration: underline; }
+.note-add { color: var(--text-3); font-size: 11px; cursor: text; }
+.note-add:hover { color: var(--accent); }
+.cell-edit {
+  background: none; border: none; color: var(--text-3); cursor: pointer;
+  font-size: 11px; padding: 0 3px; margin-left: 4px; vertical-align: middle; opacity: 0;
+}
+#hostsTable tbody tr:hover .cell-edit { opacity: .5; }
+.cell-edit:hover { opacity: 1; color: var(--accent); }
+.cell-input {
+  width: 100%; box-sizing: border-box; background: var(--surface2);
+  border: 1px solid var(--accent); color: var(--text);
+  border-radius: 4px; padding: 3px 6px; font-size: 11px; font-family: inherit;
+}
+.cell-input.invalid { border-color: #e5534b; }
+.type-edit { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.cell-select {
+  background: var(--surface2); border: 1px solid var(--accent); color: var(--text);
+  border-radius: 4px; font-size: 11px; padding: 2px 4px; font-family: inherit;
+}
+
+/* Hosts table — column show/hide (Phase C) */
+#hostsTable.hide-host   .col-host,
+#hostsTable.hide-mac    .col-mac,
+#hostsTable.hide-vendor .col-vendor,
+#hostsTable.hide-type   .col-type,
+#hostsTable.hide-os     .col-os,
+#hostsTable.hide-ports  .col-ports,
+#hostsTable.hide-seen   .col-seen,
+#hostsTable.hide-notes  .col-notes { display: none; }
+
+.col-menu-wrap { position: relative; margin-left: auto; }
+.col-menu {
+  display: none; position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+  background: var(--surface2); border: 1px solid var(--border2);
+  border-radius: 8px; padding: 6px; min-width: 150px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .4);
+}
+.col-menu.open { display: block; }
+.col-menu label {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: 5px; font-size: 12px; cursor: pointer;
+}
+.col-menu label:hover { background: var(--surface3); }
+.col-menu input { accent-color: var(--accent); }

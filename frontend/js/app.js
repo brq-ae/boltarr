@@ -266,6 +266,189 @@ async function loadHosts() {
   allHosts = await api("GET", "/api/hosts");
 }
 
+function escHtml(s) {
+  return (s == null ? "" : String(s)).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function noteIsUrl(s) { return /^https?:\/\/\S+$/i.test((s || "").trim()); }
+
+// hover-✎ that opens the inline editor for a field on this host
+function editPencil(ip, field, label) {
+  return `<button class="cell-edit" title="Edit ${label}" onclick="event.stopPropagation();editField('${ip}','${field}',this.closest('td'))">✎</button>`;
+}
+
+// scan/text cell: escaped value (or —) + hover pencil
+function textCell(h, field, raw) {
+  const val = raw ? escHtml(raw) : `<span style="color:var(--text-3)">—</span>`;
+  return `${val}${editPencil(h.ip, field, field)}`;
+}
+
+// notes cell: link/text + pencil, or a ＋ note affordance when empty
+function renderNoteCell(h) {
+  const raw = h.notes || "";
+  if (!raw) {
+    return `<span class="note-add" onclick="event.stopPropagation();editField('${h.ip}','notes',this.closest('td'))">＋ note</span>`;
+  }
+  const full = escHtml(raw);
+  const trunc = escHtml(raw.length > 42 ? raw.slice(0, 42) + "…" : raw);
+  const inner = noteIsUrl(raw)
+    ? `<a class="note-link" href="${full}" target="_blank" rel="noopener" title="${full}" onclick="event.stopPropagation()">${trunc}</a>`
+    : `<span class="note-text" title="${full}">${trunc}</span>`;
+  return inner + editPencil(h.ip, "notes", "note");
+}
+
+// generic inline editor — swaps the cell for a text input
+function editField(ip, field, td) {
+  const h = allHosts.find(x => x.ip === ip);
+  const inp = document.createElement("input");
+  inp.type = "text"; inp.className = "cell-input"; inp.maxLength = 200;
+  inp.value = (h && h[field]) || "";
+  let done = false;
+  const finish = (save) => {
+    if (done) return; done = true;
+    if (save) saveField(ip, field, inp.value.trim()); else renderHostsTable();
+  };
+  inp.addEventListener("click", e => e.stopPropagation());
+  inp.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  inp.addEventListener("blur", () => finish(true));
+  td.innerHTML = "";
+  td.appendChild(inp);
+  inp.focus(); inp.select();
+}
+
+async function saveField(ip, field, value) {
+  const h = allHosts.find(x => x.ip === ip);
+  const prev = h ? h[field] : null;
+  if (h) h[field] = value;             // optimistic ('' shows as —)
+  renderHostsTable();
+  // `notes` is written without COALESCE server-side, so always carry the
+  // current note along or an unrelated field-edit would blank it.
+  const payload = { [field]: value };
+  if (field !== "notes") payload.notes = (h && h.notes != null) ? h.notes : null;
+  try {
+    await api("PUT", `/api/hosts/${ip}`, payload);
+  } catch (e) {
+    if (h) h[field] = prev;            // revert on failure
+    await loadHosts(); renderHostsTable();
+  }
+}
+
+// ── Phase D: inline editors for structured fields (type, class, MAC) ─────────
+function typePencil(ip) {
+  return `<button class="cell-edit" title="Edit type" onclick="event.stopPropagation();editType('${ip}',this.closest('td'))">✎</button>`;
+}
+function macPencil(ip) {
+  return `<button class="cell-edit" title="Edit MAC" onclick="event.stopPropagation();editMac('${ip}',this.closest('td'))">✎</button>`;
+}
+
+function editType(ip, td) {
+  const h = allHosts.find(x => x.ip === ip);
+  const wrap = document.createElement("div");
+  wrap.className = "type-edit";
+  const dsel = document.createElement("select");
+  dsel.className = "cell-select";
+  dsel.innerHTML = DEVICE_TYPES.map(t => `<option value="${t}">${t}</option>`).join("");
+  dsel.value = (h && h.device_type) || "unknown";
+  const csel = document.createElement("select");
+  csel.className = "cell-select";
+  csel.innerHTML = '<option value="">Auto</option><option value="static">Static</option><option value="dynamic">Dynamic</option>';
+  csel.value = (h && h.static_override) || "";
+  const commit = () => saveType(ip, dsel.value, csel.value);
+  dsel.addEventListener("change", commit);
+  csel.addEventListener("change", commit);
+  wrap.addEventListener("click", e => e.stopPropagation());
+  wrap.appendChild(dsel); wrap.appendChild(csel);
+  td.innerHTML = ""; td.appendChild(wrap);
+  const away = (e) => {
+    if (!wrap.contains(e.target)) { document.removeEventListener("click", away, true); renderHostsTable(); }
+  };
+  setTimeout(() => document.addEventListener("click", away, true), 0);
+  dsel.focus();
+}
+
+async function saveType(ip, deviceType, override) {
+  const h = allHosts.find(x => x.ip === ip);
+  if (h) { h.device_type = deviceType; h.static_override = override || null; }
+  renderHostsTable();
+  const payload = {
+    device_type: deviceType,
+    set_static_override: true,
+    static_override: override || null,
+    notes: (h && h.notes != null) ? h.notes : null
+  };
+  try { await api("PUT", `/api/hosts/${ip}`, payload); } catch (e) { /* reload below */ }
+  await loadHosts(); renderHostsTable();   // refresh recomputed classification badge
+}
+
+function editMac(ip, td) {
+  const h = allHosts.find(x => x.ip === ip);
+  const inp = document.createElement("input");
+  inp.type = "text"; inp.className = "cell-input"; inp.maxLength = 17;
+  inp.value = (h && h.mac) || "";
+  inp.placeholder = "aa:bb:cc:dd:ee:ff";
+  const macRe = /^([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}$/;
+  let done = false;
+  const commit = (strict) => {
+    if (done) return;
+    const v = inp.value.trim();
+    if (v === "") { done = true; renderHostsTable(); return; }   // empty = cancel (endpoint can't clear MAC)
+    if (!macRe.test(v)) {
+      if (strict) { inp.classList.add("invalid"); inp.focus(); return; }  // Enter on invalid → keep editing
+      done = true; renderHostsTable(); return;                            // blur on invalid → cancel
+    }
+    done = true; saveField(ip, "mac", v.toLowerCase());
+  };
+  inp.addEventListener("click", e => e.stopPropagation());
+  inp.addEventListener("keydown", e => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); commit(true); }
+    else if (e.key === "Escape") { e.preventDefault(); done = true; renderHostsTable(); }
+  });
+  inp.addEventListener("blur", () => commit(false));
+  td.innerHTML = ""; td.appendChild(inp);
+  inp.focus(); inp.select();
+}
+
+// ── Hosts column show/hide (persisted per browser) ───────────────────────────
+const HOST_COLS = ["host", "mac", "vendor", "type", "os", "ports", "seen", "notes"];
+function getHiddenCols() {
+  try { return JSON.parse(localStorage.getItem("boltarr.hostsHiddenCols") || "[]"); }
+  catch (e) { return []; }
+}
+function applyHiddenCols() {
+  const t = document.getElementById("hostsTable");
+  if (!t) return;
+  const hidden = getHiddenCols();
+  HOST_COLS.forEach(c => t.classList.toggle("hide-" + c, hidden.includes(c)));
+}
+function setColumn(key, visible) {
+  let hidden = getHiddenCols();
+  if (visible) hidden = hidden.filter(k => k !== key);
+  else if (!hidden.includes(key)) hidden.push(key);
+  localStorage.setItem("boltarr.hostsHiddenCols", JSON.stringify(hidden));
+  applyHiddenCols();
+}
+function initColumnMenu() {
+  const btn = document.getElementById("colMenuBtn");
+  const menu = document.getElementById("colMenu");
+  if (!btn || !menu) return;
+  const hidden = getHiddenCols();
+  menu.querySelectorAll("input[data-col]").forEach(cb => {
+    cb.checked = !hidden.includes(cb.getAttribute("data-col"));
+    cb.addEventListener("change", () => setColumn(cb.getAttribute("data-col"), cb.checked));
+  });
+  btn.addEventListener("click", e => { e.stopPropagation(); menu.classList.toggle("open"); });
+  document.addEventListener("click", e => {
+    if (!menu.contains(e.target) && e.target !== btn) menu.classList.remove("open");
+  });
+  applyHiddenCols();
+}
+document.addEventListener("DOMContentLoaded", initColumnMenu);
+
 function renderHostsTable() {
   const tbody = document.querySelector("#hostsTable tbody");
   tbody.innerHTML = "";
@@ -301,7 +484,7 @@ function renderHostsTable() {
   });
 
   if (!sorted.length) {
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${filterText ? "No matches." : "No hosts yet — add a subnet and scan."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${filterText ? "No matches." : "No hosts yet — add a subnet and scan."}</td></tr>`;
     return;
   }
 
@@ -332,20 +515,21 @@ function renderHostsTable() {
     tr.innerHTML = `
       <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${h.ip}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="hostsUpdateBulkBtn()"></td>
       <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
-      <td class="td-host">${h.hostname || `<span style="color:var(--text-3)">—</span>`}</td>
-      <td class="col-mac mono" style="color:var(--text-3)">${h.mac||"—"}</td>
-      <td class="col-vendor" style="color:var(--text-2);font-size:11px">${h.vendor||"—"}</td>
-      <td class="td-type"><span class="tag tag-${dt}">${dt}</span>${manualBadge}${clsBadge}</td>
-      <td class="col-os" style="font-size:11px;color:var(--text-3)">${(h.os_guess||"—").substring(0,34)}</td>
-      <td><div class="port-list">${portHtml}${more}</div></td>
-      <td class="td-seen mono" style="color:var(--text-3)">${(h.last_seen||"—").substring(0,16)}</td>
+      <td class="td-host col-host">${textCell(h, 'hostname', h.hostname)}</td>
+      <td class="col-mac mono" style="color:var(--text-3)">${h.mac ? escHtml(h.mac) : '<span style="color:var(--text-3)">—</span>'}${macPencil(h.ip)}</td>
+      <td class="col-vendor" style="color:var(--text-2);font-size:11px">${textCell(h, 'vendor', h.vendor)}</td>
+      <td class="td-type col-type"><span class="tag tag-${dt}">${dt}</span>${manualBadge}${clsBadge}${typePencil(h.ip)}</td>
+      <td class="col-os" style="font-size:11px;color:var(--text-3)">${textCell(h, 'os_guess', (h.os_guess||"").substring(0,34))}</td>
+      <td class="col-ports"><div class="port-list">${portHtml}${more}</div></td>
+      <td class="td-seen col-seen mono" style="color:var(--text-3)">${(h.last_seen||"—").substring(0,16)}</td>
+      <td class="col-notes">${renderNoteCell(h)}</td>
     `;
     tr.addEventListener("click", () => showHostDetail(h.ip));
     tbody.appendChild(tr);
     if (aliases.length && expanded) {
       const subTr = document.createElement("tr");
       subTr.className = "alias-sub-row";
-      subTr.innerHTML = `<td colspan="9" class="alias-sub-cell">
+      subTr.innerHTML = `<td colspan="10" class="alias-sub-cell">
         <div class="alias-chips-row">
           <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Aliases</span>
           ${aliases.map(a => `<span class="alias-chip-inline mono">${a}</span>`).join("")}

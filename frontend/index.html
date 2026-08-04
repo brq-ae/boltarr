@@ -155,6 +155,19 @@
             <option value="unknown">Unclassified</option>
           </select>
           <span class="host-count" id="hostCount"></span>
+          <div class="col-menu-wrap">
+            <button class="btn" id="colMenuBtn" style="font-size:11px;padding:5px 11px">Columns ▾</button>
+            <div id="colMenu" class="col-menu">
+              <label><input type="checkbox" data-col="host" checked> Hostname</label>
+              <label><input type="checkbox" data-col="mac" checked> MAC</label>
+              <label><input type="checkbox" data-col="vendor" checked> Vendor</label>
+              <label><input type="checkbox" data-col="type" checked> Type</label>
+              <label><input type="checkbox" data-col="os" checked> OS</label>
+              <label><input type="checkbox" data-col="ports" checked> Ports</label>
+              <label><input type="checkbox" data-col="seen" checked> Last Seen</label>
+              <label><input type="checkbox" data-col="notes" checked> Notes</label>
+            </div>
+          </div>
           <button class="btn btn-danger" id="hostsDeleteBtn" style="font-size:11px;padding:5px 11px;margin-left:auto;display:none" onclick="hostsDeleteSelected()">Delete selected</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px" onclick="openAddHost()">+ Add Host</button>
         </div>
@@ -164,13 +177,14 @@
               <tr>
                 <th class="td-check"><input type="checkbox" id="hostsSelectAll" onchange="hostsToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
                 <th class="td-ip" onclick="sortTable('ip')">IP</th>
-                <th class="td-host" onclick="sortTable('hostname')">Hostname</th>
+                <th class="td-host col-host" onclick="sortTable('hostname')">Hostname</th>
                 <th class="td-mac col-mac" onclick="sortTable('mac')">MAC</th>
                 <th class="col-vendor" onclick="sortTable('vendor')">Vendor</th>
-                <th class="td-type" onclick="sortTable('device_type')">Type</th>
+                <th class="td-type col-type" onclick="sortTable('device_type')">Type</th>
                 <th class="col-os">OS</th>
-                <th onclick="sortTable('open_ports')">Ports</th>
-                <th class="td-seen" onclick="sortTable('last_seen')">Last Seen</th>
+                <th class="col-ports" onclick="sortTable('open_ports')">Ports</th>
+                <th class="td-seen col-seen" onclick="sortTable('last_seen')">Last Seen</th>
+                <th class="col-notes" onclick="sortTable('notes')">Notes</th>
               </tr>
             </thead>
             <tbody></tbody>
