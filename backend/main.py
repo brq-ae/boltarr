@@ -39,9 +39,12 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 @app.on_event("startup")
 def startup():
     init_db()
-    monitor.start_monitor()
-    liveness.start_liveness()
-    scheduler.start_scheduler()
+    # BOLTARR_DISABLE_LOOPS skips the background probe/scan loops — for a preview
+    # instance with sample data (so it isn't marked all-down against fake IPs).
+    if os.environ.get("BOLTARR_DISABLE_LOOPS", "").lower() not in ("1", "true", "yes"):
+        monitor.start_monitor()
+        liveness.start_liveness()
+        scheduler.start_scheduler()
 
 
 @app.get("/api/version")
@@ -532,6 +535,18 @@ def get_authorized_keys(ip: str, user: str = "root"):
     lines = [f"{r['public_key']} {r['name']}" for r in rows]
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
+
+
+@app.post("/api/hosts/{ip:path}/uptime/reset")
+def host_uptime_reset(ip: str):
+    ip = ip.rstrip("/")
+    with get_conn() as conn:
+        host = _resolve_host(conn, ip)
+        if not host:
+            raise HTTPException(404, "Host not found")
+        hid = host["id"]
+    monitor.reset_host_uptime(hid)
+    return {"ok": True}
 
 
 @app.get("/api/hosts/{ip:path}/uptime")
@@ -1030,6 +1045,20 @@ def service_uptime(svc_id: int):
         "uptime": {k: monitor.uptime(svc_id, secs) for k, secs in windows.items()},
         "outages": monitor.outages(svc_id, 30 * 86400, limit=10),
     }
+
+
+@app.post("/api/services/{svc_id}/uptime/reset")
+def service_uptime_reset(svc_id: int):
+    with get_conn() as conn:
+        if not conn.execute("SELECT 1 FROM services WHERE id=?", (svc_id,)).fetchone():
+            raise HTTPException(404, "Service not found")
+    monitor.reset_service_uptime(svc_id)
+    return {"ok": True}
+
+
+@app.post("/api/uptime/reset-all")
+def uptime_reset_all():
+    return monitor.reset_all_uptime()
 
 
 @app.delete("/api/services/{svc_id}")

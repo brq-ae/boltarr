@@ -897,7 +897,7 @@ async function loadHostUptime(ip) {
             : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
         }).join("")}</div>`
       : `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
-    el.innerHTML = rows + outages;
+    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" onclick="resetHostUptime('${ip}')">↺ Reset uptime</button></div>`;
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }
@@ -2897,10 +2897,26 @@ async function loadSvcUptime(id, monitored) {
     } else {
       outages = `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
     }
-    el.innerHTML = rows + outages;
+    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" onclick="resetSvcUptime(${id})">↺ Reset uptime</button></div>`;
   } catch (e) {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }
+}
+
+async function resetSvcUptime(id) {
+  if (!confirm("Reset uptime history for this service? Clears its outages and restarts the % from now.")) return;
+  try { await api("POST", `/api/services/${id}/uptime/reset`); await loadSvcUptime(id, true); }
+  catch (e) { alert("Error: " + (e.message || e)); }
+}
+async function resetHostUptime(ip) {
+  if (!confirm("Reset uptime history for this host? Clears its outages and restarts the % from now.")) return;
+  try { await api("POST", `/api/hosts/${ip}/uptime/reset`); await loadHostUptime(ip); }
+  catch (e) { alert("Error: " + (e.message || e)); }
+}
+async function resetAllUptime() {
+  if (!confirm("Reset uptime history for ALL services and hosts? Clears every outage record and restarts all percentages from now. This can't be undone.")) return;
+  try { await api("POST", "/api/uptime/reset-all"); alert("Uptime history reset for all services and hosts."); }
+  catch (e) { alert("Error: " + (e.message || e)); }
 }
 
 // Paint the monitor dot + label in the detail panel. status: up|down|unknown|off|checking

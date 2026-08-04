@@ -1971,6 +1971,8 @@ tbody td {
 }
 .svc-toggle.on { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
 .svc-status.locked { cursor: default; }
+.uptime-reset { margin-top: 8px; }
+.uptime-reset .btn-ghost { font-size: 10px; padding: 2px 8px; }
 @media (max-width: 799px) { #servicesTable { min-width: 640px; } }
 .cell-input {
   width: 100%; box-sizing: border-box; background: var(--surface2);

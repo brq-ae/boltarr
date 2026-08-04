@@ -350,6 +350,45 @@ def outages(service_id: int, window_seconds: int, limit: int = 10, now: datetime
     return _compute_outages(evs, window_seconds, limit, now)
 
 
+# ── Uptime reset (clear history, re-seed current state so the % restarts clean) ─
+def reset_service_uptime(service_id: int) -> None:
+    now = _iso(_now_dt())
+    with get_conn() as conn:
+        row = conn.execute("SELECT monitor_status FROM services WHERE id=?", (service_id,)).fetchone()
+        conn.execute("DELETE FROM monitor_events WHERE service_id=?", (service_id,))
+        if row and row["monitor_status"] in ("up", "down"):
+            conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
+                         (service_id, row["monitor_status"], now))
+        conn.commit()
+
+
+def reset_host_uptime(host_id: int) -> None:
+    now = _iso(_now_dt())
+    with get_conn() as conn:
+        row = conn.execute("SELECT online FROM hosts WHERE id=?", (host_id,)).fetchone()
+        conn.execute("DELETE FROM host_events WHERE host_id=?", (host_id,))
+        if row is not None and row["online"] is not None:
+            conn.execute("INSERT INTO host_events (host_id, status, ts) VALUES (?,?,?)",
+                         (host_id, "up" if row["online"] else "down", now))
+        conn.commit()
+
+
+def reset_all_uptime() -> dict:
+    now = _iso(_now_dt())
+    with get_conn() as conn:
+        conn.execute("DELETE FROM monitor_events")
+        conn.execute("DELETE FROM host_events")
+        for r in conn.execute("SELECT id, monitor_status FROM services WHERE monitored=1").fetchall():
+            if r["monitor_status"] in ("up", "down"):
+                conn.execute("INSERT INTO monitor_events (service_id, status, ts) VALUES (?,?,?)",
+                             (r["id"], r["monitor_status"], now))
+        for r in conn.execute("SELECT id, online FROM hosts WHERE online IS NOT NULL").fetchall():
+            conn.execute("INSERT INTO host_events (host_id, status, ts) VALUES (?,?,?)",
+                         (r["id"], "up" if r["online"] else "down", now))
+        conn.commit()
+    return {"ok": True}
+
+
 # ── Host uptime (same engine, fed by liveness host_events) ────────────────────
 
 def _host_events(conn, host_id: int):
