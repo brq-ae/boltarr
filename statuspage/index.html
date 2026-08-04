@@ -14,6 +14,7 @@
   </div>
 
   <div id="adminPanel" class="admin hidden"></div>
+  <div id="announce"></div>
   <div id="banner" class="hidden"></div>
   <div id="list"></div>
 
@@ -28,6 +29,35 @@
     <div class="modal-actions">
       <button class="btn" id="loginCancel">Cancel</button>
       <button class="btn primary" id="loginSubmit">Log in</button>
+    </div>
+  </div>
+</div>
+
+<div id="annModal" class="modal hidden">
+  <div class="modal-card wide">
+    <h2 id="annModalTitle">New announcement</h2>
+    <div class="err" id="annErr"></div>
+    <label class="fld">Severity
+      <select id="annSeverity">
+        <option value="info">Info</option>
+        <option value="maintenance">Maintenance</option>
+        <option value="critical">Critical</option>
+      </select>
+    </label>
+    <label class="fld">Title
+      <input id="annTitle" type="text" maxlength="120" placeholder="Scheduled maintenance">
+    </label>
+    <label class="fld">Details (optional)
+      <textarea id="annBody" rows="3" maxlength="500" placeholder="What's happening, and when."></textarea>
+    </label>
+    <div class="fld-row">
+      <label class="fld">Starts (optional)<input id="annStarts" type="datetime-local"></label>
+      <label class="fld">Ends (optional)<input id="annEnds" type="datetime-local"></label>
+    </div>
+    <label class="chk"><input id="annEnabled" type="checkbox" checked> Enabled</label>
+    <div class="modal-actions">
+      <button class="btn" id="annCancel">Cancel</button>
+      <button class="btn primary" id="annSave">Save</button>
     </div>
   </div>
 </div>

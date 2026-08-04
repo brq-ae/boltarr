@@ -18,6 +18,7 @@ import os
 import secrets
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -62,6 +63,16 @@ def init_db() -> None:
         if not c.execute("SELECT 1 FROM settings WHERE key='session_secret'").fetchone():
             c.execute("INSERT INTO settings (key, value) VALUES ('session_secret', ?)",
                       (secrets.token_hex(32),))
+        c.execute("""CREATE TABLE IF NOT EXISTS announcements (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            severity   TEXT    NOT NULL DEFAULT 'info',
+            title      TEXT    NOT NULL,
+            body       TEXT    NOT NULL DEFAULT '',
+            starts_at  TEXT,
+            ends_at    TEXT,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )""")
         c.commit()
 
 
@@ -86,6 +97,68 @@ def set_visibility(vis: dict) -> None:
     for s in SECTIONS:
         if vis.get(s) in ("public", "private"):
             set_setting(f"vis_{s}", vis[s])
+
+
+# ── Announcements (banner) ─────────────────────────────────────────────────────
+SEVERITIES = ("info", "maintenance", "critical")
+_SEV_ORDER = {"critical": 0, "maintenance": 1, "info": 2}
+
+
+def _epoch(iso: str | None) -> float | None:
+    if not iso:
+        return None
+    try:
+        return datetime.fromisoformat(iso.strip().replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _ann_status(row, now: float) -> str:
+    if not row["enabled"]:
+        return "disabled"
+    starts, ends = _epoch(row["starts_at"]), _epoch(row["ends_at"])
+    if starts and starts > now:
+        return "scheduled"
+    if ends and now >= ends:
+        return "expired"
+    return "active"
+
+
+def list_announcements() -> list[dict]:
+    now = time.time()
+    with _db() as c:
+        rows = c.execute("SELECT * FROM announcements "
+                         "ORDER BY COALESCE(starts_at, created_at) DESC, id DESC").fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["enabled"] = bool(r["enabled"])
+        d["status"] = _ann_status(r, now)
+        out.append(d)
+    return out
+
+
+def active_announcements() -> list[dict]:
+    items = [a for a in list_announcements() if a["status"] == "active"]
+    items.sort(key=lambda a: _SEV_ORDER.get(a["severity"], 3))
+    return [{"severity": a["severity"], "title": a["title"], "body": a["body"]} for a in items]
+
+
+def _clean_ann(body: dict):
+    severity = body.get("severity")
+    if severity not in SEVERITIES:
+        severity = "info"
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    text = (body.get("body") or "").strip()
+    starts = (body.get("starts_at") or "").strip() or None
+    ends = (body.get("ends_at") or "").strip() or None
+    for v in (starts, ends):
+        if v and _epoch(v) is None:
+            raise HTTPException(status_code=400, detail="invalid datetime")
+    enabled = 1 if body.get("enabled", True) else 0
+    return severity, title, text, starts, ends, enabled
 
 
 # ── Sessions: stateless HMAC-signed cookie (stdlib only) ───────────────────────
@@ -133,6 +206,21 @@ def csrf_for(token: str) -> str:
 
 def is_admin(request: Request) -> bool:
     return verify_session(request.cookies.get(COOKIE_NAME, ""))
+
+
+def _guard(request: Request, x_csrf: str) -> None:
+    """Require a valid admin session and a matching CSRF token."""
+    if not is_admin(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not hmac.compare_digest(x_csrf, csrf_for(request.cookies.get(COOKIE_NAME, ""))):
+        raise HTTPException(status_code=403, detail="bad csrf")
+
+
+async def _json(request: Request) -> dict:
+    try:
+        return await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid json")
 
 
 # ── Login brute-force limiter (in-memory) ──────────────────────────────────────
@@ -228,7 +316,7 @@ def data(request: Request):
     out = {
         "updated_at": STATE.get("updated_at"),
         "title": STATE.get("title", "Service Status"),
-        "announcements": STATE.get("announcements", []),
+        "announcements": active_announcements(),
         "admin": admin,
     }
     # A private section is simply absent from an anonymous response.
@@ -237,6 +325,7 @@ def data(request: Request):
     if admin:
         out["visibility"] = vis
         out["private_sections"] = [s for s in SECTIONS if vis[s] == "private"]
+        out["announcements_all"] = list_announcements()
         out["csrf"] = csrf_for(request.cookies.get(COOKIE_NAME, ""))
     resp = JSONResponse(out)
     resp.headers["Cache-Control"] = "no-store"
@@ -276,20 +365,55 @@ def logout():
 
 @app.post("/api/visibility")
 async def update_visibility(request: Request, x_csrf: str = Header(default="")):
-    if not is_admin(request):
-        raise HTTPException(status_code=401, detail="unauthorized")
-    if not hmac.compare_digest(x_csrf, csrf_for(request.cookies.get(COOKIE_NAME, ""))):
-        raise HTTPException(status_code=403, detail="bad csrf")
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid json")
+    _guard(request, x_csrf)
+    body = await _json(request)
     vis = get_visibility()
     for s in SECTIONS:
         if body.get(s) in ("public", "private"):
             vis[s] = body[s]
     set_visibility(vis)
     return {"ok": True, "visibility": vis}
+
+
+@app.get("/api/announcements")
+def api_announcements(request: Request):
+    if not is_admin(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    return {"announcements": list_announcements()}
+
+
+@app.post("/api/announcements")
+async def create_announcement(request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    sev, title, text, starts, ends, enabled = _clean_ann(await _json(request))
+    with _db() as c:
+        c.execute("INSERT INTO announcements (severity, title, body, starts_at, ends_at, enabled) "
+                  "VALUES (?, ?, ?, ?, ?, ?)", (sev, title, text, starts, ends, enabled))
+        c.commit()
+    return {"ok": True}
+
+
+@app.put("/api/announcements/{ann_id}")
+async def update_announcement(ann_id: int, request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    sev, title, text, starts, ends, enabled = _clean_ann(await _json(request))
+    with _db() as c:
+        cur = c.execute("UPDATE announcements SET severity=?, title=?, body=?, starts_at=?, "
+                        "ends_at=?, enabled=? WHERE id=?",
+                        (sev, title, text, starts, ends, enabled, ann_id))
+        c.commit()
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
+
+@app.delete("/api/announcements/{ann_id}")
+def delete_announcement(ann_id: int, request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    with _db() as c:
+        c.execute("DELETE FROM announcements WHERE id=?", (ann_id,))
+        c.commit()
+    return {"ok": True}
 
 
 def _static(path: Path, media_type: str) -> Response:
