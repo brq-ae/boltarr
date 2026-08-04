@@ -17,6 +17,7 @@
   <div id="announce"></div>
   <div id="banner" class="hidden"></div>
   <div id="list"></div>
+  <div id="maintenance"></div>
 
   <div class="foot">Powered by Boltarr</div>
 </div>
@@ -58,6 +59,69 @@
     <div class="modal-actions">
       <button class="btn" id="annCancel">Cancel</button>
       <button class="btn primary" id="annSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="evModal" class="modal hidden">
+  <div class="modal-card wide">
+    <h2 id="evModalTitle">New maintenance event</h2>
+    <div class="err" id="evErr"></div>
+    <label class="fld">Title<input id="evTitle" type="text" maxlength="120" placeholder="Nightly parity check"></label>
+    <label class="fld">Severity
+      <select id="evSeverity">
+        <option value="maintenance">Maintenance</option>
+        <option value="info">Info</option>
+        <option value="critical">Critical</option>
+      </select>
+    </label>
+    <label class="fld">Details (optional)<textarea id="evBody" rows="2" maxlength="500" placeholder="What visitors should know."></textarea></label>
+    <label class="fld">Repeats
+      <select id="evRec">
+        <option value="once">Once</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly_date">Monthly (by date)</option>
+        <option value="monthly_nth">Monthly (Nth weekday)</option>
+      </select>
+    </label>
+    <div id="recOnce" class="rec-fields">
+      <label class="fld">Date<input id="evOnceDate" type="date"></label>
+    </div>
+    <div id="recWeekly" class="rec-fields hidden">
+      <div class="fld">Weekdays<div class="wd-row" id="evWeekdays"></div></div>
+    </div>
+    <div id="recMonthDate" class="rec-fields hidden">
+      <label class="fld">Days of month (comma-separated)<input id="evMonthDays" type="text" placeholder="1, 15"></label>
+    </div>
+    <div id="recMonthNth" class="rec-fields hidden">
+      <div class="fld-row">
+        <label class="fld">Which
+          <select id="evNth">
+            <option value="1">First</option><option value="2">Second</option>
+            <option value="3">Third</option><option value="4">Fourth</option>
+            <option value="-1">Last</option>
+          </select>
+        </label>
+        <label class="fld">Weekday
+          <select id="evNthWeekday">
+            <option value="0">Monday</option><option value="1">Tuesday</option>
+            <option value="2">Wednesday</option><option value="3">Thursday</option>
+            <option value="4">Friday</option><option value="5">Saturday</option>
+            <option value="6">Sunday</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="fld-row">
+      <label class="fld">Starts<input id="evStart" type="time"></label>
+      <label class="fld">Ends<input id="evEnd" type="time"></label>
+    </div>
+    <label class="fld">Until (optional)<input id="evUntil" type="date"></label>
+    <label class="chk"><input id="evEnabled" type="checkbox" checked> Enabled</label>
+    <div class="modal-actions">
+      <button class="btn" id="evCancel">Cancel</button>
+      <button class="btn primary" id="evSave">Save</button>
     </div>
   </div>
 </div>

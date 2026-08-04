@@ -11,6 +11,7 @@ is designed to be safe when exposed to the internet; see README (Hardening).
 """
 import asyncio
 import base64
+import calendar
 import hashlib
 import hmac
 import json
@@ -18,8 +19,9 @@ import os
 import secrets
 import sqlite3
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
@@ -72,6 +74,23 @@ def init_db() -> None:
             ends_at    TEXT,
             enabled    INTEGER NOT NULL DEFAULT 1,
             created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            title       TEXT    NOT NULL,
+            body        TEXT    NOT NULL DEFAULT '',
+            severity    TEXT    NOT NULL DEFAULT 'maintenance',
+            recurrence  TEXT    NOT NULL DEFAULT 'once',
+            start_time  TEXT    NOT NULL DEFAULT '00:00',
+            end_time    TEXT    NOT NULL DEFAULT '00:00',
+            once_date   TEXT,
+            weekdays    TEXT,
+            month_days  TEXT,
+            nth         INTEGER,
+            nth_weekday INTEGER,
+            until_date  TEXT,
+            enabled     INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
         )""")
         c.commit()
 
@@ -159,6 +178,215 @@ def _clean_ann(body: dict):
             raise HTTPException(status_code=400, detail="invalid datetime")
     enabled = 1 if body.get("enabled", True) else 0
     return severity, title, text, starts, ends, enabled
+
+
+# ── Maintenance calendar (recurring + one-off events) ──────────────────────────
+RECURRENCES = ("once", "daily", "weekly", "monthly_date", "monthly_nth")
+_WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]     # Python weekday(): Mon=0
+_ORD = {1: "First", 2: "Second", 3: "Third", 4: "Fourth", -1: "Last"}
+
+
+def _tz():
+    name = get_setting("timezone") or os.environ.get("TZ") or "UTC"
+    try:
+        return ZoneInfo(name), name
+    except Exception:
+        return ZoneInfo("UTC"), "UTC"
+
+
+def _hm(s: str):
+    try:
+        h, m = str(s).split(":")
+        return int(h), int(m)
+    except Exception:
+        return 0, 0
+
+
+def _csv_ints(s):
+    out = []
+    for part in (s or "").split(","):
+        part = part.strip()
+        if part.lstrip("-").isdigit():
+            out.append(int(part))
+    return out
+
+
+def _all_events():
+    with _db() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM events ORDER BY id")]
+
+
+def _fires_on(ev: dict, d: date) -> bool:
+    """Does this event's rule fire on calendar date d (in the configured zone)?"""
+    if ev["until_date"]:
+        try:
+            if d > date.fromisoformat(ev["until_date"]):
+                return False
+        except Exception:
+            pass
+    rec = ev["recurrence"]
+    if rec == "once":
+        return ev["once_date"] == d.isoformat()
+    if rec == "daily":
+        return True
+    if rec == "weekly":
+        return d.weekday() in _csv_ints(ev["weekdays"])
+    if rec == "monthly_date":
+        return d.day in _csv_ints(ev["month_days"])
+    if rec == "monthly_nth":
+        if ev["nth_weekday"] is None or d.weekday() != ev["nth_weekday"]:
+            return False
+        same = [x for x in range(1, calendar.monthrange(d.year, d.month)[1] + 1)
+                if date(d.year, d.month, x).weekday() == d.weekday()]
+        if ev["nth"] == -1:
+            return d.day == same[-1]
+        idx = (ev["nth"] or 0) - 1
+        return 0 <= idx < len(same) and d.day == same[idx]
+    return False
+
+
+def _occurrences(ev: dict, start_utc: datetime, end_utc: datetime, tzinfo):
+    """Concrete (start_utc, end_utc) occurrences overlapping [start_utc, end_utc)."""
+    out = []
+    d = start_utc.astimezone(tzinfo).date() - timedelta(days=1)
+    last = end_utc.astimezone(tzinfo).date() + timedelta(days=1)
+    sh, sm = _hm(ev["start_time"])
+    eh, em = _hm(ev["end_time"])
+    while d <= last:
+        if _fires_on(ev, d):
+            s = datetime(d.year, d.month, d.day, sh, sm, tzinfo=tzinfo)
+            e = datetime(d.year, d.month, d.day, eh, em, tzinfo=tzinfo)
+            if e <= s:
+                e += timedelta(days=1)          # window crosses midnight
+            su, eu = s.astimezone(timezone.utc), e.astimezone(timezone.utc)
+            if eu > start_utc and su < end_utc:
+                out.append((su, eu))
+        d += timedelta(days=1)
+    return out
+
+
+def _next_occurrence(ev: dict, tzinfo):
+    now = datetime.now(timezone.utc)
+    for su, eu in _occurrences(ev, now, now + timedelta(days=400), tzinfo):
+        if eu > now:
+            return su
+    return None
+
+
+def _event_summary(ev: dict) -> str:
+    rec = ev["recurrence"]
+    if rec == "once":
+        base = f'Once · {ev["once_date"] or "?"}'
+    elif rec == "daily":
+        base = "Daily"
+    elif rec == "weekly":
+        base = "Weekly (" + ", ".join(_WD[w] for w in _csv_ints(ev["weekdays"]) if 0 <= w < 7) + ")"
+    elif rec == "monthly_date":
+        base = "Monthly (day " + ", ".join(str(x) for x in _csv_ints(ev["month_days"])) + ")"
+    elif rec == "monthly_nth":
+        wd = ev["nth_weekday"]
+        base = f'{_ORD.get(ev["nth"], "?")} {_WD[wd] if wd is not None and 0 <= wd < 7 else "?"}'
+    else:
+        base = rec
+    return f'{base} · {ev["start_time"]}–{ev["end_time"]}'
+
+
+def _when_str(su: datetime, eu: datetime, tzinfo) -> str:
+    s, e = su.astimezone(tzinfo), eu.astimezone(tzinfo)
+    return f'{s.strftime("%a, %b ")}{s.day} · {s.strftime("%H:%M")}–{e.strftime("%H:%M")}'
+
+
+def _next_str(ev: dict, tzinfo):
+    n = _next_occurrence(ev, tzinfo)
+    if not n:
+        return None
+    loc = n.astimezone(tzinfo)
+    return f'{loc.strftime("%b ")}{loc.day}'
+
+
+def _active_events(tzinfo):
+    now = datetime.now(timezone.utc)
+    active = []
+    for ev in _all_events():
+        if not ev["enabled"]:
+            continue
+        for su, eu in _occurrences(ev, now - timedelta(days=2), now + timedelta(minutes=1), tzinfo):
+            if su <= now < eu:
+                active.append((ev, eu))
+                break
+    return active
+
+
+def maintenance_view(tzinfo, tzname) -> dict:
+    now = datetime.now(timezone.utc)
+    active = [{"title": ev["title"], "body": ev["body"], "severity": ev["severity"],
+               "ends": eu.astimezone(tzinfo).strftime("%H:%M")}
+              for ev, eu in _active_events(tzinfo)]
+    upcoming = []
+    for ev in _all_events():
+        if not ev["enabled"]:
+            continue
+        for su, eu in _occurrences(ev, now, now + timedelta(days=90), tzinfo):
+            if su > now:
+                upcoming.append((su, {"title": ev["title"], "severity": ev["severity"],
+                                      "when": _when_str(su, eu, tzinfo)}))
+    upcoming.sort(key=lambda x: x[0])
+    return {"active": active, "upcoming": [u for _, u in upcoming[:12]], "tz": tzname}
+
+
+def _event_banners(tzinfo):
+    out = []
+    for ev, eu in _active_events(tzinfo):
+        ends = eu.astimezone(tzinfo).strftime("%H:%M")
+        tail = f"In progress until {ends}."
+        body = f'{ev["body"]} {tail}'.strip() if ev["body"] else tail
+        out.append({"severity": ev["severity"], "title": ev["title"], "body": body})
+    return out
+
+
+def _merge_banners(*groups):
+    items = [x for g in groups for x in g]
+    items.sort(key=lambda x: _SEV_ORDER.get(x["severity"], 3))
+    return items
+
+
+def _clean_event(b: dict):
+    title = (b.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title required")
+    severity = b.get("severity") if b.get("severity") in SEVERITIES else "maintenance"
+    rec = b.get("recurrence") if b.get("recurrence") in RECURRENCES else "once"
+    st = (b.get("start_time") or "00:00").strip()
+    en = (b.get("end_time") or "00:00").strip()
+    for t in (st, en):
+        h, m = _hm(t)
+        if not (0 <= h < 24 and 0 <= m < 60):
+            raise HTTPException(status_code=400, detail="invalid time")
+    once_date = (b.get("once_date") or "").strip() or None
+    weekdays = (b.get("weekdays") or "").strip() or None
+    month_days = (b.get("month_days") or "").strip() or None
+    nth = b.get("nth")
+    nth = int(nth) if str(nth).lstrip("-").isdigit() else None
+    nth_wd = b.get("nth_weekday")
+    nth_wd = int(nth_wd) if str(nth_wd).isdigit() else None
+    until_date = (b.get("until_date") or "").strip() or None
+    if rec == "once" and not once_date:
+        raise HTTPException(status_code=400, detail="date required")
+    if rec == "weekly" and not _csv_ints(weekdays):
+        raise HTTPException(status_code=400, detail="weekdays required")
+    if rec == "monthly_date" and not _csv_ints(month_days):
+        raise HTTPException(status_code=400, detail="days required")
+    if rec == "monthly_nth" and (nth is None or nth_wd is None):
+        raise HTTPException(status_code=400, detail="ordinal + weekday required")
+    for ds in (once_date, until_date):
+        if ds:
+            try:
+                date.fromisoformat(ds)
+            except Exception:
+                raise HTTPException(status_code=400, detail="invalid date")
+    enabled = 1 if b.get("enabled", True) else 0
+    return (title, (b.get("body") or "").strip(), severity, rec, st, en,
+            once_date, weekdays, month_days, nth, nth_wd, until_date, enabled)
 
 
 # ── Sessions: stateless HMAC-signed cookie (stdlib only) ───────────────────────
@@ -313,10 +541,12 @@ async def push(request: Request, authorization: str = Header(default="")):
 def data(request: Request):
     admin = is_admin(request)
     vis = get_visibility()
+    tzinfo, tzname = _tz()
     out = {
         "updated_at": STATE.get("updated_at"),
         "title": STATE.get("title", "Service Status"),
-        "announcements": active_announcements(),
+        "announcements": _merge_banners(active_announcements(), _event_banners(tzinfo)),
+        "maintenance": maintenance_view(tzinfo, tzname),
         "admin": admin,
     }
     # A private section is simply absent from an anonymous response.
@@ -326,6 +556,10 @@ def data(request: Request):
         out["visibility"] = vis
         out["private_sections"] = [s for s in SECTIONS if vis[s] == "private"]
         out["announcements_all"] = list_announcements()
+        out["events_all"] = [{**ev, "enabled": bool(ev["enabled"]),
+                              "summary": _event_summary(ev), "next": _next_str(ev, tzinfo)}
+                             for ev in _all_events()]
+        out["timezone"] = tzname
         out["csrf"] = csrf_for(request.cookies.get(COOKIE_NAME, ""))
     resp = JSONResponse(out)
     resp.headers["Cache-Control"] = "no-store"
@@ -414,6 +648,91 @@ def delete_announcement(ann_id: int, request: Request, x_csrf: str = Header(defa
         c.execute("DELETE FROM announcements WHERE id=?", (ann_id,))
         c.commit()
     return {"ok": True}
+
+
+_EVENT_COLS = ("title", "body", "severity", "recurrence", "start_time", "end_time",
+               "once_date", "weekdays", "month_days", "nth", "nth_weekday", "until_date", "enabled")
+
+
+@app.get("/api/events")
+def api_events(request: Request):
+    if not is_admin(request):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    tzinfo, _ = _tz()
+    return {"events": [{**ev, "enabled": bool(ev["enabled"]),
+                        "summary": _event_summary(ev), "next": _next_str(ev, tzinfo)}
+                       for ev in _all_events()]}
+
+
+@app.post("/api/events")
+async def create_event(request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    vals = _clean_event(await _json(request))
+    with _db() as c:
+        c.execute(f"INSERT INTO events ({', '.join(_EVENT_COLS)}) "
+                  f"VALUES ({', '.join('?' * len(_EVENT_COLS))})", vals)
+        c.commit()
+    return {"ok": True}
+
+
+@app.put("/api/events/{ev_id}")
+async def update_event(ev_id: int, request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    vals = _clean_event(await _json(request))
+    with _db() as c:
+        cur = c.execute(f"UPDATE events SET {', '.join(col + '=?' for col in _EVENT_COLS)} "
+                        f"WHERE id=?", (*vals, ev_id))
+        c.commit()
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
+
+@app.delete("/api/events/{ev_id}")
+def delete_event(ev_id: int, request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    with _db() as c:
+        c.execute("DELETE FROM events WHERE id=?", (ev_id,))
+        c.commit()
+    return {"ok": True}
+
+
+@app.post("/api/timezone")
+async def set_timezone(request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    name = str((await _json(request)).get("timezone", "")).strip()
+    try:
+        ZoneInfo(name)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid timezone")
+    set_setting("timezone", name)
+    return {"ok": True, "timezone": name}
+
+
+@app.get("/api/calendar")
+def api_calendar(request: Request):
+    tzinfo, tzname = _tz()
+    now = datetime.now(timezone.utc).astimezone(tzinfo)
+    try:
+        y, m = (int(x) for x in request.query_params.get("month", "").split("-"))
+        date(y, m, 1)
+    except Exception:
+        y, m = now.year, now.month
+    last = calendar.monthrange(y, m)[1]
+    start_utc = datetime(y, m, 1, tzinfo=tzinfo).astimezone(timezone.utc)
+    end_utc = datetime(y, m, last, 23, 59, tzinfo=tzinfo).astimezone(timezone.utc)
+    days: dict[str, list] = {}
+    for ev in _all_events():
+        if not ev["enabled"]:
+            continue
+        for su, eu in _occurrences(ev, start_utc, end_utc, tzinfo):
+            loc = su.astimezone(tzinfo)
+            if loc.year != y or loc.month != m:
+                continue
+            days.setdefault(loc.date().isoformat(), []).append({
+                "title": ev["title"], "severity": ev["severity"],
+                "when": loc.strftime("%H:%M") + "–" + eu.astimezone(tzinfo).strftime("%H:%M")})
+    return {"month": f"{y:04d}-{m:02d}", "tz": tzname, "days": days}
 
 
 def _static(path: Path, media_type: str) -> Response:
