@@ -7,7 +7,7 @@ except Exception:   # pragma: no cover
     ZoneInfo = None
 import yaml
 
-_DATA_DIR = Path(__file__).parent.parent / "data"
+_DATA_DIR = Path(os.environ.get("BOLTARR_DATA_DIR") or (Path(__file__).parent.parent / "data"))
 CONFIG_PATH = _DATA_DIR / "config.yaml"
 
 _DEFAULTS: dict = {

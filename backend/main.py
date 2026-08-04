@@ -1,3 +1,4 @@
+import os
 import uuid
 import io
 import json
@@ -1851,7 +1852,7 @@ def delete_ssh_key(key_id: int):
 
 # ── Backup & Restore ─────────────────────────────────────────────────────────
 
-_DATA_DIR = Path(__file__).parent.parent / "data"
+_DATA_DIR = Path(os.environ.get("BOLTARR_DATA_DIR") or (Path(__file__).parent.parent / "data"))
 
 @app.get("/api/backup")
 def backup():

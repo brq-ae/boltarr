@@ -122,6 +122,7 @@ function initGraph() {
     userPanningEnabled: true,
     minZoom:            0.15,
     maxZoom:            5,
+    wheelSensitivity:   0.2,   // finer, smoother wheel zoom (default 1 is coarse)
   });
 
   // Suppress native context menu using a position-based check (capture phase, before anything else).
@@ -292,6 +293,13 @@ function clearConnectSource() {
   const hint = document.getElementById("connectHint");
   if (connectMode && hint) hint.textContent = "Tap a device to start";
 }
+
+// Press Escape to leave link / multi-link mode (unless a dialog is open).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || document.querySelector(".modal-overlay.open")) return;
+  if (connectMode)           { toggleConnectMode();      e.preventDefault(); }
+  else if (multiConnectMode) { toggleMultiConnectMode(); e.preventDefault(); }
+});
 
 function handleConnectTap(node) {
   const ip = node.data("ip");

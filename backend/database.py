@@ -1,7 +1,11 @@
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "data" / "boltarr.db"
+# Data lives in <repo>/data by default; BOLTARR_DATA_DIR overrides it (holds the
+# DB and config.yaml) — handy for a preview instance or a custom deployment path.
+_DATA_DIR = Path(os.environ.get("BOLTARR_DATA_DIR") or (Path(__file__).parent.parent / "data"))
+DB_PATH = _DATA_DIR / "boltarr.db"
 
 
 def get_conn():
