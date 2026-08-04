@@ -487,36 +487,36 @@ def host_ticks(host_id: int, minutes: int = 60, now: datetime | None = None) -> 
     return _ticks_for("host_events", "host_id", host_id, minutes, now or _now_dt())
 
 
-def _daily_history(evs, anchor_status, days, now):
-    """Per-day uptime % over the last `days`, oldest→newest. 'unknown' periods
-    (before any monitoring) count as no-data (pct=None), not downtime."""
+def _bucket_history(evs, anchor_status, period_secs, count, now, label_fn):
+    """Uptime % per bucket over the last `period_secs`, split into `count` slices,
+    oldest→newest. 'unknown' periods (before monitoring) are no-data (pct=None)."""
     end = now.timestamp()
-    start = end - days * 86400
+    start = end - period_secs
+    slice_len = period_secs / count
     points = [(start, anchor_status or "unknown")]
     for e in evs:
         t = _parse(e["ts"])
         if t and t.timestamp() >= start:
             points.append((t.timestamp(), e["status"]))
     out = []
-    for i in range(days):
-        d0 = start + i * 86400
-        d1 = d0 + 86400
+    for i in range(count):
+        b0 = start + i * slice_len
+        b1 = b0 + slice_len
         up = tot = 0.0
         for j, (ts, state) in enumerate(points):
             seg_end = points[j + 1][0] if j + 1 < len(points) else end
-            lo, hi = max(ts, d0), min(seg_end, d1)
+            lo, hi = max(ts, b0), min(seg_end, b1)
             if hi > lo and state in ("up", "down"):
                 tot += hi - lo
                 if state == "up":
                     up += hi - lo
         pct = round(up / tot * 100, 2) if tot > 0 else None
-        out.append({"date": datetime.fromtimestamp(d0 + 43200, timezone.utc).strftime("%b %d"),
-                    "pct": pct})
+        out.append({"date": label_fn(b0 + slice_len / 2), "pct": pct})
     return out
 
 
-def _daily_for(table, key_col, key, days, now):
-    since_iso = _iso(datetime.fromtimestamp(now.timestamp() - days * 86400, timezone.utc))
+def _bucketed_for(table, key_col, key, period_secs, count, now, label_fn):
+    since_iso = _iso(datetime.fromtimestamp(now.timestamp() - period_secs, timezone.utc))
     with get_conn() as conn:
         anchor = conn.execute(
             f"SELECT status FROM {table} WHERE {key_col}=? AND ts < ? ORDER BY ts DESC LIMIT 1",
@@ -524,15 +524,31 @@ def _daily_for(table, key_col, key, days, now):
         evs = [dict(r) for r in conn.execute(
             f"SELECT status, ts FROM {table} WHERE {key_col}=? AND ts >= ? ORDER BY ts",
             (key, since_iso)).fetchall()]
-    return _daily_history(evs, anchor["status"] if anchor else None, days, now)
+    return _bucket_history(evs, anchor["status"] if anchor else None, period_secs, count, now, label_fn)
 
 
-def daily_history(service_id, days=90, now=None):
-    return _daily_for("monitor_events", "service_id", service_id, days, now or _now_dt())
+def _hr_label(ts):  return datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d %H:%M")
+def _day_label(ts): return datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d")
 
 
-def host_daily_history(host_id, days=90, now=None):
-    return _daily_for("host_events", "host_id", host_id, days, now or _now_dt())
+def tick_windows(table, key_col, key, now=None):
+    """Tick bars for 24h (hourly), 7d (daily), 30d (daily)."""
+    now = now or _now_dt()
+    return {
+        "24h": _bucketed_for(table, key_col, key, 86400, 24, now, _hr_label),
+        "7d":  _bucketed_for(table, key_col, key, 7 * 86400, 7, now, _day_label),
+        "30d": _bucketed_for(table, key_col, key, 30 * 86400, 30, now, _day_label),
+    }
+
+
+def uptime_windows(fn, key, now=None):
+    """{24h,7d,30d} uptime % using the given uptime function (service or host)."""
+    now = now or _now_dt()
+    out = {}
+    for k, w in (("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)):
+        u = fn(key, w, now)
+        out[k] = u["pct"] if u else None
+    return out
 
 
 def build_status_payload() -> dict:
@@ -547,14 +563,13 @@ def build_status_payload() -> dict:
     incidents = []
     WINDOW = 90 * 86400
     for r in rows:
-        up = uptime(r["id"], 86400)
         name = (r.get("public_name") or "").strip() or r["name"]
         services.append({
             "key": f"svc-{r['id']}",
             "name": name,
             "status": r.get("monitor_status") or "unknown",
-            "uptime_24h": up["pct"] if up else None,
-            "history": daily_history(r["id"]),
+            "uptime": uptime_windows(uptime, r["id"]),
+            "ticks": tick_windows("monitor_events", "service_id", r["id"]),
         })
         for o in outages(r["id"], WINDOW, limit=25):
             incidents.append({"name": name, "section": "services", "start": o["start"],
@@ -571,15 +586,14 @@ def build_status_payload() -> dict:
         """).fetchall()]
     hosts, networking = [], []
     for r in host_rows:
-        up = host_uptime(r["id"], 86400)
         name = (r.get("public_name") or "").strip() or (r.get("hostname") or "").strip() or "Host"
         sect = "networking" if (r.get("device_type") or "") in NETWORKING else "hosts"
         item = {
             "key": f"host-{r['id']}",
             "name": name,
             "status": "up" if r["online"] == 1 else "down" if r["online"] == 0 else "unknown",
-            "uptime_24h": up["pct"] if up else None,
-            "history": host_daily_history(r["id"]),
+            "uptime": uptime_windows(host_uptime, r["id"]),
+            "ticks": tick_windows("host_events", "host_id", r["id"]),
         }
         (networking if sect == "networking" else hosts).append(item)
         for o in host_outages(r["id"], WINDOW, limit=25):

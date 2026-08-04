@@ -141,6 +141,21 @@ def set_branding(data: dict) -> None:
             set_setting(k, str(data[k]))
 
 
+# ── Display (which uptime windows the cards show) ──────────────────────────────
+DISPLAY_DEFAULTS = {"uptime_window": "24h", "bar_period": "24h"}
+_WINDOWS = ("24h", "7d", "30d")
+
+
+def get_display() -> dict:
+    return {k: (get_setting(k) or v) for k, v in DISPLAY_DEFAULTS.items()}
+
+
+def set_display(data: dict) -> None:
+    for k in DISPLAY_DEFAULTS:
+        if data.get(k) in _WINDOWS:
+            set_setting(k, data[k])
+
+
 # ── Announcements (banner) ─────────────────────────────────────────────────────
 SEVERITIES = ("info", "maintenance", "critical")
 _SEV_ORDER = {"critical": 0, "maintenance": 1, "info": 2}
@@ -571,6 +586,7 @@ def data(request: Request):
         "announcements": _merge_banners(active_announcements(), _event_banners(tzinfo)),
         "maintenance": maintenance_view(tzinfo, tzname),
         "branding": get_branding(),
+        "display": get_display(),
         "admin": admin,
     }
     # A private section is simply absent from an anonymous response.
@@ -630,6 +646,13 @@ async def update_branding(request: Request, x_csrf: str = Header(default="")):
     _guard(request, x_csrf)
     set_branding(await _json(request))
     return {"ok": True, "branding": get_branding()}
+
+
+@app.post("/api/display")
+async def update_display(request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    set_display(await _json(request))
+    return {"ok": True, "display": get_display()}
 
 
 @app.post("/api/visibility")

@@ -14,6 +14,7 @@ let LAST_MAINT = { active: [], upcoming: [] };
 let MVIEW = "month";       // 'agenda' | 'month' — calendar shown by default
 let MMONTH = null;         // {y, m} for the month grid
 let BRAND = {};            // current branding settings
+let DISP = {};             // display settings (uptime_window, bar_period)
 
 const SEV = { info: "Info", maintenance: "Maintenance", critical: "Critical" };
 const WD = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];  // Mon=0 (matches backend)
@@ -49,20 +50,26 @@ function dayClass(pct){
   if(pct >= 90) return "maint";      // partial-outage day
   return "down";
 }
+function pctLabel(u, w){ return (!u || u[w] == null) ? "—" : Number(u[w]).toFixed(2) + "%"; }
 function card(x){
-  const up = (x.uptime_24h == null) ? "—" : Number(x.uptime_24h).toFixed(2) + "%";
-  let bars;
-  if(x.history && x.history.length){
-    bars = `<div class="days">${x.history.map(day => {
-      const t = `${esc(day.date)}: ${day.pct == null ? "no data" : Number(day.pct).toFixed(1) + "%"}`;
-      return `<div class="day ${dayClass(day.pct)}" title="${t}"></div>`;
-    }).join("")}</div>`;
-  } else {  // fallback for an older Boltarr that still pushes last-hour ticks
-    bars = `<div class="ticks">${(x.ticks||[]).map(t => `<div class="tick ${cls(t)}"></div>`).join("")}</div>`;
+  const uw = DISP.uptime_window || "24h";
+  const bw = DISP.bar_period || "24h";
+  let pcts;
+  if(x.uptime){
+    pcts = `${pctLabel(x.uptime, uw)} <span class="u24">${uw}</span>`;
+    if(bw !== uw) pcts += ` <span class="u24">·</span> ${pctLabel(x.uptime, bw)} <span class="u24">${bw}</span>`;
+  } else {  // older Boltarr payload
+    pcts = `${x.uptime_24h == null ? "—" : Number(x.uptime_24h).toFixed(2) + "%"} <span class="u24">24h</span>`;
   }
+  const barArr = (x.ticks && x.ticks[bw]) ? x.ticks[bw] : (Array.isArray(x.history) ? x.history : []);
+  const bars = `<div class="days">${barArr.map(d => {
+    const pct = (d && typeof d === "object") ? d.pct : null;
+    const t = (d && typeof d === "object") ? `${esc(d.date)}: ${d.pct == null ? "no data" : Number(d.pct).toFixed(1) + "%"}` : "";
+    return `<div class="day ${dayClass(pct)}" title="${t}"></div>`;
+  }).join("")}</div>`;
   return `<div class="svc"><div class="svc-head"><span class="dot ${cls(x.status)}"></span>
     <span class="svc-name">${esc(x.name)}</span>
-    <span class="uptime">${up} <span class="u24">24h</span></span></div>
+    <span class="uptime">${pcts}</span></div>
     ${bars}</div>`;
 }
 function renderList(d){
@@ -273,6 +280,14 @@ function renderAdmin(d){
     <div class="color-grid">${cf('grad_from','Gradient start')}${cf('grad_mid','Gradient mid')}${cf('grad_to','Gradient end')}</div>
     <div class="admin-actions"><button class="btn primary small" id="brandSave">Save branding</button><span class="spacer"></span></div>`;
 
+  const dopt = (v, cur) => `<option value="${v}"${v === cur ? " selected" : ""}>${v === "24h" ? "24 hours" : v === "7d" ? "7 days" : "30 days"}</option>`;
+  const displayBody = `
+    <label class="fld">Uptime % (shown next to the name)
+      <select id="dispUptime">${["24h","7d","30d"].map(v => dopt(v, DISP.uptime_window || "24h")).join("")}</select></label>
+    <label class="fld">History bar period
+      <select id="dispBar">${["24h","7d","30d"].map(v => dopt(v, DISP.bar_period || "24h")).join("")}</select></label>
+    <div class="admin-actions"><button class="btn primary small" id="dispSave">Save display</button><span class="spacer"></span></div>`;
+
   panel.innerHTML = `
     <details class="acc" open><summary>Visibility</summary><div class="acc-body">
       ${visRows}
@@ -282,6 +297,7 @@ function renderAdmin(d){
       </div>
     </div></details>
     <details class="acc"><summary>Branding</summary><div class="acc-body">${brandingBody}</div></details>
+    <details class="acc"><summary>Display</summary><div class="acc-body">${displayBody}</div></details>
     <details class="acc"><summary>Announcements</summary><div class="acc-body">
       <div class="ann-admin-actions"><button class="btn small" id="annNew">+ New announcement</button></div>
       <div class="ann-list">${annRows}</div>
@@ -302,6 +318,7 @@ function renderAdmin(d){
   $("evNew").addEventListener("click", () => openEventModal(null));
   $("tzEdit").addEventListener("click", changeTimezone);
   $("brandSave").addEventListener("click", saveBranding);
+  $("dispSave").addEventListener("click", saveDisplay);
   $("brandLogoDefault").addEventListener("click", () => { BRAND.logo = ""; $("brandLogoPrev").src = "/static/boltarr-logo.svg"; });
   $("brandLogoFile").addEventListener("change", onLogoFile);
   panel.querySelectorAll(".color-swatch").forEach(sw => {
@@ -355,6 +372,15 @@ async function saveBranding(){
   if(!$("brandGradOn").checked){ payload.grad_from = ""; payload.grad_mid = ""; payload.grad_to = ""; }
   try{
     const r = await fetch("/api/branding", { method:"POST",
+      headers:{ "Content-Type":"application/json", "X-CSRF": CSRF }, body: JSON.stringify(payload) });
+    if(r.ok) await load(); else alert("Save failed.");
+  }catch(e){ alert("Network error."); }
+}
+
+async function saveDisplay(){
+  const payload = { uptime_window: $("dispUptime").value, bar_period: $("dispBar").value };
+  try{
+    const r = await fetch("/api/display", { method:"POST",
       headers:{ "Content-Type":"application/json", "X-CSRF": CSRF }, body: JSON.stringify(payload) });
     if(r.ok) await load(); else alert("Save failed.");
   }catch(e){ alert("Network error."); }
@@ -503,6 +529,7 @@ async function load(skipAdmin){
   let d;
   try{ d = await (await fetch("/data", {cache:"no-store"})).json(); }
   catch(e){ return; }
+  DISP = d.display || {};
   applyBranding(d.branding);
   $("updated").textContent = "Updated " + ago(d.updated_at);
   // The auto-refresh timer passes skipAdmin=true so an incoming push doesn't
