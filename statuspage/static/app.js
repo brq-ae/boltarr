@@ -13,6 +13,7 @@ let TZ = "UTC";            // configured status-page timezone
 let LAST_MAINT = { active: [], upcoming: [] };
 let MVIEW = "month";       // 'agenda' | 'month' — calendar shown by default
 let MMONTH = null;         // {y, m} for the month grid
+let BRAND = {};            // current branding settings
 
 const SEV = { info: "Info", maintenance: "Maintenance", critical: "Critical" };
 const WD = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];  // Mon=0 (matches backend)
@@ -70,6 +71,35 @@ function renderAnnouncements(d){
        ${a.body ? `<div class="ann-body">${esc(a.body)}</div>` : ""}
      </div>`).join("");
 }
+function applyBranding(b){
+  if(!b) return;
+  const rs = document.documentElement.style;
+  const set = (v, val) => { if(val) rs.setProperty(v, val); };
+  set("--accent", b.color_accent); set("--bg", b.color_bg); set("--card", b.color_surface);
+  set("--up", b.color_op); set("--down", b.color_down);
+  set("--maint", b.color_maint); set("--unknown", b.color_unknown);
+  if(b.grad_from && b.grad_to){
+    const mid = b.grad_mid ? b.grad_mid + ", " : "";
+    rs.setProperty("--brand-gradient", `linear-gradient(to right, ${b.grad_from}, ${mid}${b.grad_to})`);
+    document.body.classList.add("has-stripe");
+  } else {
+    document.body.classList.remove("has-stripe");
+  }
+  $("brandLogo").src = b.logo || "/static/boltarr-logo.svg";
+  const name = b.brand_name || "Service Status";
+  $("title").textContent = name;
+  document.title = name;
+  const tl = $("tagline");
+  tl.textContent = b.brand_tagline || "";
+  tl.classList.toggle("hidden", !b.brand_tagline);
+  $("foot").textContent = b.footer_text || "";
+  renderLegend();
+}
+function renderLegend(){
+  $("legend").innerHTML = [["Operational","up"],["Down","down"],["Maintenance","maint"],["Unknown","unknown"]]
+    .map(([label,cls]) => `<span class="legend-item"><span class="legend-dot ${cls}"></span>${label}</span>`).join("");
+}
+
 function renderHealth(d){
   const all = (d.services||[]).concat(d.hosts||[], d.networking||[]);
   const b = $("banner");
@@ -175,6 +205,7 @@ function renderAdmin(d){
   ANN = d.announcements_all || [];
   EV = d.events_all || [];
   TZ = d.timezone || "UTC";
+  BRAND = d.branding || {};
   authbox.innerHTML = '<button id="logoutBtn" class="btn small">Log out</button>';
   $("logoutBtn").addEventListener("click", logout);
 
@@ -209,20 +240,41 @@ function renderAdmin(d){
          <button class="btn small danger" data-edel="${e.id}">Delete</button></div></div>`).join("")
     : '<div class="muted">No maintenance events yet.</div>';
 
-  panel.innerHTML = `
-    <h2>Visibility</h2>${visRows}
-    <div class="admin-actions">
-      <button class="btn small" id="allPublic">Make all Public</button>
-      <button class="btn small" id="allPrivate">Make all Private</button><span class="spacer"></span>
+  const cf = (key, label) =>
+    `<label class="color-fld">${label}<input type="color" data-brand="${key}" value="${BRAND[key] || '#000000'}"></label>`;
+  const brandingBody = `
+    <div class="logo-row">
+      <img id="brandLogoPrev" class="logo-preview" src="${BRAND.logo || '/static/boltarr-logo.svg'}" alt="">
+      <label class="btn small">Upload logo<input id="brandLogoFile" type="file" accept="image/*" class="hidden"></label>
+      <button class="btn small" id="brandLogoDefault">Use default</button>
     </div>
-    <h2 class="mt">Announcements</h2>
-    <div class="ann-admin-actions"><button class="btn small" id="annNew">+ New announcement</button></div>
-    <div class="ann-list">${annRows}</div>
-    <h2 class="mt">Maintenance schedule</h2>
-    <div class="tz-row">Times in <strong>${esc(TZ)}</strong>
-      <button class="btn small" id="tzEdit">Change zone</button></div>
-    <div class="ann-admin-actions"><button class="btn small" id="evNew">+ New event</button></div>
-    <div class="ann-list">${evRows}</div>`;
+    <label class="fld">Brand name<input id="brandName" type="text" maxlength="60" value="${esc(BRAND.brand_name)}"></label>
+    <label class="fld">Tagline<input id="brandTagline" type="text" maxlength="120" value="${esc(BRAND.brand_tagline)}"></label>
+    <label class="fld">Footer text<input id="brandFooter" type="text" maxlength="120" value="${esc(BRAND.footer_text)}"></label>
+    <div class="color-grid">${cf('color_accent','Accent')}${cf('color_bg','Background')}${cf('color_surface','Surface')}${cf('color_op','Operational')}${cf('color_down','Down')}${cf('color_maint','Maintenance')}${cf('color_unknown','Unknown')}</div>
+    <label class="chk"><input type="checkbox" id="brandGradOn" ${(BRAND.grad_from && BRAND.grad_to) ? 'checked' : ''}> Gradient stripe on cards</label>
+    <div class="color-grid">${cf('grad_from','Gradient start')}${cf('grad_mid','Gradient mid')}${cf('grad_to','Gradient end')}</div>
+    <div class="admin-actions"><button class="btn primary small" id="brandSave">Save branding</button><span class="spacer"></span></div>`;
+
+  panel.innerHTML = `
+    <details class="acc" open><summary>Visibility</summary><div class="acc-body">
+      ${visRows}
+      <div class="admin-actions">
+        <button class="btn small" id="allPublic">Make all Public</button>
+        <button class="btn small" id="allPrivate">Make all Private</button><span class="spacer"></span>
+      </div>
+    </div></details>
+    <details class="acc"><summary>Branding</summary><div class="acc-body">${brandingBody}</div></details>
+    <details class="acc"><summary>Announcements</summary><div class="acc-body">
+      <div class="ann-admin-actions"><button class="btn small" id="annNew">+ New announcement</button></div>
+      <div class="ann-list">${annRows}</div>
+    </div></details>
+    <details class="acc"><summary>Maintenance schedule</summary><div class="acc-body">
+      <div class="tz-row">Times in <strong>${esc(TZ)}</strong>
+        <button class="btn small" id="tzEdit">Change zone</button></div>
+      <div class="ann-admin-actions"><button class="btn small" id="evNew">+ New event</button></div>
+      <div class="ann-list">${evRows}</div>
+    </div></details>`;
   panel.classList.remove("hidden");
 
   panel.querySelectorAll(".seg button").forEach(btn => btn.addEventListener("click", () =>
@@ -232,6 +284,9 @@ function renderAdmin(d){
   $("annNew").addEventListener("click", () => openAnnModal(null));
   $("evNew").addEventListener("click", () => openEventModal(null));
   $("tzEdit").addEventListener("click", changeTimezone);
+  $("brandSave").addEventListener("click", saveBranding);
+  $("brandLogoDefault").addEventListener("click", () => { BRAND.logo = ""; $("brandLogoPrev").src = "/static/boltarr-logo.svg"; });
+  $("brandLogoFile").addEventListener("change", onLogoFile);
   panel.querySelectorAll("[data-aedit]").forEach(b => b.addEventListener("click", () => openAnnModal(+b.getAttribute("data-aedit"))));
   panel.querySelectorAll("[data-atoggle]").forEach(b => b.addEventListener("click", () => toggleAnn(+b.getAttribute("data-atoggle"))));
   panel.querySelectorAll("[data-adel]").forEach(b => b.addEventListener("click", () => deleteAnn(+b.getAttribute("data-adel"))));
@@ -253,6 +308,29 @@ async function changeTimezone(){
       headers:{ "Content-Type":"application/json", "X-CSRF": CSRF }, body: JSON.stringify({ timezone: name.trim() }) });
     if(r.ok) await load(); else alert("That timezone wasn't recognised.");
   }catch(e){}
+}
+
+function onLogoFile(e){
+  const f = e.target.files[0];
+  if(!f) return;
+  if(f.size > 512 * 1024){ alert("Logo too large (max 512 KB)."); return; }
+  const reader = new FileReader();
+  reader.onload = () => { BRAND.logo = reader.result; $("brandLogoPrev").src = reader.result; };
+  reader.readAsDataURL(f);
+}
+
+async function saveBranding(){
+  const payload = { logo: BRAND.logo || "" };
+  document.querySelectorAll("#adminPanel [data-brand]").forEach(inp => payload[inp.getAttribute("data-brand")] = inp.value);
+  payload.brand_name = $("brandName").value;
+  payload.brand_tagline = $("brandTagline").value;
+  payload.footer_text = $("brandFooter").value;
+  if(!$("brandGradOn").checked){ payload.grad_from = ""; payload.grad_mid = ""; payload.grad_to = ""; }
+  try{
+    const r = await fetch("/api/branding", { method:"POST",
+      headers:{ "Content-Type":"application/json", "X-CSRF": CSRF }, body: JSON.stringify(payload) });
+    if(r.ok) await load(); else alert("Save failed.");
+  }catch(e){ alert("Network error."); }
 }
 
 // ── announcements CRUD (Phase 2) ─────────────────────────────────────────────
@@ -371,8 +449,7 @@ async function load(){
   let d;
   try{ d = await (await fetch("/data", {cache:"no-store"})).json(); }
   catch(e){ return; }
-  $("title").textContent = d.title || "Service Status";
-  document.title = d.title || "Service Status";
+  applyBranding(d.branding);
   $("updated").textContent = "Updated " + ago(d.updated_at);
   renderAdmin(d);
   renderAnnouncements(d);

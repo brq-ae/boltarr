@@ -6,20 +6,25 @@
 </head><body>
 <div class="wrap">
   <div class="topbar">
-    <div>
-      <h1 id="title">Service Status</h1>
-      <div class="updated" id="updated"></div>
+    <div class="brand">
+      <img id="brandLogo" class="brand-logo" src="/static/boltarr-logo.svg" alt="">
+      <div>
+        <h1 id="title">Service Status</h1>
+        <div class="tagline" id="tagline"></div>
+        <div class="updated" id="updated"></div>
+      </div>
     </div>
     <div id="authbox"><button id="loginBtn" class="btn">Login</button></div>
   </div>
 
+  <div id="legend" class="legend"></div>
   <div id="adminPanel" class="admin hidden"></div>
   <div id="announce"></div>
   <div id="banner" class="hidden"></div>
   <div id="list"></div>
   <div id="maintenance"></div>
 
-  <div class="foot">Powered by Boltarr</div>
+  <div class="foot" id="foot">Powered by Boltarr</div>
 </div>
 
 <div id="loginModal" class="modal hidden">

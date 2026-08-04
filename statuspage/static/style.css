@@ -1,5 +1,6 @@
-:root{--bg:#0d1117;--card:#161b22;--border:#232a33;--text:#e6edf3;--muted:#8b949e;
-  --up:#3fb950;--down:#f85149;--unknown:#484f58;--accent:#d9a413}
+:root{--bg:#0a0c11;--card:#14161f;--border:#232833;--text:#e6edf3;--muted:#8b949e;
+  --up:#3fb950;--down:#f85149;--maint:#f59e0b;--unknown:#7d8590;--accent:#eab308;
+  --brand-gradient:transparent}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,Segoe UI,Roboto,sans-serif}
@@ -14,7 +15,8 @@ h1{font-size:22px;margin:0 0 4px}
 .btn{background:var(--card);border:1px solid var(--border);color:var(--text);
   border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer}
 .btn:hover{border-color:var(--muted)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a1205}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a1205;
+  box-shadow:0 10px 30px -12px var(--accent)}
 .btn.small{padding:5px 10px;font-size:12px}
 
 /* banners */
@@ -43,9 +45,42 @@ h1{font-size:22px;margin:0 0 4px}
 .empty{color:var(--muted);text-align:center;padding:40px}
 .foot{text-align:center;color:var(--muted);font-size:11px;margin-top:24px}
 
+/* ── Branding: header, legend, signature cues ── */
+.brand{display:flex;align-items:flex-start;gap:14px}
+.brand-logo{width:40px;height:40px;flex-shrink:0;object-fit:contain}
+.tagline{font-size:13px;color:var(--muted);margin:0 0 2px}
+.legend{display:flex;flex-wrap:wrap;gap:16px;margin:-4px 0 22px;font-size:12px;color:var(--muted)}
+.legend-item{display:flex;align-items:center;gap:6px}
+.legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.legend-dot.up{background:var(--up)}.legend-dot.down{background:var(--down)}
+.legend-dot.maint{background:var(--maint)}.legend-dot.unknown{background:var(--unknown)}
+/* signature gradient stripe atop each card (only when a brand gradient is set) */
+.svc,.agenda-item{position:relative}
+body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--brand-gradient);border-radius:10px 10px 0 0}
+
+/* ── Admin accordion ── */
+.acc{border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--card);overflow:hidden}
+.acc>summary{list-style:none;cursor:pointer;padding:12px 14px;font-size:13px;font-weight:700;
+  display:flex;align-items:center;justify-content:space-between}
+.acc>summary::-webkit-details-marker{display:none}
+.acc>summary::after{content:"+";color:var(--muted);font-weight:700;font-size:15px}
+.acc[open]>summary::after{content:"\2212"}
+.acc-body{padding:2px 14px 14px}
+.acc h2{margin-top:14px}
+
+/* ── Branding form ── */
+.color-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;margin:4px 0 12px}
+.color-fld{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--text)}
+.color-fld input[type=color]{width:38px;height:24px;border:1px solid var(--border);border-radius:6px;
+  background:none;padding:0;cursor:pointer}
+.logo-preview{height:38px;max-width:170px;object-fit:contain;background:var(--bg);
+  border:1px solid var(--border);border-radius:8px;padding:4px;vertical-align:middle}
+.logo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+
 /* admin panel */
-.admin{background:var(--card);border:1px solid var(--border);border-radius:10px;
-  padding:16px;margin-bottom:20px}
+.admin{margin-bottom:20px}
 .admin h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px}
 .vis-row{display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:8px 0;border-top:1px solid var(--border)}

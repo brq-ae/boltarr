@@ -118,6 +118,29 @@ def set_visibility(vis: dict) -> None:
             set_setting(f"vis_{s}", vis[s])
 
 
+# ── Branding (all admin-configurable; generic defaults, never brand-specific) ──
+# Keys map to CSS vars / header text on the page. A blank logo falls back to the
+# bundled Boltarr logo; a blank name falls back to "Service Status".
+BRANDING_KEYS = {
+    "brand_name": "", "brand_tagline": "", "footer_text": "Powered by Boltarr",
+    "logo": "",
+    "color_accent": "#eab308", "color_bg": "#0a0c11", "color_surface": "#14161f",
+    "color_op": "#3fb950", "color_down": "#f85149",
+    "color_maint": "#f59e0b", "color_unknown": "#7d8590",
+    "grad_from": "", "grad_mid": "", "grad_to": "",
+}
+
+
+def get_branding() -> dict:
+    return {k: (get_setting(k) or default) for k, default in BRANDING_KEYS.items()}
+
+
+def set_branding(data: dict) -> None:
+    for k in BRANDING_KEYS:
+        if k in data and data[k] is not None:
+            set_setting(k, str(data[k]))
+
+
 # ── Announcements (banner) ─────────────────────────────────────────────────────
 SEVERITIES = ("info", "maintenance", "critical")
 _SEV_ORDER = {"critical": 0, "maintenance": 1, "info": 2}
@@ -547,6 +570,7 @@ def data(request: Request):
         "title": STATE.get("title", "Service Status"),
         "announcements": _merge_banners(active_announcements(), _event_banners(tzinfo)),
         "maintenance": maintenance_view(tzinfo, tzname),
+        "branding": get_branding(),
         "admin": admin,
     }
     # A private section is simply absent from an anonymous response.
@@ -595,6 +619,13 @@ def logout():
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(COOKIE_NAME, path="/")
     return resp
+
+
+@app.post("/api/branding")
+async def update_branding(request: Request, x_csrf: str = Header(default="")):
+    _guard(request, x_csrf)
+    set_branding(await _json(request))
+    return {"ok": True, "branding": get_branding()}
 
 
 @app.post("/api/visibility")
