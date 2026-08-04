@@ -460,13 +460,15 @@ async function saveEvent(){
 }
 
 // ── load loop ────────────────────────────────────────────────────────────────
-async function load(){
+async function load(skipAdmin){
   let d;
   try{ d = await (await fetch("/data", {cache:"no-store"})).json(); }
   catch(e){ return; }
   applyBranding(d.branding);
   $("updated").textContent = "Updated " + ago(d.updated_at);
-  renderAdmin(d);
+  // The auto-refresh timer passes skipAdmin=true so an incoming push doesn't
+  // rebuild the admin forms and wipe whatever the admin is editing.
+  if(!skipAdmin) renderAdmin(d);
   renderAnnouncements(d);
   renderHealth(d);
   renderList(d);
@@ -503,5 +505,5 @@ document.addEventListener("DOMContentLoaded", () => {
   $("evSave").addEventListener("click", saveEvent);
   $("evRec").addEventListener("change", () => showRecFields($("evRec").value));
   load();
-  setInterval(load, 30000);
+  setInterval(() => load(true), 30000);
 });
