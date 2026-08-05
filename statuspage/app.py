@@ -707,6 +707,12 @@ def data(request: Request):
     # never shows to the public).
     out["incidents"] = [i for i in STATE.get("incidents", [])
                         if admin or vis.get(i.get("section", "services"), "public") == "public"]
+    # "Clear past incidents" sets a cutoff — hide resolved incidents that ended
+    # before it; ongoing ones and anything newer stay.
+    since = _parse_ts(get_setting("incidents_since"))
+    if since:
+        out["incidents"] = [i for i in out["incidents"]
+                            if i.get("ongoing") or (_parse_ts(i.get("end")) or datetime.now(timezone.utc)) > since]
     # Amber-label anything inside an automated-maintenance window (truthful — the
     # downtime stays counted; only its cause is marked).
     _annotate_maintenance(out, tzinfo)
@@ -767,6 +773,15 @@ async def update_display(request: Request, x_csrf: str = Header(default="")):
     _guard(request, x_csrf)
     set_display(await _json(request))
     return {"ok": True, "display": get_display()}
+
+
+@app.post("/api/incidents/clear")
+async def clear_incidents(request: Request, x_csrf: str = Header(default="")):
+    """Hide every already-resolved incident up to now. Boltarr keeps re-pushing
+    them, so we store a cutoff and filter in /data rather than deleting."""
+    _guard(request, x_csrf)
+    set_setting("incidents_since", datetime.now(timezone.utc).isoformat())
+    return {"ok": True}
 
 
 @app.post("/api/visibility")

@@ -335,6 +335,9 @@ function renderAdmin(d){
       <div class="tz-row">Times in <strong>${esc(TZ)}</strong></div>
       <div class="ann-admin-actions"><button class="btn small" id="autoNew">+ Add window</button></div>
       <div class="ann-list">${autoRows}</div>
+      <div class="acc-sub">Past incidents</div>
+      <p class="muted acc-hint">Hides every resolved incident up to now (an ongoing one stays; new ones still appear). Boltarr keeps its own history — this only clears the page's list.</p>
+      <div class="ann-admin-actions"><button class="btn small danger" id="incClear">Clear past incidents</button></div>
     </div></details>`;
   panel.classList.remove("hidden");
 
@@ -345,6 +348,7 @@ function renderAdmin(d){
   $("annNew").addEventListener("click", () => openAnnModal(null));
   $("evNew").addEventListener("click", () => openEventModal(null, false));
   $("autoNew").addEventListener("click", () => openEventModal(null, true));
+  $("incClear").addEventListener("click", clearIncidents);
   $("tzEdit").addEventListener("click", changeTimezone);
   $("brandSave").addEventListener("click", saveBranding);
   $("dispSave").addEventListener("click", saveDisplay);
@@ -472,6 +476,10 @@ async function toggleEvent(id){ const e = EV.find(x => x.id === id); if(!e) retu
 async function deleteEvent(id){ const e = EV.find(x => x.id === id);
   if(e && !confirm(`Delete event "${e.title}"?`)) return;
   try{ const r = await fetch("/api/events/" + id, { method:"DELETE", headers:{ "X-CSRF": CSRF } });
+    if(r.ok) await load(); }catch(e){} }
+async function clearIncidents(){
+  if(!confirm("Clear all past incidents from the status page?")) return;
+  try{ const r = await fetch("/api/incidents/clear", { method:"POST", headers:{ "X-CSRF": CSRF } });
     if(r.ok) await load(); }catch(e){} }
 
 function showRecFields(rec){

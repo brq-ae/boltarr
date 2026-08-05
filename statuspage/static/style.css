@@ -172,6 +172,7 @@ body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
 .chk input{width:auto}
 .rec-fields{margin-bottom:2px}
 .acc-hint{font-size:11px;line-height:1.5;margin:0 0 8px}
+.acc-sub{margin:14px 0 4px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;font-weight:700}
 .wd-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
 .wd{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text);font-weight:400}
 .wd input{width:auto}
