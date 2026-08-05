@@ -280,12 +280,12 @@ function renderAdmin(d){
     <div class="color-grid">${cf('grad_from','Gradient start')}${cf('grad_mid','Gradient mid')}${cf('grad_to','Gradient end')}</div>
     <div class="admin-actions"><button class="btn primary small" id="brandSave">Save branding</button><span class="spacer"></span></div>`;
 
-  const dopt = (v, cur) => `<option value="${v}"${v === cur ? " selected" : ""}>${v === "24h" ? "24 hours" : v === "7d" ? "7 days" : "30 days"}</option>`;
+  const dopt = (v, cur) => `<option value="${v}"${v === cur ? " selected" : ""}>${v === "1h" ? "1 hour" : v === "24h" ? "24 hours" : v === "7d" ? "7 days" : "30 days"}</option>`;
   const displayBody = `
     <label class="fld">Uptime % (shown next to the name)
-      <select id="dispUptime">${["24h","7d","30d"].map(v => dopt(v, DISP.uptime_window || "24h")).join("")}</select></label>
+      <select id="dispUptime">${["1h","24h","7d","30d"].map(v => dopt(v, DISP.uptime_window || "24h")).join("")}</select></label>
     <label class="fld">History bar period
-      <select id="dispBar">${["24h","7d","30d"].map(v => dopt(v, DISP.bar_period || "24h")).join("")}</select></label>
+      <select id="dispBar">${["1h","24h","7d","30d"].map(v => dopt(v, DISP.bar_period || "24h")).join("")}</select></label>
     <div class="admin-actions"><button class="btn primary small" id="dispSave">Save display</button><span class="spacer"></span></div>`;
 
   panel.innerHTML = `

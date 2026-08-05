@@ -22,10 +22,10 @@ from datetime import datetime, timezone, time as time_of_day
 import httpx
 
 from .database import get_conn
-from .config import get_monitoring_config, get_statuspage_config, local_now
+from .config import get_monitoring_config, get_statuspage_config, get_check_seconds, local_now
 from . import notify
 
-CHECK_INTERVAL = 60          # seconds between sweeps
+CHECK_INTERVAL = 60          # default probe interval; live value = get_check_seconds()
 HTTP_TIMEOUT   = 6           # seconds per HTTP probe
 TCP_TIMEOUT    = 5           # seconds per TCP probe
 
@@ -527,14 +527,22 @@ def _bucketed_for(table, key_col, key, period_secs, count, now, label_fn):
     return _bucket_history(evs, anchor["status"] if anchor else None, period_secs, count, now, label_fn)
 
 
+def _min_label(ts): return datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d %H:%M")
 def _hr_label(ts):  return datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d %H:%M")
 def _day_label(ts): return datetime.fromtimestamp(ts, timezone.utc).strftime("%b %d")
 
 
+def _hour_ticks() -> int:
+    """Number of slices in the 1-hour bar: one per real probe (adaptive to the
+    configured probe interval). At the default 60s that's 60 per-minute ticks."""
+    return max(1, round(3600 / get_check_seconds()))
+
+
 def tick_windows(table, key_col, key, now=None):
-    """Tick bars for 24h (hourly), 7d (daily), 30d (daily)."""
+    """Tick bars for 1h (one tick per probe), 24h (hourly), 7d + 30d (daily)."""
     now = now or _now_dt()
     return {
+        "1h":  _bucketed_for(table, key_col, key, 3600, _hour_ticks(), now, _min_label),
         "24h": _bucketed_for(table, key_col, key, 86400, 24, now, _hr_label),
         "7d":  _bucketed_for(table, key_col, key, 7 * 86400, 7, now, _day_label),
         "30d": _bucketed_for(table, key_col, key, 30 * 86400, 30, now, _day_label),
@@ -542,10 +550,10 @@ def tick_windows(table, key_col, key, now=None):
 
 
 def uptime_windows(fn, key, now=None):
-    """{24h,7d,30d} uptime % using the given uptime function (service or host)."""
+    """{1h,24h,7d,30d} uptime % using the given uptime function (service or host)."""
     now = now or _now_dt()
     out = {}
-    for k, w in (("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)):
+    for k, w in (("1h", 3600), ("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)):
         u = fn(key, w, now)
         out[k] = u["pct"] if u else None
     return out
@@ -561,7 +569,9 @@ def build_status_payload() -> dict:
         """).fetchall()]
     services = []
     incidents = []
-    WINDOW = 90 * 86400
+    # Match the real event-retention window — older events are pruned, so an
+    # incident list reaching further back would only ever show partial history.
+    WINDOW = RETENTION_DAYS * 86400
     for r in rows:
         name = (r.get("public_name") or "").strip() or r["name"]
         services.append({
@@ -628,10 +638,20 @@ def push_status() -> tuple[bool, str]:
 def _loop() -> None:
     _stop.wait(3)
     last_prune = 0.0
+    last_sweep = 0.0
     while not _stop.is_set():
         try:
-            _sweep()
-            # heartbeat push to the public status page (tiny, LAN-only)
+            check = get_check_seconds()
+            now_ts = _now_dt().timestamp()
+            # Probe services only when the configured interval has elapsed. This
+            # is the detection cadence — slower interval = slower to notice a
+            # change, but cheaper.
+            if now_ts - last_sweep >= check:
+                _sweep()
+                last_sweep = now_ts
+            # Heartbeat push to the public status page (tiny, LAN-only). Runs
+            # every cycle — decoupled from probing so the bars/percentages stay
+            # fresh even when the probe interval is long.
             try:
                 push_status()
             except Exception:
@@ -653,7 +673,9 @@ def _loop() -> None:
                 last_prune = _now_dt().timestamp()
         except Exception:
             pass
-        _stop.wait(CHECK_INTERVAL)
+        # Tick cadence: the heartbeat runs at least once a minute (or faster if
+        # the probe interval is shorter) so the page never goes stale.
+        _stop.wait(min(get_check_seconds(), 60))
 
 
 def start_monitor() -> None:

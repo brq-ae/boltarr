@@ -1501,6 +1501,7 @@ class NotificationSettingsIn(BaseModel):
     server:               Optional[str]  = None
     topic:                Optional[str]  = None
     token:                Optional[str]  = None
+    check_seconds:        Optional[int]  = None
     alert_after_minutes:  Optional[int]  = None
     quiet_enabled:        Optional[bool] = None
     quiet_start:          Optional[str]  = None
@@ -1525,6 +1526,7 @@ def get_settings():
     ntfy = dict(cfg["notifications"])
     ntfy["token"] = _MASKED if ntfy.get("token") else ""
     mon = cfg["monitoring"]
+    ntfy["check_seconds"] = mon.get("check_seconds", 60)
     ntfy["alert_after_minutes"] = mon.get("alert_after_minutes", 5)
     ntfy["quiet_enabled"] = mon.get("quiet_enabled", False)
     ntfy["quiet_start"]   = mon.get("quiet_start", "")
@@ -1677,6 +1679,8 @@ def update_notification_settings(data: NotificationSettingsIn):
         ntfy["token"] = data.token.strip()
     cfg["notifications"] = ntfy
     mon = cfg.setdefault("monitoring", {})
+    if data.check_seconds is not None:
+        mon["check_seconds"] = max(15, min(600, int(data.check_seconds)))
     if data.alert_after_minutes is not None:
         mon["alert_after_minutes"] = max(0, int(data.alert_after_minutes))
     if data.quiet_enabled is not None:
@@ -1690,6 +1694,7 @@ def update_notification_settings(data: NotificationSettingsIn):
     save_config(cfg)
     result = dict(ntfy)
     result["token"] = _MASKED if ntfy.get("token") else ""
+    result["check_seconds"] = mon.get("check_seconds", 60)
     result["alert_after_minutes"] = mon.get("alert_after_minutes", 5)
     result["quiet_enabled"] = mon.get("quiet_enabled", False)
     result["quiet_start"]   = mon.get("quiet_start", "")

@@ -35,6 +35,9 @@ _DEFAULTS: dict = {
     },
     # Service-monitor behaviour.
     "monitoring": {
+        # How often each monitored service is probed, in seconds. Also drives the
+        # per-minute "1 hour" tick bar on the status page. Clamped 15–600.
+        "check_seconds": 60,
         # Minutes a service must be continuously down before a down-alert fires.
         "alert_after_minutes": 5,
         # Global quiet window (do-not-disturb): alerts are muted during it, in
@@ -181,6 +184,19 @@ def get_llm_config() -> dict:
 
 def get_monitoring_config() -> dict:
     return get_config()["monitoring"]
+
+
+def get_check_seconds() -> int:
+    """Service-probe interval in seconds. Precedence: env MONITOR_CHECK_SECONDS >
+    monitoring.check_seconds config > 60. Always clamped to 15–600."""
+    raw = os.environ.get("MONITOR_CHECK_SECONDS")
+    if raw is None:
+        raw = get_monitoring_config().get("check_seconds", 60)
+    try:
+        v = int(raw)
+    except (TypeError, ValueError):
+        v = 60
+    return max(15, min(600, v))
 
 
 def get_statuspage_config() -> dict:

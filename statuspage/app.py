@@ -143,7 +143,7 @@ def set_branding(data: dict) -> None:
 
 # ── Display (which uptime windows the cards show) ──────────────────────────────
 DISPLAY_DEFAULTS = {"uptime_window": "24h", "bar_period": "24h"}
-_WINDOWS = ("24h", "7d", "30d")
+_WINDOWS = ("1h", "24h", "7d", "30d")
 
 
 def get_display() -> dict:

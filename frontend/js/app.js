@@ -3525,6 +3525,7 @@ async function openSettings() {
     document.getElementById("setNtfyServer").value    = n.server || "";
     document.getElementById("setNtfyTopic").value     = n.topic  || "";
     document.getElementById("setNtfyToken").value     = n.token  || "";
+    document.getElementById("setCheckSeconds").value  = n.check_seconds ?? 60;
     document.getElementById("setAlertAfter").value    = n.alert_after_minutes ?? 5;
     document.getElementById("setQuietEnabled").checked = !!n.quiet_enabled;
     document.getElementById("setSuppressHostDown").checked = n.suppress_when_host_down !== false;
@@ -3614,6 +3615,7 @@ async function saveSettings() {
     server:  document.getElementById("setNtfyServer").value.trim(),
     topic:   document.getElementById("setNtfyTopic").value.trim(),
     token:   document.getElementById("setNtfyToken").value,
+    check_seconds: Math.max(15, Math.min(600, parseInt(document.getElementById("setCheckSeconds").value) || 60)),
     alert_after_minutes: parseInt(document.getElementById("setAlertAfter").value) || 0,
     quiet_enabled: document.getElementById("setQuietEnabled").checked,
     quiet_start:   document.getElementById("setQuietStart").value,

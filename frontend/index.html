@@ -1158,6 +1158,14 @@
         <input id="setNtfyToken" type="password" placeholder="(optional — only if your ntfy needs a login)">
       </div>
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Probe each service every</label>
+        <input id="setCheckSeconds" type="number" min="15" max="600" style="width:64px" value="60">
+        <span style="font-size:11px;color:var(--text-3)">seconds (15–600)</span>
+      </div>
+      <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
+        How often monitored services are checked, and the width of one “1 hour” tick on the status page. Longer = lighter load but slower to notice an outage — detection is accurate to about ±this interval, and a blip shorter than it can be missed. The down-alert grace above can’t fire faster than one probe.
+      </p>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Alert after service down for</label>
         <input id="setAlertAfter" type="number" min="0" style="width:64px" value="5">
         <span style="font-size:11px;color:var(--text-3)">minutes (0 = alert immediately)</span>
