@@ -31,6 +31,7 @@ h1{font-size:22px;margin:0 0 4px}
 .dot.up{background:var(--up);box-shadow:0 0 6px var(--up)}
 .dot.down{background:var(--down);box-shadow:0 0 6px var(--down)}
 .dot.unknown{background:var(--unknown)}
+.dot.maint{background:var(--maint);box-shadow:0 0 6px var(--maint)}
 .svc-name{font-weight:600;flex:1}
 .uptime{font-size:13px;color:var(--muted)}
 .ticks{display:flex;gap:2px;align-items:flex-end;height:26px}
@@ -62,6 +63,9 @@ h1{font-size:22px;margin:0 0 4px}
 .inc-name{font-weight:600;flex:1;min-width:0}
 .inc-meta{font-size:12px;color:var(--muted);white-space:nowrap}
 .inc-item.ongoing .inc-meta{color:var(--down);font-weight:600}
+.inc-item.maint .inc-dot{background:var(--maint)}
+.inc-item.maint.ongoing .inc-meta{color:var(--maint)}
+.inc-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--maint);border:1px solid var(--maint);border-radius:10px;padding:1px 7px;white-space:nowrap}
 
 /* ── Branding: header, legend, signature cues ── */
 .brand{display:flex;align-items:flex-start;gap:14px}
@@ -167,6 +171,7 @@ body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
 .chk{display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:14px}
 .chk input{width:auto}
 .rec-fields{margin-bottom:2px}
+.acc-hint{font-size:11px;line-height:1.5;margin:0 0 8px}
 .wd-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
 .wd{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text);font-weight:400}
 .wd input{width:auto}

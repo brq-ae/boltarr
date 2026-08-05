@@ -89,9 +89,17 @@ def init_db() -> None:
             nth         INTEGER,
             nth_weekday INTEGER,
             until_date  TEXT,
+            affects     TEXT    NOT NULL DEFAULT '',
+            on_calendar INTEGER NOT NULL DEFAULT 1,
             enabled     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
         )""")
+        # Migrate older DBs that predate automated-maintenance windows.
+        ecols = {r[1] for r in c.execute("PRAGMA table_info(events)")}
+        if "affects" not in ecols:
+            c.execute("ALTER TABLE events ADD COLUMN affects TEXT NOT NULL DEFAULT ''")
+        if "on_calendar" not in ecols:
+            c.execute("ALTER TABLE events ADD COLUMN on_calendar INTEGER NOT NULL DEFAULT 1")
         c.commit()
 
 
@@ -254,6 +262,12 @@ def _all_events():
         return [dict(r) for r in c.execute("SELECT * FROM events ORDER BY id")]
 
 
+def _calendar_events():
+    """Events that belong on the public calendar (announced maintenance). Automated
+    windows (on_calendar=0) drive the amber relabel only and never show publicly."""
+    return [ev for ev in _all_events() if ev.get("on_calendar", 1)]
+
+
 def _fires_on(ev: dict, d: date) -> bool:
     """Does this event's rule fire on calendar date d (in the configured zone)?"""
     if ev["until_date"]:
@@ -345,7 +359,7 @@ def _next_str(ev: dict, tzinfo):
 def _active_events(tzinfo):
     now = datetime.now(timezone.utc)
     active = []
-    for ev in _all_events():
+    for ev in _calendar_events():
         if not ev["enabled"]:
             continue
         for su, eu in _occurrences(ev, now - timedelta(days=2), now + timedelta(minutes=1), tzinfo):
@@ -361,7 +375,7 @@ def maintenance_view(tzinfo, tzname) -> dict:
                "ends": eu.astimezone(tzinfo).strftime("%H:%M")}
               for ev, eu in _active_events(tzinfo)]
     upcoming = []
-    for ev in _all_events():
+    for ev in _calendar_events():
         if not ev["enabled"]:
             continue
         for su, eu in _occurrences(ev, now, now + timedelta(days=90), tzinfo):
@@ -388,10 +402,23 @@ def _merge_banners(*groups):
     return items
 
 
+_KEY_RE = __import__("re").compile(r"^(svc|host)-\d+$")
+
+
 def _clean_event(b: dict):
+    # Automated-maintenance windows target one or more item keys (svc-3, host-5)
+    # and stay off the public calendar; they relabel matching dips amber instead.
+    raw = b.get("affects") or []
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    affects = ",".join(k for k in (str(x).strip() for x in raw) if _KEY_RE.match(k))
+    on_calendar = 0 if (b.get("on_calendar") is False or affects) else 1
     title = (b.get("title") or "").strip()
     if not title:
-        raise HTTPException(status_code=400, detail="title required")
+        if affects:
+            title = "Automated maintenance"      # never shown publicly
+        else:
+            raise HTTPException(status_code=400, detail="title required")
     severity = b.get("severity") if b.get("severity") in SEVERITIES else "maintenance"
     rec = b.get("recurrence") if b.get("recurrence") in RECURRENCES else "once"
     st = (b.get("start_time") or "00:00").strip()
@@ -424,7 +451,8 @@ def _clean_event(b: dict):
                 raise HTTPException(status_code=400, detail="invalid date")
     enabled = 1 if b.get("enabled", True) else 0
     return (title, (b.get("body") or "").strip(), severity, rec, st, en,
-            once_date, weekdays, month_days, nth, nth_wd, until_date, enabled)
+            once_date, weekdays, month_days, nth, nth_wd, until_date,
+            affects, on_calendar, enabled)
 
 
 # ── Sessions: stateless HMAC-signed cookie (stdlib only) ───────────────────────
@@ -570,9 +598,92 @@ async def push(request: Request, authorization: str = Header(default="")):
         STATE = json.loads(body)
     except Exception:
         raise HTTPException(status_code=400, detail="invalid json")
+    # Anchor for reconstructing each tick slot's clock time (bars are built by
+    # Boltarr ending "now" ≈ this receive time). Kept server-side only.
+    STATE["_pushed_at"] = datetime.now(timezone.utc).isoformat()
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps(STATE))
     return {"ok": True}
+
+
+_TICK_SECS = {"1h": 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}
+
+
+def _relabel_windows():
+    """Enabled automated-maintenance windows: events that target specific items."""
+    return [ev for ev in _all_events() if ev["enabled"] and (ev.get("affects") or "").strip()]
+
+
+def _overlaps_window(evs, lo, hi, tzinfo):
+    """True if [lo, hi] touches any occurrence of any window in evs. A zero-width
+    range (lo == hi) is an instant check (window covers that moment)."""
+    for ev in evs:
+        for su, eu in _occurrences(ev, lo - timedelta(days=1), hi + timedelta(days=1), tzinfo):
+            if lo == hi:
+                if su <= lo < eu:
+                    return True
+            elif eu > lo and su < hi:
+                return True
+    return False
+
+
+def _annotate_maintenance(out: dict, tzinfo) -> None:
+    """Mark items/ticks/incidents that fall inside an automated-maintenance window
+    so the page can paint them amber. Never hides or recounts anything — the dip
+    stays true, only its reason is labelled."""
+    wins = _relabel_windows()
+    if not wins:
+        return
+    # These lists are shared references into STATE — copy before tagging so the
+    # amber flags never persist past the live window into the stored payload.
+    import copy
+    for sect in SECTIONS:
+        if out.get(sect):
+            out[sect] = copy.deepcopy(out[sect])
+    if out.get("incidents"):
+        out["incidents"] = copy.deepcopy(out["incidents"])
+    by_key: dict[str, list] = {}
+    for ev in wins:
+        for k in (ev["affects"] or "").split(","):
+            k = k.strip()
+            if k:
+                by_key.setdefault(k, []).append(ev)
+    now = datetime.now(timezone.utc)
+    anchor = _parse_ts(STATE.get("_pushed_at")) or now
+    key_of = {}   # (name, section) -> key, to match incidents (which carry no key)
+    for sect in SECTIONS:
+        for it in out.get(sect, []):
+            key_of[(it.get("name"), sect)] = it.get("key")
+            evs = by_key.get(it.get("key"))
+            if not evs:
+                continue
+            if it.get("status") == "down" and _overlaps_window(evs, now, now, tzinfo):
+                it["maintenance"] = True
+            for wk, arr in (it.get("ticks") or {}).items():
+                secs = _TICK_SECS.get(wk)
+                if not secs or not arr:
+                    continue
+                slot = secs / len(arr)
+                for i, d in enumerate(arr):
+                    if not isinstance(d, dict):
+                        continue
+                    s0 = anchor - timedelta(seconds=secs - i * slot)
+                    if _overlaps_window(evs, s0, s0 + timedelta(seconds=slot), tzinfo):
+                        d["maint"] = True
+    for inc in out.get("incidents", []):
+        evs = by_key.get(key_of.get((inc.get("name"), inc.get("section", "services"))))
+        st = _parse_ts(inc.get("start"))
+        if evs and st and _overlaps_window(evs, st, st, tzinfo):
+            inc["maintenance"] = True
+
+
+def _parse_ts(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 @app.get("/data")
@@ -596,6 +707,9 @@ def data(request: Request):
     # never shows to the public).
     out["incidents"] = [i for i in STATE.get("incidents", [])
                         if admin or vis.get(i.get("section", "services"), "public") == "public"]
+    # Amber-label anything inside an automated-maintenance window (truthful — the
+    # downtime stays counted; only its cause is marked).
+    _annotate_maintenance(out, tzinfo)
     if admin:
         out["visibility"] = vis
         out["private_sections"] = [s for s in SECTIONS if vis[s] == "private"]
@@ -709,7 +823,8 @@ def delete_announcement(ann_id: int, request: Request, x_csrf: str = Header(defa
 
 
 _EVENT_COLS = ("title", "body", "severity", "recurrence", "start_time", "end_time",
-               "once_date", "weekdays", "month_days", "nth", "nth_weekday", "until_date", "enabled")
+               "once_date", "weekdays", "month_days", "nth", "nth_weekday", "until_date",
+               "affects", "on_calendar", "enabled")
 
 
 @app.get("/api/events")
@@ -780,7 +895,7 @@ def api_calendar(request: Request):
     start_utc = datetime(y, m, 1, tzinfo=tzinfo).astimezone(timezone.utc)
     end_utc = datetime(y, m, last, 23, 59, tzinfo=tzinfo).astimezone(timezone.utc)
     days: dict[str, list] = {}
-    for ev in _all_events():
+    for ev in _calendar_events():
         if not ev["enabled"]:
             continue
         for su, eu in _occurrences(ev, start_utc, end_utc, tzinfo):

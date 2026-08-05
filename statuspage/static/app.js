@@ -15,6 +15,8 @@ let MVIEW = "month";       // 'agenda' | 'month' — calendar shown by default
 let MMONTH = null;         // {y, m} for the month grid
 let BRAND = {};            // current branding settings
 let DISP = {};             // display settings (uptime_window, bar_period)
+let ITEMS = [];            // current items [{key,name}] for maintenance targeting
+let EV_AUTO = false;       // event modal is in automated-maintenance mode
 
 const SEV = { info: "Info", maintenance: "Maintenance", critical: "Critical" };
 const WD = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];  // Mon=0 (matches backend)
@@ -63,11 +65,18 @@ function card(x){
   }
   const barArr = (x.ticks && x.ticks[bw]) ? x.ticks[bw] : (Array.isArray(x.history) ? x.history : []);
   const bars = `<div class="days">${barArr.map(d => {
-    const pct = (d && typeof d === "object") ? d.pct : null;
-    const t = (d && typeof d === "object") ? `${esc(d.date)}: ${d.pct == null ? "no data" : Number(d.pct).toFixed(1) + "%"}` : "";
-    return `<div class="day ${dayClass(pct)}" title="${t}"></div>`;
+    const obj = d && typeof d === "object";
+    const pct = obj ? d.pct : null;
+    const base = dayClass(pct);
+    // Amber only replaces an actual dip inside the window — an up/no-data slot
+    // stays as-is (maintenance didn't cause a problem that slot).
+    const maint = obj && d.maint && base === "down";
+    const cl = maint ? "maint" : base;
+    const t = obj ? `${esc(d.date)}: ${d.pct == null ? "no data" : Number(d.pct).toFixed(1) + "%"}${maint ? " · maintenance" : ""}` : "";
+    return `<div class="day ${cl}" title="${t}"></div>`;
   }).join("")}</div>`;
-  return `<div class="svc"><div class="svc-head"><span class="dot ${cls(x.status)}"></span>
+  const dot = x.maintenance ? "maint" : cls(x.status);
+  return `<div class="svc"><div class="svc-head"><span class="dot ${dot}"></span>
     <span class="svc-name">${esc(x.name)}</span>
     <span class="uptime">${pcts}</span></div>
     ${bars}</div>`;
@@ -226,6 +235,7 @@ function renderAdmin(d){
   CSRF = d.csrf || "";
   ANN = d.announcements_all || [];
   EV = d.events_all || [];
+  ITEMS = ["services","hosts","networking"].flatMap(s => (d[s] || []).map(x => ({ key:x.key, name:x.name })));
   TZ = d.timezone || "UTC";
   BRAND = d.branding || {};
   authbox.innerHTML = '<button id="logoutBtn" class="btn small">Log out</button>';
@@ -252,15 +262,27 @@ function renderAdmin(d){
          <button class="btn small danger" data-adel="${a.id}">Delete</button></div></div>`).join("")
     : '<div class="muted">No announcements yet.</div>';
 
-  const evRows = EV.length ? EV.map(e =>
+  const evAnnounce = EV.filter(e => e.on_calendar);
+  const evAuto = EV.filter(e => !e.on_calendar);
+  const nameOf = k => (ITEMS.find(i => i.key === k) || {}).name || k;
+  const evActions = e =>
+    `<div class="ann-item-actions">
+       <button class="btn small" data-etoggle="${e.id}">${e.enabled ? "Disable" : "Enable"}</button>
+       <button class="btn small" data-eedit="${e.id}">Edit</button>
+       <button class="btn small danger" data-edel="${e.id}">Delete</button></div>`;
+  const evRows = evAnnounce.length ? evAnnounce.map(e =>
     `<div class="ann-item"><span class="chip ${sevClass(e.severity)}">${sevLabel(e.severity)}</span>
        <div class="ann-meta"><div class="ann-item-title">${esc(e.title)}${e.enabled ? "" : ' <span class="muted">(disabled)</span>'}</div>
          <div class="ann-when">${esc(e.summary)}${e.next ? " · next " + esc(e.next) : ""}</div></div>
-       <div class="ann-item-actions">
-         <button class="btn small" data-etoggle="${e.id}">${e.enabled ? "Disable" : "Enable"}</button>
-         <button class="btn small" data-eedit="${e.id}">Edit</button>
-         <button class="btn small danger" data-edel="${e.id}">Delete</button></div></div>`).join("")
+       ${evActions(e)}</div>`).join("")
     : '<div class="muted">No maintenance events yet.</div>';
+  const autoRows = evAuto.length ? evAuto.map(e => {
+    const covers = (e.affects || "").split(",").filter(Boolean).map(nameOf).join(", ");
+    return `<div class="ann-item"><span class="chip sev-maintenance">Auto</span>
+       <div class="ann-meta"><div class="ann-item-title">${esc(covers || "—")}${e.enabled ? "" : ' <span class="muted">(disabled)</span>'}</div>
+         <div class="ann-when">${esc(e.summary)}</div></div>
+       ${evActions(e)}</div>`; }).join("")
+    : '<div class="muted">No automated windows yet. Add one to relabel a recurring backup dip as maintenance.</div>';
 
   const cf = (key, label) =>
     `<label class="color-fld">${label}<span class="color-pair">` +
@@ -307,6 +329,12 @@ function renderAdmin(d){
         <button class="btn small" id="tzEdit">Change zone</button></div>
       <div class="ann-admin-actions"><button class="btn small" id="evNew">+ New event</button></div>
       <div class="ann-list">${evRows}</div>
+    </div></details>
+    <details class="acc"><summary>Automated maintenance</summary><div class="acc-body">
+      <p class="muted acc-hint">Recurring expected downtime (e.g. a nightly backup). Never shown on the public calendar — while it's happening it just paints the covered services' dip <strong>amber</strong> instead of red. The downtime still counts toward uptime; only its reason is labelled. If it runs past the window, the overrun stays red.</p>
+      <div class="tz-row">Times in <strong>${esc(TZ)}</strong></div>
+      <div class="ann-admin-actions"><button class="btn small" id="autoNew">+ Add window</button></div>
+      <div class="ann-list">${autoRows}</div>
     </div></details>`;
   panel.classList.remove("hidden");
 
@@ -315,7 +343,8 @@ function renderAdmin(d){
   $("allPublic").addEventListener("click", () => setVisibility({ services:"public", hosts:"public", networking:"public" }));
   $("allPrivate").addEventListener("click", () => setVisibility({ services:"private", hosts:"private", networking:"private" }));
   $("annNew").addEventListener("click", () => openAnnModal(null));
-  $("evNew").addEventListener("click", () => openEventModal(null));
+  $("evNew").addEventListener("click", () => openEventModal(null, false));
+  $("autoNew").addEventListener("click", () => openEventModal(null, true));
   $("tzEdit").addEventListener("click", changeTimezone);
   $("brandSave").addEventListener("click", saveBranding);
   $("dispSave").addEventListener("click", saveDisplay);
@@ -435,7 +464,8 @@ async function putEvent(id, p){ return (await fetch("/api/events/" + id, { metho
 function eventPayload(e){
   return { title:e.title, body:e.body, severity:e.severity, recurrence:e.recurrence,
     start_time:e.start_time, end_time:e.end_time, once_date:e.once_date, weekdays:e.weekdays,
-    month_days:e.month_days, nth:e.nth, nth_weekday:e.nth_weekday, until_date:e.until_date, enabled:e.enabled };
+    month_days:e.month_days, nth:e.nth, nth_weekday:e.nth_weekday, until_date:e.until_date,
+    affects:e.affects, on_calendar:e.on_calendar, enabled:e.enabled };
 }
 async function toggleEvent(id){ const e = EV.find(x => x.id === id); if(!e) return;
   if(await putEvent(id, { ...eventPayload(e), enabled: !e.enabled })) await load(); }
@@ -449,10 +479,18 @@ function showRecFields(rec){
   ["recOnce","recWeekly","recMonthDate","recMonthNth"].forEach(id => $(id).classList.add("hidden"));
   if(map[rec]) $(map[rec]).classList.remove("hidden");
 }
-function openEventModal(id){
+function openEventModal(id, auto){
   EV_EDIT = id; const e = (id != null) ? EV.find(x => x.id === id) : null;
-  $("evModalTitle").textContent = e ? "Edit maintenance event" : "New maintenance event";
+  EV_AUTO = (e != null) ? !e.on_calendar : !!auto;
+  $("evModalTitle").textContent = (e ? "Edit " : "New ") + (EV_AUTO ? "automated window" : "maintenance event");
   $("evErr").textContent = "";
+  // Covers checklist (automated mode only) — target specific items by key.
+  const checked = e && e.affects ? e.affects.split(",") : [];
+  $("evCovers").innerHTML = ITEMS.length
+    ? ITEMS.map(it => `<label class="wd"><input type="checkbox" value="${esc(it.key)}"${checked.includes(it.key) ? " checked" : ""}> ${esc(it.name)}</label>`).join("")
+    : '<span class="muted">No services on the page yet.</span>';
+  $("evCoversWrap").classList.toggle("hidden", !EV_AUTO);
+  $("evAnnounceOnly").classList.toggle("hidden", EV_AUTO);
   $("evTitle").value = e ? e.title : "";
   $("evSeverity").value = e ? e.severity : "maintenance";
   $("evBody").value = e ? e.body : "";
@@ -468,7 +506,8 @@ function openEventModal(id){
   $("evUntil").value = e ? (e.until_date || "") : "";
   $("evEnabled").checked = e ? e.enabled : true;
   showRecFields($("evRec").value);
-  $("evModal").classList.remove("hidden"); $("evTitle").focus();
+  $("evModal").classList.remove("hidden");
+  if(!EV_AUTO) $("evTitle").focus();
 }
 function closeEventModal(){ $("evModal").classList.add("hidden"); EV_EDIT = null; }
 function collectEvent(){
@@ -481,12 +520,21 @@ function collectEvent(){
   if(rec === "weekly") p.weekdays = [...document.querySelectorAll("#evWeekdays input:checked")].map(c => c.value).join(",");
   if(rec === "monthly_date") p.month_days = $("evMonthDays").value;
   if(rec === "monthly_nth"){ p.nth = $("evNth").value; p.nth_weekday = $("evNthWeekday").value; }
+  if(EV_AUTO){
+    p.affects = [...document.querySelectorAll("#evCovers input:checked")].map(c => c.value);
+    p.on_calendar = false;      // never on the public calendar
+    p.title = "";               // server auto-titles automated windows
+    p.severity = "maintenance"; p.body = "";
+  } else {
+    p.affects = []; p.on_calendar = true;
+  }
   return p;
 }
 async function saveEvent(){
   const err = $("evErr"); err.textContent = "";
   const p = collectEvent();
-  if(!p.title){ err.textContent = "Title is required."; return; }
+  if(EV_AUTO && !p.affects.length){ err.textContent = "Pick at least one service to cover."; return; }
+  if(!EV_AUTO && !p.title){ err.textContent = "Title is required."; return; }
   if(p.recurrence === "once" && !p.once_date){ err.textContent = "Pick a date."; return; }
   if(p.recurrence === "weekly" && !p.weekdays){ err.textContent = "Pick at least one weekday."; return; }
   if(p.recurrence === "monthly_date" && !p.month_days.trim()){ err.textContent = "Enter day(s) of the month."; return; }
@@ -499,10 +547,14 @@ async function saveEvent(){
 
 // ── load loop ────────────────────────────────────────────────────────────────
 function fmtDur(sec){
+  sec = Math.max(0, Math.round(sec));
   if(sec < 60) return sec + "s";
-  if(sec < 3600) return Math.round(sec/60) + "m";
-  if(sec < 86400) return Math.round(sec/3600) + "h";
-  return Math.round(sec/86400) + "d";
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if(d) return h ? `${d}d ${h}h` : `${d}d`;      // e.g. "2d 3h"
+  if(h) return m ? `${h}h ${m}m` : `${h}h`;      // e.g. "1h 12m"
+  return `${m}m`;                                 // e.g. "12m"
 }
 function renderIncidents(d){
   const items = d.incidents || [];
@@ -517,11 +569,24 @@ function renderIncidents(d){
   wrap.innerHTML = `<div class="section-label">Past incidents</div>` + order.map(day =>
     `<div class="inc-day"><div class="inc-date">${esc(day)}</div>` +
     groups[day].map(inc => {
-      const t = new Date(inc.start).toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
-      const dur = inc.ongoing ? `ongoing (${fmtDur(inc.seconds)})` : `down ${fmtDur(inc.seconds)}`;
-      return `<div class="inc-item${inc.ongoing ? " ongoing" : ""}"><span class="inc-dot"></span>` +
-        `<span class="inc-name">${esc(inc.name)}</span>` +
-        `<span class="inc-meta">${esc(t)} · ${dur}</span></div>`;
+      const hm = dt => dt.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
+      const down = new Date(inc.start);
+      let meta;
+      if(inc.ongoing){
+        meta = `down ${esc(hm(down))} · ongoing (${fmtDur(inc.seconds)})`;
+      } else {
+        const back = new Date(inc.end);
+        // If it came back on a later day (e.g. crossed midnight), show that date.
+        let backLbl = hm(back);
+        if(back.toDateString() !== down.toDateString())
+          backLbl = back.toLocaleDateString(undefined, { month:"short", day:"numeric" }) + " " + backLbl;
+        meta = `down ${esc(hm(down))} → back ${esc(backLbl)} · ${fmtDur(inc.seconds)}`;
+      }
+      const tag = inc.maintenance ? `<span class="inc-tag">Scheduled maintenance</span>` : "";
+      const kind = inc.maintenance ? " maint" : "";
+      return `<div class="inc-item${inc.ongoing ? " ongoing" : ""}${kind}"><span class="inc-dot"></span>` +
+        `<span class="inc-name">${esc(inc.name)}</span>${tag}` +
+        `<span class="inc-meta">${meta}</span></div>`;
     }).join("") + `</div>`).join("");
 }
 

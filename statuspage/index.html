@@ -74,15 +74,20 @@
   <div class="modal-card wide">
     <h2 id="evModalTitle">New maintenance event</h2>
     <div class="err" id="evErr"></div>
-    <label class="fld">Title<input id="evTitle" type="text" maxlength="120" placeholder="Nightly parity check"></label>
-    <label class="fld">Severity
-      <select id="evSeverity">
-        <option value="maintenance">Maintenance</option>
-        <option value="info">Info</option>
-        <option value="critical">Critical</option>
-      </select>
-    </label>
-    <label class="fld">Details (optional)<textarea id="evBody" rows="2" maxlength="500" placeholder="What visitors should know."></textarea></label>
+    <div id="evCoversWrap" class="fld hidden">Covers services
+      <div class="wd-row" id="evCovers"></div>
+    </div>
+    <div id="evAnnounceOnly">
+      <label class="fld">Title<input id="evTitle" type="text" maxlength="120" placeholder="Nightly parity check"></label>
+      <label class="fld">Severity
+        <select id="evSeverity">
+          <option value="maintenance">Maintenance</option>
+          <option value="info">Info</option>
+          <option value="critical">Critical</option>
+        </select>
+      </label>
+      <label class="fld">Details (optional)<textarea id="evBody" rows="2" maxlength="500" placeholder="What visitors should know."></textarea></label>
+    </div>
     <label class="fld">Repeats
       <select id="evRec">
         <option value="once">Once</option>
