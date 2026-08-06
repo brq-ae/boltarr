@@ -9,7 +9,14 @@ let ANN = [];              // admin announcements list
 let EV = [];               // admin events list
 let ANN_EDIT = null;       // announcement being edited
 let EV_EDIT = null;        // event being edited
-let TZ = "UTC";            // configured status-page timezone
+let TZ = "UTC";            // configured status-page timezone (label)
+let TZONE;                 // validated IANA tz for rendering, or undefined (browser)
+// Current wall-clock time in the configured zone — a wrong zone shows an
+// obviously-wrong time, catching misconfiguration.
+function tzNowStr(){
+  try { return new Intl.DateTimeFormat(undefined, { timeZone: TZ, hour: "2-digit", minute: "2-digit" }).format(new Date()); }
+  catch(e){ return "?"; }
+}
 let LAST_MAINT = { active: [], upcoming: [] };
 let MVIEW = "month";       // 'agenda' | 'month' — calendar shown by default
 let MMONTH = null;         // {y, m} for the month grid
@@ -325,14 +332,14 @@ function renderAdmin(d){
       <div class="ann-list">${annRows}</div>
     </div></details>
     <details class="acc"><summary>Maintenance schedule</summary><div class="acc-body">
-      <div class="tz-row">Times in <strong>${esc(TZ)}</strong>
+      <div class="tz-row">Times in <strong>${esc(TZ)}</strong> · now ${esc(tzNowStr())}
         <button class="btn small" id="tzEdit">Change zone</button></div>
       <div class="ann-admin-actions"><button class="btn small" id="evNew">+ New event</button></div>
       <div class="ann-list">${evRows}</div>
     </div></details>
     <details class="acc"><summary>Automated maintenance</summary><div class="acc-body">
       <p class="muted acc-hint">Recurring expected downtime (e.g. a nightly backup). Never shown on the public calendar — while it's happening it just paints the covered services' dip <strong>amber</strong> instead of red. The downtime still counts toward uptime; only its reason is labelled. If it runs past the window, the overrun stays red.</p>
-      <div class="tz-row">Times in <strong>${esc(TZ)}</strong></div>
+      <div class="tz-row">Times in <strong>${esc(TZ)}</strong> · now ${esc(tzNowStr())}</div>
       <div class="ann-admin-actions"><button class="btn small" id="autoNew">+ Add window</button></div>
       <div class="ann-list">${autoRows}</div>
       <div class="acc-sub">Past incidents</div>
@@ -570,14 +577,15 @@ function renderIncidents(d){
   if(!items.length){ wrap.innerHTML = ""; return; }
   const order = [], groups = {};
   items.forEach(inc => {
-    const day = new Date(inc.start).toLocaleDateString(undefined, { year:"numeric", month:"short", day:"numeric" });
+    const day = new Date(inc.start).toLocaleDateString(undefined, { timeZone: TZONE, year:"numeric", month:"short", day:"numeric" });
     if(!groups[day]){ groups[day] = []; order.push(day); }
     groups[day].push(inc);
   });
   wrap.innerHTML = `<div class="section-label">Past incidents</div>` + order.map(day =>
     `<div class="inc-day"><div class="inc-date">${esc(day)}</div>` +
     groups[day].map(inc => {
-      const hm = dt => dt.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
+      const hm = dt => dt.toLocaleTimeString(undefined, { timeZone: TZONE, hour:"2-digit", minute:"2-digit" });
+      const dayOf = dt => dt.toLocaleDateString(undefined, { timeZone: TZONE, year:"numeric", month:"short", day:"numeric" });
       const down = new Date(inc.start);
       let meta;
       if(inc.ongoing){
@@ -586,8 +594,8 @@ function renderIncidents(d){
         const back = new Date(inc.end);
         // If it came back on a later day (e.g. crossed midnight), show that date.
         let backLbl = hm(back);
-        if(back.toDateString() !== down.toDateString())
-          backLbl = back.toLocaleDateString(undefined, { month:"short", day:"numeric" }) + " " + backLbl;
+        if(dayOf(back) !== dayOf(down))
+          backLbl = back.toLocaleDateString(undefined, { timeZone: TZONE, month:"short", day:"numeric" }) + " " + backLbl;
         meta = `down ${esc(hm(down))} → back ${esc(backLbl)} · ${fmtDur(inc.seconds)}`;
       }
       const tag = inc.maintenance ? `<span class="inc-tag">Scheduled maintenance</span>` : "";
@@ -603,6 +611,9 @@ async function load(skipAdmin){
   try{ d = await (await fetch("/data", {cache:"no-store"})).json(); }
   catch(e){ return; }
   DISP = d.display || {};
+  TZ = d.timezone || "UTC";
+  TZONE = undefined;
+  if(d.timezone){ try { new Intl.DateTimeFormat(undefined, { timeZone: d.timezone }); TZONE = d.timezone; } catch(e){} }
   applyBranding(d.branding);
   $("updated").textContent = "Updated " + ago(d.updated_at);
   // The auto-refresh timer passes skipAdmin=true so an incoming push doesn't

@@ -698,6 +698,7 @@ def data(request: Request):
         "maintenance": maintenance_view(tzinfo, tzname),
         "branding": get_branding(),
         "display": get_display(),
+        "timezone": tzname,   # so the page renders incident times in the page's zone
         "admin": admin,
     }
     # A private section is simply absent from an anonymous response.
@@ -723,7 +724,6 @@ def data(request: Request):
         out["events_all"] = [{**ev, "enabled": bool(ev["enabled"]),
                               "summary": _event_summary(ev), "next": _next_str(ev, tzinfo)}
                              for ev in _all_events()]
-        out["timezone"] = tzname
         out["csrf"] = csrf_for(request.cookies.get(COOKIE_NAME, ""))
     resp = JSONResponse(out)
     resp.headers["Cache-Control"] = "no-store"
