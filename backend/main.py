@@ -6,7 +6,7 @@ import ipaddress
 import zipfile
 import tempfile
 import sqlite3 as _sqlite3
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -25,7 +25,7 @@ from . import liveness
 from . import scheduler
 from .changes import classify_host
 from .llm import (
-    list_models, generate, chat, is_configured, get_default_model,
+    list_models, generate, chat, chat_stream, is_configured, get_default_model,
     build_host_prompt, build_network_prompt, infer_device_type, LLMError, LONG_TIMEOUT,
 )
 
@@ -1415,29 +1415,75 @@ class ChatReq(BaseModel):
     model: Optional[str] = None
 
 
-@app.post("/api/chat")
-async def chat_endpoint(req: ChatReq):
+_NETGEAR = {"router", "gateway", "switch", "unmanaged-switch", "firewall", "ap"}
+_HOST_CAP = 80          # full host lines sent to the model; the rest are summarised
+_CONN_CAP = 120
+
+
+def _chat_context() -> str:
+    """Build the chat system message: live network state + recent history."""
     with get_conn() as conn:
         hosts = [dict(h) for h in conn.execute("SELECT * FROM hosts ORDER BY ip")]
-        lines = []
+        host_entries = []                        # (priority, rendered_line, device_type)
+        down_hosts, down_svcs = [], []
+        mon_services, host_min = [], []          # for the recent-outages section
         for h in hosts:
             label = h.get("hostname") or h.get("device_type") or "unknown"
-            parts = [f"{h['ip']} ({label}, {h.get('device_type','?')})"]
+            live = h.get("online")
+            hstatus = "online" if live == 1 else "offline" if live == 0 else "unknown"
+            host_min.append((h["id"], h["ip"], label))
+            parts = [f"{h['ip']} ({label}, {h.get('device_type','?')}) status={hstatus}"]
             if h.get("vendor"):   parts.append(f"vendor={h['vendor']}")
             if h.get("os_guess"): parts.append(f"os={h['os_guess']}")
             if h.get("has_wifi"): parts.append("wifi=yes")
+            if live == 0:
+                down_hosts.append(f"{h['ip']} ({label})")
             ports = conn.execute(
                 "SELECT port, service FROM ports WHERE host_id=? AND state='open'",
                 (h["id"],),
             ).fetchall()
             if ports:
-                parts.append("open=" + ",".join(f"{p['port']}/{p['service'] or '?'}" for p in ports))
-            services = conn.execute(
-                "SELECT name, port, status FROM services WHERE host_id=?", (h["id"],)
-            ).fetchall()
-            if services:
-                parts.append("services=" + ",".join(f"{s['name']}:{s['port'] or '?'}[{s['status']}]" for s in services))
-            lines.append("  " + "  ".join(parts))
+                _p = ports[:15]
+                _ptail = f" +{len(ports) - 15} more" if len(ports) > 15 else ""
+                parts.append("open=" + ",".join(f"{p['port']}/{p['service'] or '?'}" for p in _p) + _ptail)
+            svc_rows = [dict(s) for s in conn.execute(
+                "SELECT id, name, port, status, monitored, monitor_status FROM services WHERE host_id=?", (h["id"],)
+            )]
+            if svc_rows:
+                svc_strs = []
+                for s in svc_rows:
+                    mon = s.get("monitored")
+                    st = (s.get("monitor_status") if mon and s.get("monitor_status") else s.get("status")) or "?"
+                    cell = f"{s['name']}:{s.get('port') or '?'}[{st}]"
+                    if mon:
+                        u = monitor.uptime(s["id"], 86400)
+                        if u and u.get("pct") is not None:
+                            cell += f" up24h={u['pct']:.0f}%"
+                        u7 = monitor.uptime(s["id"], 7 * 86400)
+                        if u7 and u7.get("pct") is not None:
+                            cell += f" up7d={u7['pct']:.0f}%"
+                        mon_services.append((s["id"], s["name"], h["ip"], label))
+                        if s.get("monitor_status") == "down":
+                            down_svcs.append(f"{s['name']} on {h['ip']} ({label})")
+                    svc_strs.append(cell)
+                parts.append("services=" + ",".join(svc_strs))
+            dt = (h.get("device_type") or "").lower()
+            host_down = live == 0 or any(s.get("monitored") and s.get("monitor_status") == "down" for s in svc_rows)
+            has_mon = any(s.get("monitored") for s in svc_rows)
+            prio = 4 if host_down else 3 if (dt in _NETGEAR or has_mon) else 2 if (ports or svc_rows) else 1
+            host_entries.append((prio, "  " + "  ".join(parts), h.get("device_type") or "unknown"))
+
+        # Trim: keep the most relevant hosts in full (down > infra/monitored > has
+        # ports/services > plain clients); summarise the rest so a big network
+        # doesn't overflow the model. Stable sort preserves IP order within a tier.
+        host_entries.sort(key=lambda x: x[0], reverse=True)
+        lines = [e[1] for e in host_entries[:_HOST_CAP]]
+        _dropped = host_entries[_HOST_CAP:]
+        if _dropped:
+            from collections import Counter
+            _cnt = ", ".join(f"{n} {t}" for t, n in Counter(e[2] for e in _dropped).most_common())
+            lines.append(f"  ... and {len(_dropped)} more hosts not shown ({_cnt}). "
+                         f"Ask about a specific IP for full detail.")
 
         conns = [dict(c) for c in conn.execute("SELECT * FROM connections ORDER BY src_ip")]
         conn_lines = []
@@ -1453,33 +1499,121 @@ async def chat_endpoint(req: ChatReq):
             if vlans:
                 cl += " vlans=" + ",".join(f"VLAN{v['tag']}({v['name']})" for v in vlans)
             conn_lines.append(cl)
+        if len(conn_lines) > _CONN_CAP:
+            _extra = len(conn_lines) - _CONN_CAP
+            conn_lines = conn_lines[:_CONN_CAP] + [f"  ... and {_extra} more connections not shown."]
 
         vlan_rows = conn.execute("SELECT * FROM vlans ORDER BY tag").fetchall()
         vlan_lines = ["  VLAN " + str(v["tag"]) + " " + v["name"] for v in vlan_rows]
 
-    network_ctx = ""
+        # Local-time helpers (timestamps are stored UTC; show them in the user's zone).
+        _tzname = get_config().get("general", {}).get("timezone") or "UTC"
+        try:
+            from zoneinfo import ZoneInfo
+            _tz = ZoneInfo(_tzname)
+        except Exception:
+            _tz = timezone.utc
+        def _loc(iso):
+            try:
+                return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).astimezone(_tz).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return str(iso)
+        def _dur(sec):
+            sec = int(sec or 0)
+            if sec < 3600: return f"{max(1, sec // 60)}m"
+            if sec < 86400: return f"{sec // 3600}h {sec % 3600 // 60}m"
+            return f"{sec // 86400}d {sec % 86400 // 3600}h"
+
+        # Recent changes (change-tracking feed), newest first.
+        _CL = {"host_new": "new host", "host_offline": "went offline", "host_online": "back online",
+               "port_opened": "port opened", "port_closed": "port closed",
+               "mac_changed": "MAC changed", "hostname_changed": "hostname changed"}
+        _since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        change_lines = []
+        for e in conn.execute("SELECT ts, ip, type, port, old_value, new_value FROM change_events "
+                              "WHERE ts >= ? ORDER BY ts DESC LIMIT 20", (_since,)):
+            e = dict(e); t = e["type"]
+            base = f"{e['ip']}:{e['port']}" if t in ("port_opened", "port_closed") and e.get("port") else e["ip"]
+            extra = f" ({e.get('old_value') or '?'} -> {e.get('new_value') or '?'})" \
+                if t in ("mac_changed", "hostname_changed") else ""
+            change_lines.append(f"  {_loc(e['ts'])}  {_CL.get(t, t)}  {base}{extra}")
+
+    # Recent outages (last 7 days) across monitored services and hosts, newest first.
+    outage_items = []
+    for sid, sname, sip, slabel in mon_services:
+        for o in monitor.outages(sid, 7 * 86400, limit=5):
+            outage_items.append((o.get("start") or "", f"{sname} on {sip} ({slabel})", o))
+    for hid, hip, hlabel in host_min:
+        for o in monitor.host_outages(hid, 7 * 86400, limit=5):
+            outage_items.append((o.get("start") or "", f"HOST {hip} ({hlabel})", o))
+    outage_items.sort(key=lambda x: x[0], reverse=True)
+    outage_lines = []
+    for _, name, o in outage_items[:15]:
+        if o.get("ongoing"):
+            outage_lines.append(f"  {name} — down since {_loc(o['start'])} (ongoing)")
+        else:
+            outage_lines.append(f"  {name} — down {_loc(o['start'])} for {_dur(o.get('seconds'))}")
+
+    problems = []
+    if down_hosts:
+        problems.append("Offline hosts: " + "; ".join(down_hosts))
+    if down_svcs:
+        problems.append("Down monitored services: " + "; ".join(down_svcs))
+    network_ctx = f"Current time: {datetime.now(_tz).strftime('%Y-%m-%d %H:%M %Z')}\n\n"
+    network_ctx += "Currently down:\n  " + (
+        "\n  ".join(problems) if problems else "Nothing — all monitored items are up.") + "\n\n"
     if lines:
-        network_ctx += "Hosts:\n" + "\n".join(lines) + "\n"
+        network_ctx += ("Hosts (status = live liveness state; up24h/up7d = uptime of monitored "
+                        "services):\n" + "\n".join(lines) + "\n")
     if conn_lines:
         network_ctx += "\nConnections:\n" + "\n".join(conn_lines) + "\n"
     if vlan_lines:
         network_ctx += "\nVLANs:\n" + "\n".join(vlan_lines) + "\n"
-    if not network_ctx:
+    if change_lines:
+        network_ctx += "\nRecent changes (last 7 days, newest first):\n" + "\n".join(change_lines) + "\n"
+    if outage_lines:
+        network_ctx += "\nRecent outages (last 7 days, newest first):\n" + "\n".join(outage_lines) + "\n"
+    if not lines:
         network_ctx = "No hosts scanned yet."
 
     system_msg = (
-        "You are a helpful network assistant with full knowledge of the user's network topology, "
-        "devices, services, connections, VLANs, and security posture. "
-        "Answer questions accurately using the data below. Reference specific IPs and hostnames.\n\n"
+        "You are Boltarr's network assistant. Below is the user's LIVE network state plus recent "
+        "history: the device inventory, connections and VLANs, each host's current online/offline "
+        "status, monitored services' up/down status with 24-hour and 7-day uptime, the recent "
+        "change-tracking feed, and recent outages. Answer accurately from this data, lead with "
+        "anything currently down or notably unstable when relevant, and reference specific IPs, "
+        "hostnames and times. Be concise, and if the data doesn't cover something, say so rather "
+        "than guessing.\n\n"
         + network_ctx
     )
+    return system_msg
 
+
+@app.post("/api/chat")
+async def chat_endpoint(req: ChatReq):
+    system_msg = _chat_context()
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
     try:
         response = await chat(messages, model=req.model or get_default_model(), system=system_msg)
     except LLMError as e:
         raise HTTPException(503, str(e))
     return {"response": response, "model": req.model or get_default_model()}
+
+
+@app.post("/api/chat/stream")
+async def chat_stream_endpoint(req: ChatReq):
+    system_msg = _chat_context()
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    model = req.model or get_default_model()
+
+    async def gen():
+        try:
+            async for chunk in chat_stream(messages, model=model, system=system_msg):
+                yield chunk
+        except LLMError as e:
+            yield f"\n\n[AI error: {e}]"
+
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────

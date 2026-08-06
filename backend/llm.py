@@ -2,6 +2,7 @@
 Unified LLM client supporting Ollama, OpenAI-compatible APIs, and Anthropic.
 Provider is configured via data/config.yaml or LLM_* environment variables.
 """
+import json
 import httpx
 from .config import get_llm_config
 
@@ -168,6 +169,84 @@ async def chat(messages: list[dict], model: str = "", system: str = "") -> str:
         raise LLMError(f"AI request failed ({provider}): {e}") from e
 
     raise LLMError(f"Unknown provider: {provider}")
+
+
+async def chat_stream(messages: list[dict], model: str = "", system: str = ""):
+    """Async generator yielding response text chunks as the provider produces them.
+    Same providers as chat(); used by the streaming chat endpoint."""
+    cfg = _cfg()
+    provider = cfg.get("provider", "none")
+    if provider == "none":
+        raise LLMError("No AI provider configured. Open ⚙ AI Settings to configure one.")
+    model   = model or cfg.get("model") or ""
+    timeout = cfg.get("timeout", 120)
+    base = cfg.get("base_url", "").rstrip("/")
+
+    try:
+        if provider == "ollama":
+            full = ([{"role": "system", "content": system}] if system else []) + messages
+            async with httpx.AsyncClient(timeout=timeout) as c:
+                async with c.stream("POST", f"{base}/api/chat",
+                                    json={"model": model, "messages": full, "stream": True}) as r:
+                    r.raise_for_status()
+                    async for line in r.aiter_lines():
+                        if not line.strip():
+                            continue
+                        obj = json.loads(line)
+                        chunk = (obj.get("message") or {}).get("content", "")
+                        if chunk:
+                            yield chunk
+                        if obj.get("done"):
+                            break
+
+        elif provider == "openai":
+            full = ([{"role": "system", "content": system}] if system else []) + messages
+            headers = {"Content-Type": "application/json"}
+            if cfg.get("api_key"):
+                headers["Authorization"] = f"Bearer {cfg['api_key']}"
+            async with httpx.AsyncClient(timeout=timeout) as c:
+                async with c.stream("POST", f"{base}/chat/completions", headers=headers,
+                                    json={"model": model, "messages": full, "stream": True}) as r:
+                    r.raise_for_status()
+                    async for line in r.aiter_lines():
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        obj = json.loads(data)
+                        chunk = ((obj.get("choices") or [{}])[0].get("delta") or {}).get("content") or ""
+                        if chunk:
+                            yield chunk
+
+        elif provider == "anthropic":
+            payload = {"model": model, "max_tokens": 4096, "messages": messages, "stream": True}
+            if system:
+                payload["system"] = system
+            async with httpx.AsyncClient(timeout=timeout) as c:
+                async with c.stream("POST", "https://api.anthropic.com/v1/messages", json=payload,
+                                    headers={"x-api-key": cfg.get("api_key", ""),
+                                             "anthropic-version": "2023-06-01",
+                                             "content-type": "application/json"}) as r:
+                    r.raise_for_status()
+                    async for line in r.aiter_lines():
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        obj = json.loads(line[5:].strip())
+                        if obj.get("type") == "content_block_delta":
+                            chunk = (obj.get("delta") or {}).get("text", "")
+                            if chunk:
+                                yield chunk
+
+        else:
+            raise LLMError(f"Unknown provider: {provider}")
+
+    except LLMError:
+        raise
+    except Exception as e:
+        raise LLMError(f"AI stream failed ({provider}): {e}") from e
 
 
 # ── Prompt builders (provider-agnostic) ───────────────────────────────────────

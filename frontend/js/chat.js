@@ -34,26 +34,35 @@ async function sendChat() {
   const thinking = appendMsg("thinking", "thinking…");
 
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages: chatHistory, model }),
     });
-    const text = await res.text();
-    thinking.remove();
-    let data;
-    try { data = JSON.parse(text); } catch {
-      appendMsg("assistant", `Server error (${res.status}) — check that a model is selected and AI is configured.`);
-      chatHistory.pop();
-      return;
-    }
     if (!res.ok) {
-      appendMsg("assistant", `Error: ${data.detail || res.statusText}`);
+      thinking.remove();
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch {}
+      appendMsg("assistant", `Error: ${detail}`);
       chatHistory.pop();
       return;
     }
-    chatHistory.push({ role: "assistant", content: data.response });
-    appendMsg("assistant", data.response);
+    // Stream tokens into a single assistant bubble as they arrive.
+    thinking.remove();
+    const msgs = document.getElementById("chatMessages");
+    const div = appendMsg("assistant", "");
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let full = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      full += decoder.decode(value, { stream: true });
+      div.textContent = full;
+      msgs.scrollTop = msgs.scrollHeight;
+    }
+    if (!full) div.textContent = "(no response)";
+    chatHistory.push({ role: "assistant", content: full });
   } catch (e) {
     thinking.remove();
     appendMsg("assistant", "Error: " + e.message);
