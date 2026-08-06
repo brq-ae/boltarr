@@ -224,9 +224,12 @@ built-in Uptime-Kuma.
 **Turn it on:** open a service's detail panel and tick **Monitor**. It's off by
 default, so you only watch the services you care about.
 
-- Boltarr checks the service every **60 seconds**. If the service has a **URL**
-  it does an HTTP request; otherwise it opens a **TCP** connection to its port.
-  *Reachable = up.*
+- Boltarr checks the service on a timer — **every 60 seconds by default,
+  configurable 15–600s** in Settings → Notifications (*"Probe each service every
+  N seconds"*). If the service has a **URL** it does an HTTP request; otherwise
+  it opens a **TCP** connection to its port. *Reachable = up.* A longer interval
+  is lighter but slower to notice an outage; the interval also sets the width of
+  one tick on the status page's 1-hour bar.
 - A live **dot** shows current status — green (up) / red (down) — in both the
   services table and the detail panel. It flips the instant a check fails.
 - The detail panel shows **uptime** for the last **24h / 7d / 30d**, plus a list
@@ -310,14 +313,44 @@ the public name, status, uptime and ticks are pushed — never the IP.
 - **Token** — a shared secret sent with each push.
 - **Push now** — sends immediately so you can verify the page updates.
 
-Boltarr pushes on any status change plus a ~60-second heartbeat. The payload per
-service is: public name, up/down, 24-hour uptime %, and ~60 "ticks" (one per
-minute for the last hour).
+Boltarr pushes on any status change plus a heartbeat at least every ~60s (so the
+page stays fresh even if you lengthen the probe interval). The payload per item
+is: public name, up/down, uptime %, and tick bars for 1h / 24h / 7d / 30d, plus a
+sanitized incident list.
 
 > **Security:** the push travels only over your LAN. If you put the status app
 > behind a reverse proxy for the public subdomain, block its receive path (e.g.
 > deny `/push`) so the internet can't post fake statuses — the LAN push bypasses
 > the proxy and keeps working.
+
+### Status-page admin panel
+
+The status app has its own **admin panel** — log in from the page (set
+`STATUS_ADMIN_PASSWORD` in the status app's `.env`). It's cookie-session + CSRF
+protected and rate-limits logins, so it's safe to expose. Logged in, you get:
+
+- **Visibility (gating)** — mark each section (Services / Hosts / Networking)
+  **Public** or **Private**. A private section is received but shown only to a
+  logged-in admin — check private things from anywhere by logging in, while the
+  public sees only what you choose. Per *section*, not per item.
+- **Display** — pick the **uptime %** window and **bar period** independently,
+  each `1h / 24h / 7d / 30d`. The 1-hour bar shows one tick per probe.
+- **Branding** — name, tagline, footer, logo, and the full colour palette (with a
+  colour legend). Stored on the status app; the repo ships neutral defaults.
+- **Announcements** — a banner (info / maintenance / critical) with optional
+  start/end times.
+- **Maintenance calendar** — planned, announced maintenance: one-off or recurring
+  (daily / weekly / monthly-by-date / monthly-Nth-weekday) with a time window;
+  visitors see upcoming + a calendar + an "in progress" banner.
+- **Automated maintenance** — recurring **expected** downtime you don't announce
+  (e.g. a nightly backup). Target the services/hosts it covers + the days/time;
+  while a covered item dips inside its window the incident, tick, and dot turn
+  **amber "Scheduled maintenance"** instead of red. The downtime still counts
+  toward uptime — only the cause is relabelled; an overrun past the window stays
+  red. Never on the public calendar.
+- **Past incidents** — the timeline (down → back → duration). **Clear past
+  incidents** hides everything resolved up to now (ongoing stays; new ones still
+  appear).
 
 ---
 
