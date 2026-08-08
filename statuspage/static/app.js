@@ -20,6 +20,7 @@ function tzNowStr(){
 let LAST_MAINT = { active: [], upcoming: [] };
 let MVIEW = "month";       // 'agenda' | 'month' — calendar shown by default
 let MMONTH = null;         // {y, m} for the month grid
+let MAINT_SIG = null;      // last-rendered maintenance payload; skip rebuilds when unchanged
 let BRAND = {};            // current branding settings
 let DISP = {};             // display settings (uptime_window, bar_period)
 let ITEMS = [];            // current items [{key,name}] for maintenance targeting
@@ -151,6 +152,13 @@ function renderHealth(d){
 function renderMaintenance(d){
   LAST_MAINT = d.maintenance || { active: [], upcoming: [], tz: "UTC" };
   const wrap = $("maintenance");
+  // Only rebuild when the maintenance data actually changed. Otherwise every
+  // 30s poll (and every push) re-fetched /api/calendar and wiped the Month grid
+  // — a visible flicker. The Agenda view rebuilt synchronously so it didn't show
+  // it. This guard fixes both while preserving the chosen view and month.
+  const sig = JSON.stringify(LAST_MAINT);
+  if($("maintBody") && sig === MAINT_SIG) return;
+  MAINT_SIG = sig;
   if(!LAST_MAINT.active.length && !LAST_MAINT.upcoming.length){ wrap.innerHTML = ""; return; }
   wrap.innerHTML = `
     <div class="maint-head">
