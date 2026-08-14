@@ -211,4 +211,10 @@ body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
 .cal-ev.sev-info{background:rgba(88,166,255,.18);color:#58a6ff}
 .cal-ev.sev-maintenance{background:rgba(217,164,19,.2);color:var(--accent)}
 .cal-ev.sev-critical{background:rgba(248,81,73,.2);color:var(--down)}
-@media(max-width:560px){.cal-cell{min-height:48px}.cal-ev{font-size:9px}}
+@media(max-width:560px){.cal-cell{min-height:48px}.cal-ev{font-size:9px}
+  /* Past incidents: stack instead of cramming into one row (the tag no longer
+     overlaps the service name). Dot + name on line 1; tag and time below. */
+  .inc-item{flex-wrap:wrap;align-items:flex-start;row-gap:3px}
+  .inc-tag{flex-basis:100%;padding-left:16px}
+  .inc-meta{flex-basis:100%;padding-left:16px;white-space:normal}
+}
