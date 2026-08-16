@@ -20,7 +20,7 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 - **DHCP-aware classification** — per-subnet DHCP range classifies hosts as static or dynamic
 - **Device management** — add/edit/delete hosts, merge multi-homed devices, annotate with notes
 - **Services registry** — track running services per host, with a services topology and dependencies
-- **Service uptime monitor** — up/down checks on a **configurable interval (15–600s)**, ntfy alerts with a grace period, quiet hours, uptime history, and per-service uptime reset
+- **Service uptime monitor** — up/down checks with a choice of **HTTP(S), TCP, or Ping (ICMP)** and an **overridable check target** (e.g. a container's own IP), on a configurable interval (15–600s); ntfy alerts with a grace period, quiet hours, uptime history, and per-service uptime reset
 - **Public status page** — push a sanitized status summary (services, hosts, and networking gear) to a separate, internet-facing page over your LAN — public names only, never internal IPs. Includes an **admin panel**: public/private section gating, configurable uptime windows (1h/24h/7d/30d), branding, announcements, a recurring **maintenance calendar**, **automated-maintenance windows** (relabel expected backups instead of flagging them), and an **incident timeline**
 - **VLAN management** — define VLANs, assign them to connections, visualize on topology
 - **AI analysis** — per-host and network-wide analysis; AI chat assistant with full network context
