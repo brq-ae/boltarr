@@ -1,0 +1,36 @@
+# Keep the Docker build context small and free of anything that shouldn't ship.
+.git
+.github
+.gitignore
+.dockerignore
+
+# Python caches / local venvs
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Runtime data — personal network data, DBs, secrets. Never send to the image.
+data/
+statuspage/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Docs, meta, and dev-only files not needed at runtime
+docs/
+templates/
+README.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+LICENSE
+docker-compose*.yml
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
