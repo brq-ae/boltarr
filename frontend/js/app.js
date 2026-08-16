@@ -2076,10 +2076,10 @@ async function deleteSvc(id, hostIp) {
   renderServicesTable();
 }
 
-// Fill the modal's host dropdown (regular hosts + a Containers group) and
-// pre-select `selectedIp` if given. Shared by Add and Edit.
-function populateSvcHostSelect(selectedIp) {
-  const sel = document.getElementById("svcHostIp");
+// Fill a host <select> (regular hosts + a Containers group) and pre-select an
+// IP if given. Shared by the Add/Edit modal and the detail panel.
+function _fillHostSelect(sel, selectedIp) {
+  if (!sel) return;
   const regularHosts   = allHosts.filter(h => h.device_type !== "container");
   const containerHosts = allHosts.filter(h => h.device_type === "container");
   const hostOpts = host => `<option value="${host.ip}">${host.ip}${host.hostname ? " — " + host.hostname : ""}</option>`;
@@ -2088,12 +2088,43 @@ function populateSvcHostSelect(selectedIp) {
     (containerHosts.length ? `<optgroup label="── Containers ──">${containerHosts.map(hostOpts).join("")}</optgroup>` : "");
   if (selectedIp && sel.querySelector(`option[value="${CSS.escape ? CSS.escape(selectedIp) : selectedIp}"]`)) sel.value = selectedIp;
 }
+function populateSvcHostSelect(selectedIp) { _fillHostSelect(document.getElementById("svcHostIp"), selectedIp); }
 
-// Show the URL field for HTTP checks, the target-IP field for TCP/Ping.
+// Grey out (disable + dim) the fields a given check type ignores, keeping all
+// fields visible. HTTP → uses URL; TCP → target IP + port; ICMP → target IP only.
+function _applyCheckGrey(ct, ids) {
+  const use = {
+    http: { url: true,  target: false, port: false },
+    tcp:  { url: false, target: true,  port: true  },
+    icmp: { url: false, target: true,  port: false },
+  }[ct] || { url: true, target: true, port: true };
+  const set = (id, active) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const row = el.closest(".form-row, .svc-detail-field") || el;
+    el.disabled = !active;
+    row.classList.toggle("field-dim", !active);
+  };
+  set(ids.url,    use.url);
+  set(ids.target, use.target);
+  set(ids.port,   use.port);
+}
+
+// Modal: grey the unused fields when the check type changes.
 function svcCheckTypeChanged() {
   const ct = document.getElementById("svcCheckType").value;
-  document.getElementById("svcUrlRow").style.display    = (ct === "http") ? "" : "none";
-  document.getElementById("svcTargetRow").style.display = (ct === "http") ? "none" : "";
+  _applyCheckGrey(ct, { url: "svcUrl", target: "svcContainerIp", port: "svcPort" });
+}
+
+// Detail panel: same grey-out for the panel's own fields.
+function svcDetailCheckChanged() {
+  const ct = document.getElementById("svcDetailCheckType").value;
+  _applyCheckGrey(ct, { url: "svcDetailUrl", target: "svcDetailContainerIp", port: "svcDetailPort" });
+}
+
+function svcModalPublicToggled() {
+  document.getElementById("svcModalPublicNameRow").style.display =
+    document.getElementById("svcModalPublic").checked ? "" : "none";
 }
 
 function openEditService(id) {
@@ -2112,6 +2143,10 @@ function openEditService(id) {
   document.getElementById("svcContainerIp").value = s.container_ip || "";
   document.getElementById("svcCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
   svcCheckTypeChanged();
+  document.getElementById("svcModalMonitored").checked = !!s.monitored;
+  document.getElementById("svcModalPublic").checked    = !!s.public;
+  document.getElementById("svcModalPublicName").value  = s.public_name || "";
+  svcModalPublicToggled();
   populateSvcHostSelect(s.ip);                                 // let the host be changed on edit too
   document.getElementById("svcHostRow").style.display        = "";
   document.getElementById("containerPickRow").style.display  = "none";
@@ -2133,6 +2168,10 @@ function openAddService(presetIp) {
   document.getElementById("svcContainerIp").value = "";
   document.getElementById("svcCheckType").value   = "http";
   svcCheckTypeChanged();
+  document.getElementById("svcModalMonitored").checked = false;
+  document.getElementById("svcModalPublic").checked    = false;
+  document.getElementById("svcModalPublicName").value  = "";
+  svcModalPublicToggled();
   document.getElementById("svcDeleteBtn").style.display = "none";
 
   pickedContainerIp = null;
@@ -2209,27 +2248,41 @@ async function saveServiceModal() {
   const url     = document.getElementById("svcUrl").value.trim() || null;
   const checkType   = document.getElementById("svcCheckType").value;
   const containerIp = document.getElementById("svcContainerIp").value.trim();
+  const monitored   = document.getElementById("svcModalMonitored").checked;
+  const isPublic    = document.getElementById("svcModalPublic").checked;
+  const publicName  = document.getElementById("svcModalPublicName").value.trim();
   if (!name) return alert("Service name is required.");
 
   try {
+    let svcId;
     if (editId) {
       const svc = await api("PUT", `/api/services/${editId}`, {
         name, description: desc, port, protocol: proto, status, url,
         check_type: checkType, container_ip: containerIp,   // "" clears the override
         host_ip: document.getElementById("svcHostIp").value // allow moving to another host
       });
-      allServices = allServices.map(s => s.id === parseInt(editId) ? { ...s, ...svc } : s);
-      const row = document.getElementById(`svc-row-${editId}`);
-      if (row) row.outerHTML = svcRowHTML(svc, svc.ip);
+      svcId = parseInt(editId);
+      allServices = allServices.map(s => s.id === svcId ? { ...s, ...svc } : s);
     } else {
       const hostIp = document.getElementById("svcHostIp").value;
       const svc = await api("POST", `/api/hosts/${hostIp}/services`, {
         name, description: desc, port, protocol: proto, status, url,
         check_type: checkType, container_ip: containerIp || null
       });
+      svcId = svc.id;
       allServices.push(svc);
       pickedContainerIp = null;
       localStorage.setItem("boltarr_last_svc_host", hostIp);
+    }
+    // Monitor + public go through their dedicated endpoints (same as the panel).
+    const cur = allServices.find(s => s.id === svcId) || {};
+    if (!!cur.monitored !== monitored) {
+      const r = await api("POST", `/api/services/${svcId}/monitor`, { enabled: monitored });
+      cur.monitored = monitored ? 1 : 0; cur.monitor_status = r.monitor_status;
+    }
+    if (!!cur.public !== isPublic || (isPublic && (cur.public_name || "") !== publicName)) {
+      await api("POST", `/api/services/${svcId}/public`, { enabled: isPublic, name: publicName });
+      cur.public = isPublic ? 1 : 0; cur.public_name = publicName;
     }
     renderServicesTable();
     closeServiceModal();
@@ -2854,12 +2907,14 @@ function showSvcDetail(id) {
   _setSvcDetailIcon(s.name);
 
   document.getElementById("svcDetailName").value        = s.name || "";
-  document.getElementById("svcDetailHostLabel").textContent =
-    s.ip + (s.hostname ? ` · ${s.hostname}` : "");
+  _fillHostSelect(document.getElementById("svcDetailHost"), s.ip);
   document.getElementById("svcDetailPort").value        = s.port || "";
   const proto = document.getElementById("svcDetailProto");
   if (proto) proto.value = s.protocol || "tcp";
   document.getElementById("svcDetailUrl").value         = s.url || "";
+  document.getElementById("svcDetailContainerIp").value = s.container_ip || "";
+  document.getElementById("svcDetailCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
+  svcDetailCheckChanged();
   document.getElementById("svcDetailDesc").value        = s.description || "";
 
   const btn = document.getElementById("svcDetailStatusBtn");
@@ -3018,9 +3073,13 @@ async function saveSvcDetail() {
   const proto = document.getElementById("svcDetailProto")?.value || "tcp";
   const url   = document.getElementById("svcDetailUrl").value.trim() || null;
   const desc  = document.getElementById("svcDetailDesc").value.trim() || null;
+  const checkType   = document.getElementById("svcDetailCheckType").value;
+  const containerIp = document.getElementById("svcDetailContainerIp").value.trim();
+  const hostIp      = document.getElementById("svcDetailHost").value;
   try {
     const svc = await api("PUT", `/api/services/${svcDetailId}`, {
       name, port, protocol: proto, url, description: desc, status: svcDetailStatus,
+      check_type: checkType, container_ip: containerIp, host_ip: hostIp,
     });
     await saveSvcPublic();   // public toggle + public name (dedicated, safe endpoint)
     allServices = allServices.map(s => s.id === svcDetailId ? { ...s, ...svc } : s);
@@ -3062,9 +3121,8 @@ function renderSvcDetailDeps(svcId) {
       return `<span class="dep-chip incoming">← ${src ? src.name : d.from_service_id}</span>`;
     }),
   ];
-  container.innerHTML = chips.length
-    ? chips.join("")
-    : `<span style="font-size:11px;color:var(--text-3)">None — use ⊕ Deps to manage</span>`;
+  const hint = `<span style="font-size:11px;color:var(--text-3)">Manage dependencies from the Topology view.</span>`;
+  container.innerHTML = chips.length ? chips.join("") + `<div style="flex-basis:100%">${hint}</div>` : hint;
 }
 
 // ── Bulk add containers ───────────────────────────────────────────────────────

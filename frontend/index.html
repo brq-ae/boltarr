@@ -868,7 +868,7 @@
         <option value="icmp">Ping (ICMP) — is the IP reachable</option>
       </select>
     </div>
-    <div class="form-row" id="svcTargetRow" style="display:none">
+    <div class="form-row" id="svcTargetRow">
       <label>Monitor target IP <span style="color:var(--text-3);font-weight:400;text-transform:none">(defaults to the host)</span></label>
       <input type="text" id="svcContainerIp" class="mono" placeholder="e.g. 192.168.1.42 — the container's own IP">
     </div>
@@ -879,6 +879,24 @@
     <div class="form-row">
       <label>Description <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
       <input type="text" id="svcDesc" placeholder="Brief description">
+    </div>
+    <div class="form-2col">
+      <div class="form-row">
+        <label>Monitor</label>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:32px">
+          <input type="checkbox" id="svcModalMonitored"> <span style="font-size:12px">Watch this service</span>
+        </label>
+      </div>
+      <div class="form-row">
+        <label>Public status page</label>
+        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:32px">
+          <input type="checkbox" id="svcModalPublic" onchange="svcModalPublicToggled()"> <span style="font-size:12px">Show publicly</span>
+        </label>
+      </div>
+    </div>
+    <div class="form-row" id="svcModalPublicNameRow" style="display:none">
+      <label>Public name <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <input type="text" id="svcModalPublicName" placeholder="Defaults to the service name">
     </div>
     <div class="modal-actions">
       <button class="btn btn-danger" id="svcDeleteBtn" onclick="deleteServiceFromModal()" style="display:none">Delete</button>
@@ -1348,8 +1366,8 @@
   </div>
   <div class="svc-detail-body">
     <div class="svc-detail-field">
-      <label>Host</label>
-      <span id="svcDetailHostLabel" class="mono" style="font-size:11px;color:var(--text-2)"></span>
+      <label>Host (runs on)</label>
+      <select id="svcDetailHost" class="mono" style="font-size:11px;max-width:180px"></select>
     </div>
     <div class="svc-detail-field">
       <label>Port</label>
@@ -1358,6 +1376,18 @@
     <div class="svc-detail-field">
       <label>Protocol</label>
       <select id="svcDetailProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+    </div>
+    <div class="svc-detail-field">
+      <label>Monitor check</label>
+      <select id="svcDetailCheckType" onchange="svcDetailCheckChanged()">
+        <option value="http">HTTP(S)</option>
+        <option value="tcp">TCP</option>
+        <option value="icmp">Ping (ICMP)</option>
+      </select>
+    </div>
+    <div class="svc-detail-field">
+      <label>Monitor target IP</label>
+      <input type="text" id="svcDetailContainerIp" class="mono" placeholder="defaults to host" style="width:130px">
     </div>
     <div class="svc-detail-field">
       <label>Monitor</label>

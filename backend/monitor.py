@@ -87,12 +87,17 @@ def _probe_tcp(host: str, port: int) -> bool:
 
 
 def _probe_icmp(host: str) -> bool:
-    """One ICMP echo. Up = a reply. Needs the NET_RAW cap (which Boltarr has)."""
+    """Reachability via nmap host-discovery (ICMP echo; ARP on the local segment).
+    We use nmap because it's already in the image and works with Boltarr's caps —
+    the `ping` binary is not installed in the container. Up = nmap reports it up."""
     try:
-        r = subprocess.run(
-            ["ping", "-c", "1", "-W", str(ICMP_TIMEOUT), host],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=ICMP_TIMEOUT + 2)
-        return r.returncode == 0
+        import nmap
+        proc = subprocess.run(
+            ["nmap", "-sn", "-PE", "-n", "-oX", "-", host],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=ICMP_TIMEOUT + 4)
+        nm = nmap.PortScanner()
+        nm.analyse_nmap_xml_scan(proc.stdout.decode("utf-8", "replace"))
+        return host in nm.all_hosts() and nm[host].state() == "up"
     except Exception:
         return False
 

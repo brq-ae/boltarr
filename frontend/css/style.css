@@ -1119,6 +1119,9 @@ tbody td {
   color: var(--text);
 }
 .form-row { margin-bottom: 13px; }
+/* A field the current monitor-check type ignores: visible but greyed + inert. */
+.field-dim { opacity: 0.4; }
+.field-dim input, .field-dim select { pointer-events: none; }
 .form-row label { display: block; font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
 .form-row input, .form-row select, .form-row textarea { width: 100%; }
 .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
