@@ -861,7 +861,19 @@
       </div>
     </div>
     <div class="form-row">
-      <label>URL <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
+      <label>Monitor check <span style="color:var(--text-3);font-weight:400;text-transform:none">(how it's probed)</span></label>
+      <select id="svcCheckType" onchange="svcCheckTypeChanged()">
+        <option value="http">HTTP(S) — request a URL</option>
+        <option value="tcp">TCP — connect to a port</option>
+        <option value="icmp">Ping (ICMP) — is the IP reachable</option>
+      </select>
+    </div>
+    <div class="form-row" id="svcTargetRow" style="display:none">
+      <label>Monitor target IP <span style="color:var(--text-3);font-weight:400;text-transform:none">(defaults to the host)</span></label>
+      <input type="text" id="svcContainerIp" class="mono" placeholder="e.g. 192.168.1.42 — the container's own IP">
+    </div>
+    <div class="form-row" id="svcUrlRow">
+      <label>URL <span style="color:var(--text-3);font-weight:400;text-transform:none">(used by HTTP check)</span></label>
       <input type="text" id="svcUrl" placeholder="http://192.168.1.10:8080" oninput="if(this.value!==this.dataset.auto)this.dataset.auto=''">
     </div>
     <div class="form-row">
@@ -1328,6 +1340,7 @@
     <button class="svc-status" id="svcDetailStatusBtn" onclick="cycleSvcDetailStatus()">unknown</button>
     <div class="svc-detail-actions">
       <a id="svcDetailUrlBtn" href="#" target="_blank" class="btn-ghost" style="font-size:11px;padding:3px 8px;display:none">↗ URL</a>
+      <button class="btn-ghost" style="font-size:11px;padding:3px 8px" onclick="openEditService(svcDetailId)" title="Open the full edit dialog">✎ Edit</button>
       <button class="btn btn-primary" style="font-size:11px;padding:4px 11px" onclick="saveSvcDetail()">Save</button>
       <button class="btn-ghost btn-danger" style="font-size:12px;padding:3px 8px" onclick="deleteSvcDetail()">Delete</button>
       <button class="btn-ghost" onclick="hideSvcDetail()" style="font-size:17px;padding:1px 7px;line-height:1">×</button>

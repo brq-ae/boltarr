@@ -901,17 +901,21 @@ class ServiceIn(BaseModel):
     url:          Optional[str] = None
     icon:         Optional[str] = None
     container_ip: Optional[str] = None
+    check_type:   Optional[str] = None   # http | tcp | icmp | None (auto)
 
 
 class ServiceUpdate(BaseModel):
-    name:        Optional[str] = None
-    description: Optional[str] = None
-    port:        Optional[int] = None
-    protocol:    Optional[str] = None
-    status:      Optional[str] = None
-    url:         Optional[str] = None
-    icon:        Optional[str] = None
-    monitored:   Optional[bool] = None
+    name:         Optional[str] = None
+    description:  Optional[str] = None
+    port:         Optional[int] = None
+    protocol:     Optional[str] = None
+    status:       Optional[str] = None
+    url:          Optional[str] = None
+    icon:         Optional[str] = None
+    monitored:    Optional[bool] = None
+    container_ip: Optional[str] = None
+    check_type:   Optional[str] = None
+    host_ip:      Optional[str] = None   # move the service to another host
 
 
 @app.get("/api/services")
@@ -933,10 +937,11 @@ def add_service(ip: str, data: ServiceIn):
         if not host:
             raise HTTPException(404, "Host not found")
         conn.execute(
-            "INSERT INTO services (host_id, name, description, port, protocol, status, url, icon, container_ip)"
-            " VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO services (host_id, name, description, port, protocol, status, url, icon, container_ip, check_type)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
             (host["id"], data.name, data.description, data.port, data.protocol,
-             data.status, data.url, data.icon, data.container_ip),
+             data.status, data.url, data.icon, data.container_ip,
+             (data.check_type or None) and data.check_type.strip().lower() or None),
         )
         conn.commit()
         row = conn.execute("""
@@ -954,19 +959,30 @@ def update_service(svc_id: int, data: ServiceUpdate):
         if not s:
             raise HTTPException(404, "Service not found")
         monitored = None if data.monitored is None else (1 if data.monitored else 0)
+        new_host_id = None
+        if data.host_ip:
+            hrow = conn.execute("SELECT id FROM hosts WHERE ip=?", (data.host_ip,)).fetchone()
+            if not hrow:
+                raise HTTPException(404, "Host not found")
+            new_host_id = hrow["id"]
         conn.execute("""
             UPDATE services SET
-                name        = COALESCE(?, name),
-                description = ?,
-                port        = ?,
-                protocol    = COALESCE(?, protocol),
-                status      = COALESCE(?, status),
-                url         = ?,
-                icon        = COALESCE(?, icon),
-                monitored   = COALESCE(?, monitored)
+                host_id      = COALESCE(?, host_id),
+                name         = COALESCE(?, name),
+                description  = ?,
+                port         = ?,
+                protocol     = COALESCE(?, protocol),
+                status       = COALESCE(?, status),
+                url          = ?,
+                icon         = COALESCE(?, icon),
+                monitored    = COALESCE(?, monitored),
+                container_ip = CASE WHEN ? IS NULL THEN container_ip ELSE NULLIF(TRIM(?), '') END,
+                check_type   = CASE WHEN ? IS NULL THEN check_type   ELSE NULLIF(LOWER(TRIM(?)), '') END
             WHERE id=?
-        """, (data.name, data.description, data.port, data.protocol,
-              data.status, data.url, data.icon, monitored, svc_id))
+        """, (new_host_id, data.name, data.description, data.port, data.protocol,
+              data.status, data.url, data.icon, monitored,
+              data.container_ip, data.container_ip,
+              data.check_type, data.check_type, svc_id))
         conn.commit()
         row = conn.execute("""
             SELECT s.*, h.ip, h.hostname FROM services s

@@ -157,6 +157,7 @@ def init_db():
             "ALTER TABLE services ADD COLUMN monitor_alerted INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE services ADD COLUMN public INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE services ADD COLUMN public_name TEXT",
+            "ALTER TABLE services ADD COLUMN check_type TEXT",   # http | tcp | icmp | NULL(auto-infer)
             # DHCP range lives on the subnet (one range per subnet for now; multi-pool
             # per subnet can be added later if requested). Hosts are classified static/
             # dynamic by whether their IP falls in it; static_override forces a value.

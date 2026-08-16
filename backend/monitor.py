@@ -16,6 +16,7 @@ but a down-ALERT only fires once the service has been continuously down for
 comes back, but only if a down-alert had been sent.
 """
 import socket
+import subprocess
 import threading
 from datetime import datetime, timezone, time as time_of_day
 
@@ -28,13 +29,15 @@ from . import notify
 CHECK_INTERVAL = 60          # default probe interval; live value = get_check_seconds()
 HTTP_TIMEOUT   = 6           # seconds per HTTP probe
 TCP_TIMEOUT    = 5           # seconds per TCP probe
+ICMP_TIMEOUT   = 4           # seconds per ICMP (ping) probe
 
 _thread: threading.Thread | None = None
 _stop = threading.Event()
 
 _SELECT = """
     SELECT s.id, s.name, s.url, s.port, s.monitor_status,
-           s.monitor_fail_since, s.monitor_alerted, h.ip, h.hostname, h.online
+           s.monitor_fail_since, s.monitor_alerted, s.container_ip, s.check_type,
+           h.ip, h.hostname, h.online
     FROM services s JOIN hosts h ON s.host_id = h.id
 """
 
@@ -83,14 +86,34 @@ def _probe_tcp(host: str, port: int) -> bool:
         return False
 
 
+def _probe_icmp(host: str) -> bool:
+    """One ICMP echo. Up = a reply. Needs the NET_RAW cap (which Boltarr has)."""
+    try:
+        r = subprocess.run(
+            ["ping", "-c", "1", "-W", str(ICMP_TIMEOUT), host],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=ICMP_TIMEOUT + 2)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def probe(service: dict) -> str:
+    """Check a monitored service. The method is explicit (check_type = http|tcp|icmp);
+    older services with no check_type fall back to the old rule (URL -> http, else tcp).
+    The TCP/ICMP target is container_ip if set, otherwise the linked host's IP — so a
+    service can 'live on' host A while its check points at the container's own IP."""
+    ct = (service.get("check_type") or "").strip().lower()
     url = (service.get("url") or "").strip()
-    if url:
-        return "up" if _probe_http(url) else "down"
-    host = service.get("ip")
+    target = (service.get("container_ip") or "").strip() or (service.get("ip") or "")
     port = service.get("port")
-    if host and port:
-        return "up" if _probe_tcp(host, int(port)) else "down"
+    if ct not in ("http", "tcp", "icmp"):
+        ct = "http" if url else "tcp"
+    if ct == "http":
+        return "up" if (url and _probe_http(url)) else "down"
+    if ct == "tcp":
+        return "up" if (target and port and _probe_tcp(target, int(port))) else "down"
+    if ct == "icmp":
+        return "up" if (target and _probe_icmp(target)) else "down"
     return "unknown"
 
 

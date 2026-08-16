@@ -2076,6 +2076,26 @@ async function deleteSvc(id, hostIp) {
   renderServicesTable();
 }
 
+// Fill the modal's host dropdown (regular hosts + a Containers group) and
+// pre-select `selectedIp` if given. Shared by Add and Edit.
+function populateSvcHostSelect(selectedIp) {
+  const sel = document.getElementById("svcHostIp");
+  const regularHosts   = allHosts.filter(h => h.device_type !== "container");
+  const containerHosts = allHosts.filter(h => h.device_type === "container");
+  const hostOpts = host => `<option value="${host.ip}">${host.ip}${host.hostname ? " — " + host.hostname : ""}</option>`;
+  sel.innerHTML =
+    regularHosts.map(hostOpts).join("") +
+    (containerHosts.length ? `<optgroup label="── Containers ──">${containerHosts.map(hostOpts).join("")}</optgroup>` : "");
+  if (selectedIp && sel.querySelector(`option[value="${CSS.escape ? CSS.escape(selectedIp) : selectedIp}"]`)) sel.value = selectedIp;
+}
+
+// Show the URL field for HTTP checks, the target-IP field for TCP/Ping.
+function svcCheckTypeChanged() {
+  const ct = document.getElementById("svcCheckType").value;
+  document.getElementById("svcUrlRow").style.display    = (ct === "http") ? "" : "none";
+  document.getElementById("svcTargetRow").style.display = (ct === "http") ? "none" : "";
+}
+
 function openEditService(id) {
   const s = allServices.find(s => s.id === id);
   if (!s) return;
@@ -2089,7 +2109,11 @@ function openEditService(id) {
   const urlEl = document.getElementById("svcUrl");
   urlEl.value = s.url || "";
   urlEl.dataset.auto = "";
-  document.getElementById("svcHostRow").style.display        = "none";
+  document.getElementById("svcContainerIp").value = s.container_ip || "";
+  document.getElementById("svcCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
+  svcCheckTypeChanged();
+  populateSvcHostSelect(s.ip);                                 // let the host be changed on edit too
+  document.getElementById("svcHostRow").style.display        = "";
   document.getElementById("containerPickRow").style.display  = "none";
   document.getElementById("svcDeleteBtn").style.display      = "";
   document.getElementById("serviceModal").classList.add("open");
@@ -2106,6 +2130,9 @@ function openAddService(presetIp) {
   const svcUrlEl = document.getElementById("svcUrl");
   svcUrlEl.value = "";
   svcUrlEl.dataset.auto = "";
+  document.getElementById("svcContainerIp").value = "";
+  document.getElementById("svcCheckType").value   = "http";
+  svcCheckTypeChanged();
   document.getElementById("svcDeleteBtn").style.display = "none";
 
   pickedContainerIp = null;
@@ -2116,25 +2143,11 @@ function openAddService(presetIp) {
   document.getElementById("containerPickChevron").textContent = "▸";
   renderContainerPick();
 
-  const hostRow = document.getElementById("svcHostRow");
-  hostRow.style.display = "";
-  const sel = document.getElementById("svcHostIp");
-  // Group hosts: regular hosts first, then containers (which can themselves run services)
-  const regularHosts   = allHosts.filter(h => h.device_type !== "container");
-  const containerHosts = allHosts.filter(h => h.device_type === "container");
-  const hostOpts = host => `<option value="${host.ip}">${host.ip}${host.hostname ? " — " + host.hostname : ""}</option>`;
-  sel.innerHTML =
-    regularHosts.map(hostOpts).join("") +
-    (containerHosts.length
-      ? `<optgroup label="── Containers ──">${containerHosts.map(hostOpts).join("")}</optgroup>`
-      : "");
+  document.getElementById("svcHostRow").style.display = "";
   // Pre-select: explicit preset → last used → first option
-  if (presetIp && sel.querySelector(`option[value="${presetIp}"]`)) {
-    sel.value = presetIp;
-  } else {
-    const last = localStorage.getItem("boltarr_last_svc_host");
-    if (last && sel.querySelector(`option[value="${last}"]`)) sel.value = last;
-  }
+  const last   = localStorage.getItem("boltarr_last_svc_host");
+  const preset = (presetIp && allHosts.some(h => h.ip === presetIp)) ? presetIp : (last || null);
+  populateSvcHostSelect(preset);
   document.getElementById("serviceModal").classList.add("open");
 }
 
@@ -2169,6 +2182,7 @@ function toggleContainerPick() {
 function pickContainer(ip, name) {
   pickedContainerIp = ip;
   document.getElementById("svcName").value = name;
+  document.getElementById("svcContainerIp").value = ip;   // also the monitor target
   const urlEl = document.getElementById("svcUrl");
   const port  = document.getElementById("svcPort").value;
   const auto  = port ? `http://${ip}:${port}` : `http://${ip}`;
@@ -2193,11 +2207,17 @@ async function saveServiceModal() {
   const proto   = document.getElementById("svcProto").value;
   const status  = document.getElementById("svcStatus").value;
   const url     = document.getElementById("svcUrl").value.trim() || null;
+  const checkType   = document.getElementById("svcCheckType").value;
+  const containerIp = document.getElementById("svcContainerIp").value.trim();
   if (!name) return alert("Service name is required.");
 
   try {
     if (editId) {
-      const svc = await api("PUT", `/api/services/${editId}`, { name, description: desc, port, protocol: proto, status, url });
+      const svc = await api("PUT", `/api/services/${editId}`, {
+        name, description: desc, port, protocol: proto, status, url,
+        check_type: checkType, container_ip: containerIp,   // "" clears the override
+        host_ip: document.getElementById("svcHostIp").value // allow moving to another host
+      });
       allServices = allServices.map(s => s.id === parseInt(editId) ? { ...s, ...svc } : s);
       const row = document.getElementById(`svc-row-${editId}`);
       if (row) row.outerHTML = svcRowHTML(svc, svc.ip);
@@ -2205,7 +2225,7 @@ async function saveServiceModal() {
       const hostIp = document.getElementById("svcHostIp").value;
       const svc = await api("POST", `/api/hosts/${hostIp}/services`, {
         name, description: desc, port, protocol: proto, status, url,
-        container_ip: pickedContainerIp || null
+        check_type: checkType, container_ip: containerIp || null
       });
       allServices.push(svc);
       pickedContainerIp = null;
