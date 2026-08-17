@@ -202,20 +202,84 @@ def _mac_map(conn, events: list[dict]) -> dict:
             conn.execute(f"SELECT ip, mac FROM hosts WHERE ip IN ({q})", tuple(ips)) if r["mac"]}
 
 
-def summarize(events: list[dict], cap: int = 6, mac_map: dict | None = None) -> str:
+# A device counts as "flapping" when it toggled both ways repeatedly in the
+# window — pulled into its own rollup instead of spamming the offline/online
+# lists. Tunable here (not yet a user setting).
+FLAP_MIN = 2   # needs >= this many offline AND >= this many online
+
+
+def _ip_key(ip: str):
+    """Sort key: numeric per-octet for IPv4, so .9 < .80 < .100. Non-IPv4 sorts last."""
+    parts = str(ip).split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return (0, tuple(int(p) for p in parts))
+    return (1, (str(ip),))
+
+
+def _label_key(ev: dict) -> str:
+    """Aggregation identity: ip:port for port events, else ip. Events are IP-keyed
+    (the schema stores no per-event MAC), so a reused dynamic IP collapses together
+    — the shown MAC is whatever currently holds that IP."""
+    t = ev["type"]
+    return f"{ev['ip']}:{ev['port']}" if t in ("port_opened", "port_closed") and ev.get("port") is not None else ev["ip"]
+
+
+def _mac_suffix(ip: str, mac_map: dict | None) -> str:
+    mac = (mac_map or {}).get(ip)
+    return f" [{mac}]" if mac else ""
+
+
+def _agg_line(icon: str, sing: str, plur: str, events: list[dict], mac_map, cap: int) -> str:
+    """One summary line: dedupe by identity, count per device, noisiest first."""
+    counts: dict[str, int] = {}
+    ip_of: dict[str, str] = {}
+    for e in events:
+        k = _label_key(e)
+        counts[k] = counts.get(k, 0) + 1
+        ip_of[k] = e["ip"]
+    keys = sorted(counts, key=lambda k: (-counts[k], _ip_key(ip_of[k])))
+    devices, total = len(keys), sum(counts.values())
+    shown = keys[:cap]
+    parts = [f"{k}{_mac_suffix(ip_of[k], mac_map)}" + (f" ×{counts[k]}" if counts[k] > 1 else "") for k in shown]
+    more = f" +{devices - cap} more" if devices > cap else ""
+    noun = sing if devices == 1 else plur
+    # Clarify device-vs-event count only when they differ (the old confusion).
+    head = f"{devices} {noun}" + (f" ({total} events)" if total != devices else "")
+    return f"{icon} {head}: {', '.join(parts)}{more}"
+
+
+def summarize(events: list[dict], cap: int = 8, mac_map: dict | None = None) -> str:
     by: dict[str, list] = {}
     for e in events:
         by.setdefault(e["type"], []).append(e)
+
+    # Flapping rollup: IPs with >= FLAP_MIN offline AND >= FLAP_MIN online.
+    off_by, on_by = {}, {}
+    for e in by.get("host_offline", []):
+        off_by[e["ip"]] = off_by.get(e["ip"], 0) + 1
+    for e in by.get("host_online", []):
+        on_by[e["ip"]] = on_by.get(e["ip"], 0) + 1
+    flappers = {ip for ip in off_by if off_by[ip] >= FLAP_MIN and on_by.get(ip, 0) >= FLAP_MIN}
+
     lines = []
+    if flappers:
+        keys = sorted(flappers, key=lambda ip: (-(off_by[ip] + on_by[ip]), _ip_key(ip)))
+        shown = keys[:cap]
+        parts = [f"{ip}{_mac_suffix(ip, mac_map)} {off_by[ip]}↓ {on_by[ip]}↑" for ip in shown]
+        more = f" +{len(keys) - cap} more" if len(keys) > cap else ""
+        noun = "device" if len(keys) == 1 else "devices"
+        lines.append(f"🔁 Flapping ({len(keys)} {noun}): {', '.join(parts)}{more}")
+
     for t in _ORDER:
         evs = by.get(t)
         if not evs:
             continue
+        if t in ("host_offline", "host_online") and flappers:
+            evs = [e for e in evs if e["ip"] not in flappers]   # flappers shown above
+            if not evs:
+                continue
         icon, sing, plur = _LABEL[t]
-        n = len(evs)
-        details = [_detail(e, mac_map) for e in evs[:cap]]
-        more = f" +{n - cap} more" if n > cap else ""
-        lines.append(f"{icon} {n} {sing if n == 1 else plur}: {', '.join(details)}{more}")
+        lines.append(_agg_line(icon, sing, plur, evs, mac_map, cap))
     return "\n".join(lines)
 
 
