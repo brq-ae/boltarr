@@ -58,11 +58,6 @@
       </button>
       <label style="margin-top:6px">Model override</label>
       <select id="globalModel" title="Leave empty to use the default from settings"></select>
-      <div style="display:flex;gap:6px;margin-top:10px">
-        <button class="btn" style="flex:1;font-size:11px" onclick="downloadBackup()">⬇ Backup</button>
-        <button class="btn" style="flex:1;font-size:11px" onclick="document.getElementById('restoreInput').click()">⬆ Restore</button>
-        <input type="file" id="restoreInput" accept=".zip" style="display:none" onchange="restoreBackup(this)">
-      </div>
     </div>
   </aside>
 
@@ -146,6 +141,13 @@
 
       <!-- Hosts tab -->
       <div class="tab-panel" id="panel-hosts">
+        <div class="svc-toolbar">
+          <div class="svc-subtabs">
+            <button class="svc-subtab active" id="hostsTabBtn-list" onclick="setHostsTab('list')">List</button>
+            <button class="svc-subtab" id="hostsTabBtn-iphistory" onclick="setHostsTab('iphistory')">IP History</button>
+          </div>
+        </div>
+        <div id="hosts-panel-list" class="hosts-sub">
         <div class="table-toolbar">
           <input type="text" class="search-input" id="tableFilter" placeholder="Filter by IP, hostname, service…">
           <select id="classFilter" class="search-input" style="max-width:150px;flex-shrink:0">
@@ -189,6 +191,35 @@
             </thead>
             <tbody></tbody>
           </table>
+        </div>
+        </div>
+
+        <!-- IP History: static-range IPs and how long since each last answered -->
+        <div id="hosts-panel-iphistory" class="hosts-sub" style="display:none">
+          <div class="table-toolbar">
+            <select id="iphSubnet" class="search-input" style="max-width:220px;flex-shrink:0" onchange="loadIpHistory()"></select>
+            <input type="text" class="search-input" id="iphFilter" placeholder="Filter by IP, hostname, MAC…" oninput="renderIpHistory()">
+            <span class="host-count" id="iphCount"></span>
+          </div>
+          <div class="iph-chips" id="iphChips"></div>
+          <div class="iph-note" id="iphNote"></div>
+          <div class="table-wrap">
+            <table id="iphTable">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th class="td-ip" onclick="sortIpHistory('ip')">IP</th>
+                  <th onclick="sortIpHistory('days')">Last seen</th>
+                  <th>Hostname</th>
+                  <th class="td-mac">MAC</th>
+                  <th>Vendor</th>
+                  <th>First seen</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -1271,6 +1302,21 @@
 
       </div></details>
       <details class="settings-section">
+        <summary>🕓 IP History</summary>
+        <div class="acc-body">
+      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+        Hosts → IP History lists every static-range IP (outside the DHCP pool) and how long since it last answered. These decide when an unseen IP reads as stale (probably free) or gone (safe to reuse).
+      </p>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Stale after</label>
+        <input id="setIphStale" type="number" min="1" style="width:64px" value="30">
+        <span style="font-size:11px;color:var(--text-3)">days · gone after</span>
+        <input id="setIphGone" type="number" min="1" style="width:64px" value="60">
+        <span style="font-size:11px;color:var(--text-3)">days</span>
+      </div>
+
+      </div></details>
+      <details class="settings-section">
         <summary>🔔 Changes</summary>
         <div class="acc-body">
       <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Everything is recorded to the Changes feed; alerts are the subset that push to ntfy.</p>
@@ -1336,7 +1382,12 @@
       <details class="settings-section">
         <summary>🗄 Data</summary>
         <div class="acc-body">
-          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup &amp; Restore are in the sidebar (bottom-left). Factory reset permanently wipes all network data — use with care.</p>
+          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup downloads a zip of the database + settings (it includes your tokens and keys — keep it private). Restore replaces everything with a backup. Factory reset permanently wipes all network data — use with care.</p>
+          <div style="display:flex;gap:6px">
+            <button class="btn" style="font-size:12px" onclick="downloadBackup()">⬇ Backup</button>
+            <button class="btn" style="font-size:12px" onclick="document.getElementById('restoreInput').click()">⬆ Restore</button>
+            <input type="file" id="restoreInput" accept=".zip" style="display:none" onchange="restoreBackup(this)">
+          </div>
           <button class="btn" style="font-size:12px;align-self:flex-start" onclick="resetAllUptime()">↺ Reset all uptime</button>
           <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" onclick="openFactoryReset()">↺ Factory reset</button>
         </div>

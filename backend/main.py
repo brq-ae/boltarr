@@ -126,6 +126,85 @@ def delete_subnet(subnet_id: int):
     return {"ok": True}
 
 
+_IP_HISTORY_MAX = 4096   # largest subnet (addresses) the IP History view will enumerate
+
+
+@app.get("/api/subnets/{subnet_id}/ip-history")
+def subnet_ip_history(subnet_id: int):
+    """Every static-range IP of a subnet with how long since it last answered.
+    Static range = the subnet minus its DHCP pool (whole subnet if no pool is set)."""
+    cfg = get_config()["ip_history"]
+    stale_days = max(1, int(cfg.get("stale_days") or 30))
+    gone_days  = max(stale_days, int(cfg.get("gone_days") or 60))
+    with get_conn() as conn:
+        subnet = conn.execute("SELECT * FROM subnets WHERE id=?", (subnet_id,)).fetchone()
+        if not subnet:
+            raise HTTPException(404, "Subnet not found")
+        subnet = dict(subnet)
+        try:
+            net = ipaddress.ip_network(subnet["cidr"], strict=False)
+        except ValueError:
+            raise HTTPException(422, "Subnet CIDR is invalid")
+        if net.num_addresses > _IP_HISTORY_MAX:
+            raise HTTPException(422, f"Subnet too large for IP History (max {_IP_HISTORY_MAX} addresses)")
+        pool = None
+        try:
+            if subnet.get("dhcp_start") and subnet.get("dhcp_end"):
+                pool = (ipaddress.ip_address(subnet["dhcp_start"]), ipaddress.ip_address(subnet["dhcp_end"]))
+        except ValueError:
+            pool = None
+
+        hosts = {h["ip"]: dict(h) for h in conn.execute(
+            "SELECT id, ip, mac, hostname, vendor, device_type, online, first_seen, last_seen FROM hosts")}
+        by_id = {h["id"]: h for h in hosts.values()}
+        aliases = {a["ip"]: by_id.get(a["host_id"]) for a in conn.execute("SELECT host_id, ip FROM host_aliases")}
+        mac_changes = {}
+        for e in conn.execute(
+                "SELECT ip, ts, old_value, new_value FROM change_events WHERE type='mac_changed' ORDER BY ts"):
+            mac_changes[e["ip"]] = {"ts": e["ts"], "old": e["old_value"], "new": e["new_value"]}
+        since = conn.execute("SELECT MIN(first_seen) AS m FROM hosts").fetchone()["m"]
+
+    now = datetime.now(timezone.utc)
+    counts = {"in_use": 0, "recent": 0, "stale": 0, "gone": 0, "never": 0}
+    rows = []
+    for ip in net.hosts():
+        if pool and pool[0] <= ip <= pool[1]:
+            continue
+        ip_s = str(ip)
+        h, alias_of = hosts.get(ip_s), None
+        if not h and aliases.get(ip_s):
+            h = aliases[ip_s]
+            alias_of = h["ip"]
+        row = {"ip": ip_s, "alias_of": alias_of, "mac_change": mac_changes.get(ip_s)}
+        if not h:
+            row["status"] = "never"
+        else:
+            days = None
+            try:
+                seen = datetime.strptime(h["last_seen"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                days = max(0, (now - seen).days)
+            except (TypeError, ValueError):
+                pass
+            if h.get("online") == 1 or (h.get("online") is None and days == 0):
+                status = "in_use"
+            elif days is None or days < stale_days:
+                status = "recent"
+            elif days < gone_days:
+                status = "stale"
+            else:
+                status = "gone"
+            row.update({"status": status, "days": days, "host_ip": h["ip"],
+                        "hostname": h.get("hostname"), "mac": h.get("mac"), "vendor": h.get("vendor"),
+                        "device_type": h.get("device_type"), "online": h.get("online"),
+                        "first_seen": h.get("first_seen"), "last_seen": h.get("last_seen")})
+        counts[row["status"]] += 1
+        rows.append(row)
+    return {"subnet": {"id": subnet["id"], "name": subnet.get("name"), "cidr": subnet["cidr"],
+                       "dhcp_start": subnet.get("dhcp_start"), "dhcp_end": subnet.get("dhcp_end")},
+            "has_pool": bool(pool), "stale_days": stale_days, "gone_days": gone_days,
+            "tracking_since": since, "counts": counts, "ips": rows}
+
+
 # ── Scans ─────────────────────────────────────────────────────────────────────
 
 class ScanOptions(BaseModel):
@@ -1691,7 +1770,8 @@ def get_settings():
             "llm": llm, "notifications": ntfy, "statuspage": sp,
             "change_tracking": dict(cfg["change_tracking"]),
             "change_alerts": ca,
-            "liveness": dict(cfg["liveness"])}
+            "liveness": dict(cfg["liveness"]),
+            "ip_history": dict(cfg["ip_history"])}
 
 
 class ChangeTrackingIn(BaseModel):
@@ -1720,6 +1800,24 @@ def update_change_tracking(data: ChangeTrackingIn):
     cfg["change_tracking"] = ct
     save_config(cfg)
     return {"ok": True, "change_tracking": ct}
+
+
+class IpHistoryIn(BaseModel):
+    stale_days: Optional[int] = None
+    gone_days:  Optional[int] = None
+
+
+@app.put("/api/settings/ip-history")
+def update_ip_history(data: IpHistoryIn):
+    cfg = get_config()
+    ih = cfg.get("ip_history", {})
+    if data.stale_days is not None: ih["stale_days"] = max(1, int(data.stale_days))
+    if data.gone_days is not None:  ih["gone_days"]  = max(1, int(data.gone_days))
+    if ih.get("gone_days", 60) < ih.get("stale_days", 30):
+        raise HTTPException(422, "'Gone after' must be at least 'Stale after'")
+    cfg["ip_history"] = ih
+    save_config(cfg)
+    return {"ok": True, "ip_history": ih}
 
 
 class LivenessIn(BaseModel):

@@ -94,6 +94,12 @@ _DEFAULTS: dict = {
         "digest_time": "08:00",
         "last_digest": "",         # runtime: last digest sent (ISO)
     },
+    # IP History: how long a static-range IP must go unseen before it reads as
+    # stale (probably free) and gone (safe to reuse).
+    "ip_history": {
+        "stale_days": 30,
+        "gone_days": 60,
+    },
 }
 
 
@@ -107,6 +113,7 @@ def get_config() -> dict:
         "liveness": dict(_DEFAULTS["liveness"]),
         "change_tracking": dict(_DEFAULTS["change_tracking"]),
         "change_alerts": dict(_DEFAULTS["change_alerts"]),
+        "ip_history": dict(_DEFAULTS["ip_history"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -127,6 +134,8 @@ def get_config() -> dict:
             cfg["change_tracking"].update({k: v for k, v in raw["change_tracking"].items() if v is not None})
         if "change_alerts" in raw:
             cfg["change_alerts"].update({k: v for k, v in raw["change_alerts"].items() if v is not None})
+        if "ip_history" in raw:
+            cfg["ip_history"].update({k: v for k, v in raw["ip_history"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -209,6 +218,10 @@ def get_change_tracking_config() -> dict:
 
 def get_change_alerts_config() -> dict:
     return get_config()["change_alerts"]
+
+
+def get_ip_history_config() -> dict:
+    return get_config()["ip_history"]
 
 
 def get_liveness_config() -> dict:

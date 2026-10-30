@@ -2013,3 +2013,28 @@ tbody td {
 }
 .col-menu label:hover { background: var(--surface3); }
 .col-menu input { accent-color: var(--accent); }
+
+/* ── Hosts → IP History ─────────────────────────────────────────────────────── */
+.hosts-sub { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.iph-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px 0; }
+.iph-chip {
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text-2);
+  font-size: 11px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+}
+.iph-chip b { font-family: var(--font-mono); font-weight: 600; margin-left: 3px; }
+.iph-chip:hover  { color: var(--text-1); }
+.iph-chip.active { border-color: var(--accent); color: var(--text-1); }
+.iph-note { padding: 8px 14px 0; font-size: 11px; line-height: 1.6; color: var(--text-3); }
+.iph-badge {
+  font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 4px; white-space: nowrap;
+  background: var(--surface2); color: var(--text-3);
+}
+.iph-badge.iph-in_use { background: oklch(30% 0.07 150); color: oklch(82% 0.13 150); }
+.iph-badge.iph-recent { background: oklch(28% 0.03 240); color: oklch(80% 0.04 240); }
+.iph-badge.iph-stale  { background: oklch(32% 0.09 75);  color: oklch(84% 0.13 80); }
+.iph-badge.iph-gone   { background: oklch(30% 0.09 25);  color: oklch(80% 0.13 25); }
+.iph-chip.iph-in_use.active { border-color: oklch(65% 0.13 150); }
+.iph-chip.iph-stale.active  { border-color: oklch(70% 0.13 80); }
+.iph-chip.iph-gone.active   { border-color: oklch(65% 0.15 25); }
+#iphTable tr.iph-row-link { cursor: pointer; }
+#iphTable tr.iph-row-never td { color: var(--text-3); }

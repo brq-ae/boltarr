@@ -1323,6 +1323,139 @@ function setScanTab(tab) {
   if (tab === "history")   loadScans();   // always refresh (picks up running scans/probes + starts the live poll)
 }
 
+// ── Hosts sub-tabs + IP History ──────────────────────────────────────────────
+
+let currentHostsTab = "list";
+let _iphData = null;
+let _iphStatus = "all";              // chip filter; "all" leaves never-seen out
+let _iphSort = { key: "days", dir: -1 };
+
+function setHostsTab(tab) {
+  currentHostsTab = tab;
+  document.getElementById("hosts-panel-list").style.display      = tab === "list"      ? "" : "none";
+  document.getElementById("hosts-panel-iphistory").style.display = tab === "iphistory" ? "" : "none";
+  document.querySelectorAll("#panel-hosts .svc-subtab").forEach(b => b.classList.remove("active"));
+  document.getElementById(`hostsTabBtn-${tab}`)?.classList.add("active");
+  if (tab === "iphistory") loadIpHistory(true);
+}
+
+const _IPH_STATUS = {
+  in_use: { label: "In use",     cls: "iph-in_use" },
+  recent: { label: "Recent",     cls: "iph-recent" },
+  stale:  { label: "Stale",      cls: "iph-stale"  },
+  gone:   { label: "Gone",       cls: "iph-gone"   },
+  never:  { label: "Never seen", cls: "iph-never"  },
+};
+
+async function loadIpHistory(refreshSubnets = false) {
+  const sel = document.getElementById("iphSubnet");
+  if (refreshSubnets || !sel.options.length) {
+    const prev = sel.value;
+    const subnets = await api("GET", "/api/subnets");
+    if (!subnets.length) {
+      document.getElementById("iphNote").textContent = "No subnets yet — add one in Settings → Subnets.";
+      return;
+    }
+    sel.innerHTML = subnets.map(s =>
+      `<option value="${s.id}">${escHtml(s.name || s.cidr)} · ${escHtml(s.cidr)}</option>`).join("");
+    const withPool = subnets.find(s => s.dhcp_start && s.dhcp_end);
+    if (prev && subnets.some(s => String(s.id) === prev)) sel.value = prev;
+    else if (withPool) sel.value = withPool.id;
+  }
+  try {
+    _iphData = await api("GET", `/api/subnets/${sel.value}/ip-history`);
+  } catch (e) {
+    _iphData = null;
+    document.getElementById("iphChips").innerHTML = "";
+    document.getElementById("iphNote").textContent = e.message;
+    document.querySelector("#iphTable tbody").innerHTML = "";
+    document.getElementById("iphCount").textContent = "";
+    return;
+  }
+  renderIpHistory();
+}
+
+function setIpHistoryStatus(st) { _iphStatus = st; renderIpHistory(); }
+
+function sortIpHistory(key) {
+  _iphSort = _iphSort.key === key ? { key, dir: -_iphSort.dir } : { key, dir: key === "days" ? -1 : 1 };
+  renderIpHistory();
+}
+
+function _iphDaysText(d) {
+  if (d == null) return "—";
+  if (d === 0) return "today";
+  return d === 1 ? "1 day ago" : `${d} days ago`;
+}
+
+function renderIpHistory() {
+  const data = _iphData;
+  if (!data) return;
+  const c = data.counts;
+  const shown = c.in_use + c.recent + c.stale + c.gone;
+  const chip = (st, label, n) =>
+    `<button class="iph-chip ${st !== "all" ? _IPH_STATUS[st].cls : ""}${_iphStatus === st ? " active" : ""}" onclick="setIpHistoryStatus('${st}')">${label} <b>${n}</b></button>`;
+  document.getElementById("iphChips").innerHTML =
+    chip("all", "All seen", shown) +
+    ["in_use", "recent", "stale", "gone", "never"].map(st => chip(st, _IPH_STATUS[st].label, c[st])).join("");
+
+  const s = data.subnet;
+  const notes = [];
+  notes.push(data.has_pool
+    ? `Static range = ${escHtml(s.cidr)} outside the DHCP pool ${escHtml(s.dhcp_start)}–${escHtml(s.dhcp_end)}.`
+    : `No DHCP pool set for this subnet, so every IP is shown. Set the pool in Settings → Subnets to limit this to the static range.`);
+  notes.push(`Stale after ${data.stale_days} days, gone after ${data.gone_days} (Settings → IP History).`);
+  if (data.tracking_since) notes.push(`Tracking since ${escHtml(fmtLocal(data.tracking_since))} — "never seen" means not since then.`);
+  if (_iphStatus === "all" && c.never) notes.push(`${c.never} never-seen IPs hidden — pick "Never seen" to list them.`);
+  document.getElementById("iphNote").innerHTML = notes.join(" ");
+
+  const q = (document.getElementById("iphFilter").value || "").trim().toLowerCase();
+  let rows = data.ips.filter(r => _iphStatus === "all" ? r.status !== "never" : r.status === _iphStatus);
+  if (q) rows = rows.filter(r =>
+    [r.ip, r.hostname, r.mac, r.vendor, r.alias_of].some(v => v && String(v).toLowerCase().includes(q)));
+
+  const ipNum = ip => ip.split(".").reduce((a, o) => a * 256 + (+o), 0);
+  const { key, dir } = _iphSort;
+  rows.sort((a, b) => {
+    if (key === "days") {
+      const da = a.status === "never" ? -1 : (a.days ?? 0);
+      const db = b.status === "never" ? -1 : (b.days ?? 0);
+      if (da !== db) return (da - db) * dir;
+    } else {
+      return (ipNum(a.ip) - ipNum(b.ip)) * dir;
+    }
+    return ipNum(a.ip) - ipNum(b.ip);
+  });
+
+  document.getElementById("iphCount").textContent = `${rows.length} IP${rows.length === 1 ? "" : "s"}`;
+  const tbody = document.querySelector("#iphTable tbody");
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-3" style="text-align:center;padding:18px">Nothing here.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const st = _IPH_STATUS[r.status];
+    const note = [];
+    if (r.alias_of) note.push(`alias of ${escHtml(r.alias_of)}`);
+    if (r.mac_change) note.push(`different device since ${escHtml(fmtLocal(r.mac_change.ts))}`);
+    const seen = r.status === "never" ? "—"
+      : r.status === "in_use" ? (r.online === 1 ? "online now" : "today")
+      : `<span title="${escHtml(fmtLocal(r.last_seen))}">${_iphDaysText(r.days)}</span>`;
+    return `<tr class="${r.host_ip ? "iph-row-link" : "iph-row-never"}" ${r.host_ip ? `data-host="${escHtml(r.host_ip)}"` : ""}>
+      <td><span class="iph-badge ${st.cls}">${st.label}</span></td>
+      <td class="td-ip">${escHtml(r.ip)}</td>
+      <td>${seen}</td>
+      <td>${escHtml(r.hostname || "")}</td>
+      <td class="td-mac">${escHtml(r.mac || "")}</td>
+      <td>${escHtml(r.vendor || "")}</td>
+      <td>${r.first_seen ? escHtml(fmtLocal(r.first_seen)) : ""}</td>
+      <td class="text-3">${note.join(" · ")}</td>
+    </tr>`;
+  }).join("");
+  tbody.querySelectorAll("tr[data-host]").forEach(tr =>
+    tr.addEventListener("click", () => showHostDetail(tr.dataset.host)));
+}
+
 // ── Change-tracking feed ──────────────────────────────────────────────────────
 
 const _CHANGE_META = {
@@ -3584,7 +3717,7 @@ async function loadAppTz() {
 
 async function openSettings() {
   try {
-    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness } = await api("GET", "/api/settings");
+    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history } = await api("GET", "/api/settings");
     populateTimezones();
     APP_TZ = (general && general.timezone) || "";
     document.getElementById("setTimezone").value = APP_TZ;
@@ -3628,6 +3761,10 @@ async function openSettings() {
     document.getElementById("setCtOffline").checked          = ct.host_offline     !== false;
     document.getElementById("setCtOnline").checked           = ct.host_online      !== false;
     document.getElementById("setCtRetention").value          = ct.retention_days ?? 90;
+
+    const ih = ip_history || {};
+    document.getElementById("setIphStale").value = ih.stale_days ?? 30;
+    document.getElementById("setIphGone").value  = ih.gone_days ?? 60;
 
     const lv = liveness || {};
     document.getElementById("setLvEnabled").checked  = lv.enabled !== false;
@@ -3745,6 +3882,10 @@ async function saveSettings() {
     await api("PUT", "/api/settings/statuspage", spPayload);
     await api("PUT", "/api/settings/change-tracking", ctPayload);
     await api("PUT", "/api/settings/liveness", lvPayload);
+    await api("PUT", "/api/settings/ip-history", {
+      stale_days: parseInt(document.getElementById("setIphStale").value, 10) || 30,
+      gone_days:  parseInt(document.getElementById("setIphGone").value, 10)  || 60,
+    });
     await api("PUT", "/api/settings/change-alerts", caPayload);
     closeSettings();
     await loadModels();
@@ -3753,6 +3894,7 @@ async function saveSettings() {
     if (document.getElementById("scan-panel-history")?.style.display !== "none") loadScans();
     if (document.getElementById("scan-panel-changes")?.style.display !== "none") loadChanges();
     if (document.getElementById("scan-panel-schedules")?.style.display !== "none") loadSchedules();
+    if (currentHostsTab === "iphistory" && document.getElementById("panel-hosts").classList.contains("active")) loadIpHistory();
     showToast("Settings saved");
   } catch (e) {
     alert("Failed to save settings: " + e.message);
