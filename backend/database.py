@@ -246,6 +246,20 @@ def init_db():
             # Which hosts appear on the public status page (Phase 3).
             "ALTER TABLE hosts ADD COLUMN public INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE hosts ADD COLUMN public_name TEXT",
+            # What the browser blocked (enforced policy) or would block under the
+            # strict, no-inline-code policy (report-only). See security.py.
+            """CREATE TABLE IF NOT EXISTS csp_reports (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                mode       TEXT NOT NULL,
+                directive  TEXT NOT NULL,
+                blocked    TEXT NOT NULL DEFAULT '',
+                source     TEXT NOT NULL DEFAULT '',
+                line       INTEGER NOT NULL DEFAULT 0,
+                sample     TEXT NOT NULL DEFAULT '',
+                count      INTEGER NOT NULL DEFAULT 1,
+                first_seen TEXT NOT NULL,
+                last_seen  TEXT NOT NULL
+            )""",
         ]:
             try:
                 conn.execute(sql)

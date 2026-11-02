@@ -12,7 +12,7 @@ from typing import Optional
 
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
-from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
+from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -24,6 +24,7 @@ from . import monitor
 from . import liveness
 from . import scheduler
 from . import auth
+from . import security
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, chat_stream, is_configured, get_default_model,
@@ -80,10 +81,40 @@ async def login_gate(request: Request, call_next):
                 return JSONResponse({"detail": "Login required"}, status_code=401)
             return RedirectResponse("/login.html", status_code=303)
     # Forged cross-site requests: changes must come from Boltarr's own pages
+    # (the browser's own security reports can't carry the header)
     if (gated and path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS")
-            and auth.CSRF_HEADER not in request.headers):
+            and auth.CSRF_HEADER not in request.headers and path != security.REPORT_PATH):
         return JSONResponse({"detail": "Missing X-Boltarr header"}, status_code=403)
     return await call_next(request)
+
+
+# Registered after login_gate, so it wraps it: redirects and 401s get the headers too.
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    for k, v in security.headers_for(get_config()["security"].get("frame_origins", "")).items():
+        resp.headers.setdefault(k, v)
+    return resp
+
+
+@app.post("/api/csp-report", status_code=204)
+async def csp_report(request: Request):
+    """Where browsers send security-policy reports. Open (the login page reports
+    too), size-capped, and stored de-duplicated with a row cap."""
+    body = await request.body()
+    security.record(security.parse_reports(body))
+    return Response(status_code=204)
+
+
+@app.get("/api/security/reports")
+def get_security_reports():
+    return security.list_reports()
+
+
+@app.delete("/api/security/reports")
+def clear_security_reports():
+    security.clear_reports()
+    return {"ok": True}
 
 
 def _client_ip(request: Request) -> str:
@@ -1972,7 +2003,8 @@ def get_settings():
             "change_tracking": dict(cfg["change_tracking"]),
             "change_alerts": ca,
             "liveness": dict(cfg["liveness"]),
-            "ip_history": dict(cfg["ip_history"])}
+            "ip_history": dict(cfg["ip_history"]),
+            "security": dict(cfg["security"])}
 
 
 class ChangeTrackingIn(BaseModel):
@@ -2118,6 +2150,19 @@ def _apply_change_alerts(cfg: dict, data: ChangeAlertsIn):
         ca["scope"] = data.scope
 
 
+class SecurityIn(BaseModel):
+    frame_origins: Optional[str] = None
+
+
+def _apply_security(cfg: dict, data: SecurityIn):
+    if data.frame_origins is not None:
+        try:
+            origins = security.parse_frame_origins(data.frame_origins)
+        except ValueError as e:
+            raise HTTPException(422, f"Allowed dashboards: {e}")
+        cfg.setdefault("security", {})["frame_origins"] = ", ".join(origins)
+
+
 class AllSettingsIn(BaseModel):
     general:         Optional[GeneralIn]              = None
     llm:             Optional[LLMSettingsIn]          = None
@@ -2127,13 +2172,14 @@ class AllSettingsIn(BaseModel):
     liveness:        Optional[LivenessIn]             = None
     ip_history:      Optional[IpHistoryIn]            = None
     change_alerts:   Optional[ChangeAlertsIn]         = None
+    security:        Optional[SecurityIn]             = None
 
 
 _SECTION_APPLY = {
     "general": _apply_general, "llm": _apply_llm, "notifications": _apply_notifications,
     "statuspage": _apply_statuspage, "change_tracking": _apply_change_tracking,
     "liveness": _apply_liveness, "ip_history": _apply_ip_history,
-    "change_alerts": _apply_change_alerts,
+    "change_alerts": _apply_change_alerts, "security": _apply_security,
 }
 
 

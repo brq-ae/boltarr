@@ -3758,7 +3758,9 @@ async function loadAppTz() {
 async function openSettings() {
   renderLoginSettings();
   try {
-    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history } = await api("GET", "/api/settings");
+    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history, security } = await api("GET", "/api/settings");
+    document.getElementById("setFrameOrigins").value = (security && security.frame_origins) || "";
+    loadCspReports();
     populateTimezones();
     APP_TZ = (general && general.timezone) || "";
     document.getElementById("setTimezone").value = APP_TZ;
@@ -3858,6 +3860,49 @@ function onSettingsProviderChange() {
   }
 }
 
+// ── Security: strict-mode check (CSP report-only findings) ────────────────────
+
+async function loadCspReports() {
+  const sum = document.getElementById("cspSummary"), list = document.getElementById("cspList");
+  let rows = [];
+  try { rows = await api("GET", "/api/security/reports"); } catch (_) { sum.textContent = "Couldn't load the report."; return; }
+  // A frame block is the protection working (another site tried to embed Boltarr),
+  // never a broken Boltarr page — so it gets its own calm line, not the red warning.
+  const isFrame  = r => r.directive === "frame-ancestors";
+  const framed   = rows.filter(r => r.mode === "enforced" && isFrame(r));
+  const enforced = rows.filter(r => r.mode === "enforced" && !isFrame(r));
+  const strict   = rows.filter(r => r.mode !== "enforced");
+  const parts = [];
+  if (enforced.length) parts.push(`<span style="color:var(--red)">⚠ ${enforced.length} thing${enforced.length === 1 ? "" : "s"} blocked by the current rules — something may not work</span>`);
+  if (framed.length) {
+    const times = framed.reduce((n, r) => n + r.count, 0);
+    parts.push(`<span style="color:var(--text-2)">🛡 A site was stopped from showing Boltarr in a frame (×${times}). If that was your dashboard, add it under Allowed dashboards.</span>`);
+  }
+  parts.push(strict.length
+    ? `${strict.length} place${strict.length === 1 ? "" : "s"} would be blocked in strict mode`
+    : "Nothing reported yet — use Boltarr normally and check back.");
+  sum.innerHTML = parts.join("<br>");
+  list.innerHTML = rows.length ? rows.slice(0, 100).map(r => {
+    const where = r.source ? `${r.source.replace(location.origin, "")}${r.line ? ":" + r.line : ""}` : "";
+    return `<div class="csp-row${r.mode === "enforced" && !isFrame(r) ? " csp-enforced" : ""}">
+      <span class="mono">${escHtml(r.directive)}</span>
+      <span class="mono text-3">${escHtml(r.sample || r.blocked || "")}</span>
+      <span class="text-3">${escHtml(where)} · ×${r.count}</span></div>`;
+  }).join("") : "";
+  document.getElementById("cspListBtn").hidden = !rows.length;
+}
+
+function toggleCspList() {
+  const list = document.getElementById("cspList");
+  list.hidden = !list.hidden;
+  document.getElementById("cspListBtn").textContent = list.hidden ? "Show details" : "Hide details";
+}
+
+async function clearCspReports() {
+  await api("DELETE", "/api/security/reports");
+  loadCspReports();
+}
+
 async function saveSettings() {
   const payload = {
     provider:     document.getElementById("setProvider").value,
@@ -3931,6 +3976,7 @@ async function saveSettings() {
         gone_days:  parseInt(document.getElementById("setIphGone").value, 10)  || 60,
       },
       change_alerts:   caPayload,
+      security:        { frame_origins: document.getElementById("setFrameOrigins").value.trim() },
     });
     APP_TZ = generalPayload.timezone;
     closeSettings();

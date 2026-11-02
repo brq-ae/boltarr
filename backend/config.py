@@ -115,6 +115,10 @@ _DEFAULTS: dict = {
         "proxy_header": "Remote-User",
         "trusted_proxies": "",     # IPs/CIDRs allowed to send that header, comma-separated
     },
+    # Browser security headers (see backend/security.py)
+    "security": {
+        "frame_origins": "",       # dashboards allowed to show Boltarr in a frame, e.g. "https://homarr.lan"
+    },
 }
 
 
@@ -163,6 +167,7 @@ def _load_config() -> dict:
         "change_alerts": dict(_DEFAULTS["change_alerts"]),
         "ip_history": dict(_DEFAULTS["ip_history"]),
         "auth": dict(_DEFAULTS["auth"]),
+        "security": dict(_DEFAULTS["security"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -187,6 +192,8 @@ def _load_config() -> dict:
             cfg["ip_history"].update({k: v for k, v in raw["ip_history"].items() if v is not None})
         if "auth" in raw:
             cfg["auth"].update({k: v for k, v in raw["auth"].items() if v is not None})
+        if "security" in raw:
+            cfg["security"].update({k: v for k, v in raw["security"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {

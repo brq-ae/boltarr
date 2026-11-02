@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Inter:wght@400;500;600&display=swap');
+@import url('../vendor/fonts/fonts.css');
 
 /* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
@@ -2094,3 +2094,10 @@ tbody td {
 .login-skip { display: block; text-align: center; margin-top: 14px; font-size: 12px; color: var(--text-3); background: none; border: 0; cursor: pointer; width: 100%; }
 .login-skip:hover { color: var(--text-2); text-decoration: underline; }
 .login-foot { margin-top: 18px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
+
+/* Settings → Security: strict-mode check list */
+.csp-list { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
+.csp-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.csp-row:last-child { border-bottom: 0; }
+.csp-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.csp-enforced { background: color-mix(in srgb, var(--red) 10%, transparent); }

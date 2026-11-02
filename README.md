@@ -26,6 +26,7 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 - **AI analysis** — per-host and network-wide analysis; AI chat assistant with full network context
 - **AI optional** — works without AI; supports Ollama, OpenAI-compatible APIs, and Anthropic
 - **Optional login** — one admin password (or trust an auth proxy like Authelia/Authentik); new installs are asked to set one, upgrades can turn it on in Settings
+- **Self-contained & locked down** — no outside scripts or fonts (works fully offline); strict browser security headers, with optional allowed dashboards for embedding (Homarr, Home Assistant…)
 - **Backup & restore** — one-click backup, optionally password-protected (AES-encrypted zip); restore shows what's inside first and applies it without a restart
 
 ## Quick start (Docker)

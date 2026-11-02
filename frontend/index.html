@@ -6,7 +6,7 @@
   <title>Boltarr</title>
   <link rel="icon" type="image/svg+xml" href="/img/BoltarrLogo.svg">
   <link rel="stylesheet" href="/css/style.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
+  <script src="/vendor/cytoscape.min.js"></script>
 </head>
 <body>
 
@@ -1281,6 +1281,32 @@
             <div class="settings-sub">Turn login off</div>
             <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" autocomplete="current-password"></div>
             <button class="btn btn-danger" style="font-size:12px" onclick="disableLogin()">Turn off login</button>
+          </div>
+        </div>
+      </details>
+      <details class="settings-section" id="setSecuritySection">
+        <summary>🛡 Security</summary>
+        <div class="acc-body">
+          <div class="settings-sub" style="margin-top:0">Allowed dashboards</div>
+          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+            Other sites can't show Boltarr inside a frame — that stops click-trick attacks.
+            To embed Boltarr in a dashboard (Homarr, Organizr, Home Assistant…), add the dashboard's address here,
+            exactly as it appears in your browser's address bar. Several? Separate them with commas.
+          </p>
+          <div class="form-row"><label>Dashboard addresses</label><input id="setFrameOrigins" type="text" class="mono" placeholder="https://homarr.example, http://10.0.0.5:7575"></div>
+          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 4px">
+            With login on, the dashboard should be on the same domain as Boltarr (e.g. both under <code>example.com</code>), otherwise browsers won't keep you logged in inside the frame.
+          </p>
+
+          <div class="settings-sub">Strict-mode check</div>
+          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+            Your browser quietly reports what a stricter security mode would block. Nothing is blocked now — this list shows what still needs updating before that mode can be turned on.
+          </p>
+          <div id="cspSummary" class="text-3" style="font-size:12px;margin-bottom:6px">—</div>
+          <div id="cspList" class="csp-list" hidden></div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn" style="font-size:12px" onclick="toggleCspList()" id="cspListBtn">Show details</button>
+            <button class="btn" style="font-size:12px" onclick="clearCspReports()">Clear</button>
           </div>
         </div>
       </details>
