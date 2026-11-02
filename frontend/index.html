@@ -86,12 +86,94 @@
   </div>
 </div>
 
+<!-- Restore: check the backup, then confirm -->
+<div class="modal-overlay" id="restoreModal">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-title">⬆ Restore from backup</div>
+    <div id="restoreUpload">
+      <p class="text-3" style="font-size:12px;margin:0 0 8px">Uploading and checking <span id="restoreFileName" class="mono"></span>… nothing is changed yet.</p>
+      <div class="restore-bar"><div id="restoreUploadBar"></div></div>
+      <div id="restoreUploadPct" class="text-3 mono" style="font-size:11px;margin-top:6px">0%</div>
+    </div>
+    <form id="restorePwBox" hidden>
+      <p style="font-size:12px;margin:0 0 10px">🔒 <span id="restorePwMsg">This backup is password-protected.</span></p>
+      <div class="form-row"><label for="restorePw">Backup password</label><input id="restorePw" type="password" autocomplete="off"></div>
+      <button class="btn btn-primary" type="submit" style="font-size:12px">Unlock</button>
+    </form>
+    <div id="restoreSummary" hidden>
+      <div class="restore-facts">
+        <div><label>Backup made</label><span id="restoreDate"></span></div>
+        <div><label>Boltarr version</label><span id="restoreVersion"></span></div>
+        <div><label>Includes settings</label><span id="restoreSettings"></span></div>
+        <div><label>Password-protected</label><span id="restoreProtected"></span></div>
+      </div>
+      <table class="restore-compare">
+        <thead><tr><th></th><th>Now</th><th>After restore</th></tr></thead>
+        <tbody id="restoreCompare"></tbody>
+      </table>
+      <div id="restoreNote" class="restore-note" hidden></div>
+      <div class="restore-warn">
+        <strong>Everything currently in Boltarr will be replaced</strong> by this backup. Background checks
+        pause for a few seconds, and the page reloads by itself when it's done. This can't be undone —
+        <a href="#" onclick="event.preventDefault();openBackupModal()">download a backup of the current data</a> first if you might want it back.
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="cancelRestore()">Cancel</button>
+      <button class="btn btn-danger" id="restoreGoBtn" onclick="applyRestore()" disabled>Restore now</button>
+    </div>
+  </div>
+</div>
+
+<!-- Restore: full-screen progress while it runs -->
+<div class="restore-overlay" id="restoreOverlay" hidden>
+  <div class="restore-panel" role="status" aria-live="polite">
+    <div class="restore-panel-title" id="restoreOverlayTitle">Restoring…</div>
+    <ol class="restore-steps" id="restoreSteps">
+      <li data-step="upload">Backup uploaded and checked</li>
+      <li data-step="restore">Restoring <strong>now</strong> — don't close this page</li>
+      <li data-step="monitor">Restarting background checks</li>
+      <li data-step="reload">Reloading</li>
+    </ol>
+    <div class="restore-panel-msg" id="restoreOverlayMsg"></div>
+    <button class="btn" id="restoreOverlayClose" onclick="closeRestoreOverlay()" hidden>Close</button>
+  </div>
+</div>
+
+<!-- Backup: optional password -->
+<div class="modal-overlay" id="backupModal" style="z-index:110">
+  <form class="modal" style="max-width:440px" id="backupForm">
+    <div class="modal-title">⬇ Download backup</div>
+    <p class="text-3" style="font-size:12px;line-height:1.55;margin:0 0 12px">
+      A backup holds your whole Boltarr: hosts, services, history and settings — including your ntfy and status-page tokens, AI key and login.
+    </p>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-bottom:10px">
+      <input type="checkbox" id="backupProtect" checked style="accent-color:var(--accent);width:14px;height:14px" onchange="onBackupProtectChange()">
+      <span>Protect with a password <span class="text-3">(recommended)</span></span>
+    </label>
+    <div id="backupPwRows">
+      <div class="form-row"><label for="backupPw">Password (8+ characters)</label><input id="backupPw" type="password" autocomplete="new-password"></div>
+      <div class="form-row"><label for="backupPw2">Repeat password</label><input id="backupPw2" type="password" autocomplete="new-password"></div>
+      <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
+        You'll need this password to restore. It can't be recovered — keep it somewhere safe. The file is a standard encrypted zip (7-Zip/WinRAR can open it too).
+      </p>
+    </div>
+    <div id="backupNoPwWarn" class="restore-warn" hidden>Without a password, anyone who gets this file can read your tokens and keys. Keep it private.</div>
+    <div class="login-error" id="backupErr" role="alert"></div>
+    <div class="modal-actions">
+      <button class="btn" type="button" onclick="closeBackupModal()">Cancel</button>
+      <button class="btn btn-primary" type="submit" id="backupGoBtn">Download</button>
+    </div>
+  </form>
+</div>
+
   <!-- ── Top bar ────────────────────────────────────────────────────────────── -->
   <header class="topbar">
     <button class="btn-menu" id="menuBtn" onclick="toggleSidebar()">☰</button>
     <span class="topbar-title" id="topbarTitle">Topology</span>
     <div class="topbar-spacer"></div>
     <button class="btn" onclick="toggleChat()" title="Network assistant">💬 Chat</button>
+    <button class="btn" id="logoutBtn" onclick="logout()" title="Log out" hidden>⎋ Log out</button>
   </header>
 
   <!-- ── Content ────────────────────────────────────────────────────────────── -->
@@ -1158,6 +1240,50 @@
       </p>
 
       </div></details>
+      <details class="settings-section" id="setLoginSection">
+        <summary>🔒 Login</summary>
+        <div class="acc-body">
+          <!-- login off -->
+          <div id="loginOff">
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 10px">
+              Login is <strong style="color:var(--text-2)">off</strong> — anyone who can reach Boltarr on your network can see and change everything. Set a password to require a login.
+            </p>
+            <div class="form-row"><label>Username</label><input id="loginNewUser" type="text" value="admin" autocomplete="username"></div>
+            <div class="form-row"><label>Password (8+ characters)</label><input id="loginNewPw" type="password" autocomplete="new-password"></div>
+            <div class="form-row"><label>Repeat password</label><input id="loginNewPw2" type="password" autocomplete="new-password"></div>
+            <button class="btn btn-primary" style="font-size:12px" onclick="enableLogin()">Turn on login</button>
+          </div>
+          <!-- login on -->
+          <div id="loginOn" hidden>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 10px">
+              Login is <strong style="color:var(--green)">on</strong> for <span id="loginUserName" class="mono" style="color:var(--text-2)"></span>. Browsers stay logged in for 30 days.
+              Forgot it? Run <code>reset-password</code> in the container console.
+            </p>
+            <div class="settings-sub">Change password</div>
+            <div class="form-row"><label>Current password</label><input id="loginCurPw" type="password" autocomplete="current-password"></div>
+            <div class="form-row"><label>New password</label><input id="loginChgPw" type="password" autocomplete="new-password"></div>
+            <div class="form-row"><label>Repeat new password</label><input id="loginChgPw2" type="password" autocomplete="new-password"></div>
+            <button class="btn" style="font-size:12px" onclick="changeLoginPassword()">Change password</button>
+            <p class="text-3" style="font-size:11px;margin:6px 0 0">Other browsers are logged out when you change it.</p>
+
+            <div class="settings-sub">Login service in front (optional)</div>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+              If Boltarr sits behind Authelia, Authentik or similar, it can trust that service's login so you only sign in once.
+              Only requests from the addresses below are trusted.
+            </p>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px">
+              <input type="checkbox" id="loginTrustProxy" style="accent-color:var(--accent)"> Trust the login service
+            </label>
+            <div class="form-row"><label>Its IP address(es)</label><input id="loginProxies" type="text" class="mono" placeholder="172.18.0.5, 10.0.0.0/24"></div>
+            <div class="form-row"><label>User header</label><input id="loginProxyHeader" type="text" class="mono" placeholder="Remote-User"></div>
+            <button class="btn" style="font-size:12px" onclick="saveLoginProxy()">Save</button>
+
+            <div class="settings-sub">Turn login off</div>
+            <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" autocomplete="current-password"></div>
+            <button class="btn btn-danger" style="font-size:12px" onclick="disableLogin()">Turn off login</button>
+          </div>
+        </div>
+      </details>
       <details class="settings-section">
         <summary>🤖 AI</summary>
         <div class="acc-body">
@@ -1371,6 +1497,7 @@
       </div>
       <div class="scan-checks" style="padding-left:2px">
         <label title="A roaming device keeps its MAC across IPs/APs"><input type="checkbox" id="setCaIncludeMac"> Attach device MAC to alerts (offline/online, scan summary, digest)</label>
+        <label title="A host's extra IPs are pinged on their own. Untick to keep their offline/online in the Changes feed without sending alerts."><input type="checkbox" id="setCaIncludeAliases"> Include alias IPs in offline/online alerts</label>
       </div>
       <div class="scan-checks" style="padding-left:2px">
         <label><input type="checkbox" id="setCaOnScan"> Summary after each scan</label>
@@ -1382,7 +1509,7 @@
       <details class="settings-section">
         <summary>🗄 Data</summary>
         <div class="acc-body">
-          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup downloads a zip of the database + settings (it includes your tokens and keys — keep it private). Restore replaces everything with a backup. Factory reset permanently wipes all network data — use with care.</p>
+          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup downloads a zip of the database + settings, optionally protected with a password (it includes your tokens and keys). Restore replaces everything with a backup. Factory reset permanently wipes all network data — use with care.</p>
           <div style="display:flex;gap:6px">
             <button class="btn" style="font-size:12px" onclick="downloadBackup()">⬇ Backup</button>
             <button class="btn" style="font-size:12px" onclick="document.getElementById('restoreInput').click()">⬆ Restore</button>

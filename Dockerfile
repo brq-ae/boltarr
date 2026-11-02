@@ -14,6 +14,10 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY VERSION .
 
+# `docker exec boltarr reset-password` turns login off if the password is lost
+RUN printf '#!/bin/sh\ncd /app && exec python -m backend.reset_password "$@"\n' > /usr/local/bin/reset-password \
+    && chmod +x /usr/local/bin/reset-password
+
 # Runtime data (DB + config) is stored in /app/data — mount a volume here
 RUN mkdir -p /app/data
 

@@ -14,6 +14,7 @@ from datetime import datetime, time as _time, timezone, timedelta
 from .database import get_conn
 from .config import get_timezone
 from . import scanner
+from . import maintenance
 from .changes import classify_host
 
 _thread: threading.Thread | None = None
@@ -280,7 +281,8 @@ def _loop() -> None:
     _stop.wait(20)   # let startup settle
     while not _stop.is_set():
         try:
-            tick()
+            with maintenance.loop_work():
+                tick()
         except Exception:
             pass
         _stop.wait(60)

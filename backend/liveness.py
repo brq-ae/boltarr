@@ -14,6 +14,7 @@ import nmap
 from .database import get_conn
 from .config import get_liveness_config
 from . import changes
+from . import maintenance
 
 
 def _host_event(conn, host_id: int, status: str) -> None:
@@ -84,14 +85,40 @@ def sweep_once() -> None:
                     _host_event(conn, h["id"], "down")
                 else:
                     conn.execute("UPDATE hosts SET miss_count=? WHERE id=?", (miss, h["id"]))
+        _sweep_aliases(conn, live, offline_after)
         conn.commit()
+
+
+def _sweep_aliases(conn, live: set[str], offline_after: int) -> None:
+    """Alias IPs keep their own online/last-seen, from the same sweep results.
+    Offline/online transitions are logged and alerted like a host's (the
+    'Include alias IPs' Change-alerts switch can silence the alerts)."""
+    for a in conn.execute("SELECT id, ip, online, miss_count FROM host_aliases").fetchall():
+        ip, was = a["ip"], a["online"]
+        if ip in live:
+            conn.execute("UPDATE host_aliases SET online=1, miss_count=0, last_seen=datetime('now') "
+                         "WHERE id=?", (a["id"],))
+            if was == 0:                          # offline -> back online
+                changes.record(conn, ip, "host_online")
+                conn.commit()
+                changes.alert_transition(conn, ip, "host_online")
+        else:
+            miss = (a["miss_count"] or 0) + 1
+            online = 0 if miss >= offline_after else was
+            conn.execute("UPDATE host_aliases SET online=?, miss_count=? WHERE id=?",
+                         (online, miss, a["id"]))
+            if online == 0 and was == 1:          # online -> offline (None -> 0 is a silent seed)
+                changes.record(conn, ip, "host_offline")
+                conn.commit()
+                changes.alert_transition(conn, ip, "host_offline")
 
 
 def _loop() -> None:
     _stop.wait(15)   # let startup settle
     while not _stop.is_set():
         try:
-            sweep_once()
+            with maintenance.loop_work():
+                sweep_once()
         except Exception:
             pass
         interval = max(1, int(get_liveness_config().get("interval_minutes", 3))) * 60

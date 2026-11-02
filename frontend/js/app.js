@@ -28,6 +28,27 @@ let expandedAliases   = new Set();
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
+// Every same-origin request carries X-Boltarr (the server refuses changes
+// without it, which blocks forged requests from other sites), and a 401 means
+// the login expired — go to the login page. Wraps window.fetch so graph.js and
+// chat.js are covered too.
+(() => {
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (input, opts = {}) => {
+    const url = new URL(typeof input === "string" ? input : input.url, location.href);
+    if (url.origin === location.origin) {
+      opts = { ...opts, headers: new Headers(opts.headers || {}) };
+      opts.headers.set("X-Boltarr", "1");
+    }
+    const r = await realFetch(input, opts);
+    if (r.status === 401 && url.origin === location.origin && url.pathname.startsWith("/api/")
+        && !url.pathname.startsWith("/api/auth/")) {
+      location.href = "/login.html";
+    }
+    return r;
+  };
+})();
+
 async function api(method, path, body) {
   const opts = { method, headers: {} };
   if (body !== undefined) {
@@ -35,8 +56,19 @@ async function api(method, path, body) {
     opts.body = JSON.stringify(body);
   }
   const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error(apiErrorText(await r.text()));
   return r.json();
+}
+
+// FastAPI errors arrive as {"detail": "..."} or a list of field errors — show
+// the readable part, not the raw JSON.
+function apiErrorText(text) {
+  try {
+    const d = JSON.parse(text).detail;
+    if (typeof d === "string") return d;
+    if (Array.isArray(d)) return d.map(x => `${(x.loc || []).slice(1).join(".")}: ${x.msg}`).join("\n");
+  } catch (_) {}
+  return text;
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -47,6 +79,13 @@ async function boot() {
   await loadGraph();
   await loadScans();
   setTab("topology");
+  document.getElementById("backupForm").addEventListener("submit", doBackup);
+  document.getElementById("restorePwBox").addEventListener("submit", e => {
+    e.preventDefault();
+    _checkRestoreFile(document.getElementById("restorePw").value);
+  });
+  showRestoredBanner();
+  loadLoginState();
   api("GET", "/api/version").then(d => {
     const el = document.getElementById("appVersion");
     if (el && d.version) el.textContent = "v" + d.version;
@@ -85,13 +124,13 @@ function renderSubnetList() {
     <div class="subnet-row${hidden ? " subnet-hidden" : ""}" id="subnet-row-${s.id}" onclick="selectSubnetNodes(${s.id})" title="Click to select all hosts in this subnet">
       <div class="subnet-dot" id="subnet-dot-${s.id}"></div>
       <div class="subnet-info">
-        <div class="subnet-name">${s.name}</div>
-        <div class="subnet-cidr mono">${s.cidr}</div>
+        <div class="subnet-name">${escHtml(s.name)}</div>
+        <div class="subnet-cidr mono">${escHtml(s.cidr)}</div>
       </div>
       <button class="btn-icon subnet-eye" onclick="event.stopPropagation(); toggleSubnetVisibility(${s.id})" title="${hidden ? "Show" : "Hide"} in topology">${hidden ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>` : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`}</button>
       <button class="btn-icon" onclick="event.stopPropagation(); openEditSubnet(${s.id})" title="Edit subnet (name, DHCP range)" style="color:var(--text-3);font-size:12px;padding:2px 5px">✎</button>
-      <button class="btn-scan" onclick="event.stopPropagation(); triggerScan(${s.id})" title="Scan ${s.cidr}">▶</button>
-      <button class="btn-icon" onclick="event.stopPropagation(); deleteSubnet(${s.id},'${s.name}')" title="Remove subnet" style="color:var(--text-3);font-size:13px;padding:2px 5px">✕</button>
+      <button class="btn-scan" onclick="event.stopPropagation(); triggerScan(${s.id})" title="Scan ${escHtml(s.cidr)}">▶</button>
+      <button class="btn-icon" onclick="event.stopPropagation(); deleteSubnet(${s.id},${jsq(s.name)})" title="Remove subnet" style="color:var(--text-3);font-size:13px;padding:2px 5px">✕</button>
     </div>`;
   }).join("");
 }
@@ -190,7 +229,7 @@ async function stopScan() {
 function _probeProfileOptions() {
   const usable = scanProfiles.filter(p => (p.options || {}).ports !== "none");
   return usable.map(p =>
-    `<option value="${p.id}"${p.name === "Standard" ? " selected" : ""}>${p.name}</option>`
+    `<option value="${p.id}"${p.name === "Standard" ? " selected" : ""}>${escHtml(p.name)}</option>`
   ).join("") || `<option value="">Standard</option>`;
 }
 
@@ -270,11 +309,16 @@ function escHtml(s) {
   return (s == null ? "" : String(s)).replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+// A value passed as a JS string argument inside an inline on*="…" handler.
+// JSON-quote it (JS context) then HTML-escape it (attribute context).
+function jsq(s) { return escHtml(JSON.stringify(s == null ? "" : String(s))); }
+// Only http(s) links may be clickable — blocks javascript:/data: URLs.
+function safeUrl(u) { return /^https?:\/\//i.test(String(u || "").trim()) ? escHtml(String(u).trim()) : "#"; }
 function noteIsUrl(s) { return /^https?:\/\/\S+$/i.test((s || "").trim()); }
 
 // hover-✎ that opens the inline editor for a field on this host
 function editPencil(ip, field, label) {
-  return `<button class="cell-edit" title="Edit ${label}" onclick="event.stopPropagation();editField('${ip}','${field}',this.closest('td'))">✎</button>`;
+  return `<button class="cell-edit" title="Edit ${escHtml(label)}" onclick="event.stopPropagation();editField(${jsq(ip)},${jsq(field)},this.closest('td'))">✎</button>`;
 }
 
 // scan/text cell: escaped value (or —) + hover pencil
@@ -287,12 +331,12 @@ function textCell(h, field, raw) {
 function renderNoteCell(h) {
   const raw = h.notes || "";
   if (!raw) {
-    return `<span class="note-add" onclick="event.stopPropagation();editField('${h.ip}','notes',this.closest('td'))">＋ note</span>`;
+    return `<span class="note-add" onclick="event.stopPropagation();editField(${jsq(h.ip)},'notes',this.closest('td'))">＋ note</span>`;
   }
   const full = escHtml(raw);
   const trunc = escHtml(raw.length > 42 ? raw.slice(0, 42) + "…" : raw);
   const inner = noteIsUrl(raw)
-    ? `<a class="note-link" href="${full}" target="_blank" rel="noopener" title="${full}" onclick="event.stopPropagation()">${trunc}</a>`
+    ? `<a class="note-link" href="${safeUrl(raw)}" target="_blank" rel="noopener" title="${full}" onclick="event.stopPropagation()">${trunc}</a>`
     : `<span class="note-text" title="${full}">${trunc}</span>`;
   return inner + editPencil(h.ip, "notes", "note");
 }
@@ -325,10 +369,7 @@ async function saveField(ip, field, value) {
   const prev = h ? h[field] : null;
   if (h) h[field] = value;             // optimistic ('' shows as —)
   renderHostsTable();
-  // `notes` is written without COALESCE server-side, so always carry the
-  // current note along or an unrelated field-edit would blank it.
-  const payload = { [field]: value };
-  if (field !== "notes") payload.notes = (h && h.notes != null) ? h.notes : null;
+  const payload = { [field]: value };   // the server changes only the fields sent
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);
   } catch (e) {
@@ -339,10 +380,10 @@ async function saveField(ip, field, value) {
 
 // ── Phase D: inline editors for structured fields (type, class, MAC) ─────────
 function typePencil(ip) {
-  return `<button class="cell-edit" title="Edit type" onclick="event.stopPropagation();editType('${ip}',this.closest('td'))">✎</button>`;
+  return `<button class="cell-edit" title="Edit type" onclick="event.stopPropagation();editType(${jsq(ip)},this.closest('td'))">✎</button>`;
 }
 function macPencil(ip) {
-  return `<button class="cell-edit" title="Edit MAC" onclick="event.stopPropagation();editMac('${ip}',this.closest('td'))">✎</button>`;
+  return `<button class="cell-edit" title="Edit MAC" onclick="event.stopPropagation();editMac(${jsq(ip)},this.closest('td'))">✎</button>`;
 }
 
 function editType(ip, td) {
@@ -378,7 +419,6 @@ async function saveType(ip, deviceType, override) {
     device_type: deviceType,
     set_static_override: true,
     static_override: override || null,
-    notes: (h && h.notes != null) ? h.notes : null
   };
   try { await api("PUT", `/api/hosts/${ip}`, payload); } catch (e) { /* reload below */ }
   await loadHosts(); renderHostsTable();   // refresh recomputed classification badge
@@ -491,7 +531,7 @@ function renderHostsTable() {
   sorted.forEach(h => {
     const openPorts = (h.ports||[]).filter(p => p.state === "open");
     const portHtml = openPorts.slice(0,5).map(p =>
-      `<span class="port-badge${p.manual ? ' manual' : ''}">${p.port}/${p.service||"?"}</span>`
+      `<span class="port-badge${p.manual ? ' manual' : ''}">${escHtml(p.port)}/${escHtml(p.service||"?")}</span>`
     ).join("");
     const more = openPorts.length > 5 ? `<span class="port-badge">+${openPorts.length-5}</span>` : "";
     const dt = h.device_type || "unknown";
@@ -500,7 +540,7 @@ function renderHostsTable() {
     const aliases     = h.aliases || [];
     const expanded    = expandedAliases.has(h.ip);
     const aliasToggle = aliases.length
-      ? `<button class="alias-toggle${expanded ? " open" : ""}" onclick="event.stopPropagation();toggleAliasRow('${h.ip}')" title="${expanded ? "Hide" : "Show"} aliases">${expanded ? "▼" : "▶"} +${aliases.length}</button>`
+      ? `<button class="alias-toggle${expanded ? " open" : ""}" onclick="event.stopPropagation();toggleAliasRow(${jsq(h.ip)})" title="${expanded ? "Hide" : "Show"} aliases">${expanded ? "▼" : "▶"} +${aliases.length}</button>`
       : "";
     const manualBadge = h.source === "manual" ? `<span class="port-badge" style="margin-left:4px;background:oklch(38% 0.1 280);color:oklch(78% 0.1 280)">manual</span>` : "";
     const ov = h.static_override ? " ·set" : "";
@@ -509,19 +549,19 @@ function renderHostsTable() {
       : h.classification === "dynamic"
       ? `<span class="cls-badge cls-dynamic" title="Dynamic — in DHCP range${ov}">dynamic</span>`
       : "";
-    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : h.ip;
+    const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : escHtml(h.ip);
     const dot = isSynthetic ? "" : livenessDot(h.online);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${h.ip}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="hostsUpdateBulkBtn()"></td>
+      <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${escHtml(h.ip)}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="hostsUpdateBulkBtn()"></td>
       <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
       <td class="td-host col-host">${textCell(h, 'hostname', h.hostname)}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac ? escHtml(h.mac) : '<span style="color:var(--text-3)">—</span>'}${macPencil(h.ip)}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${textCell(h, 'vendor', h.vendor)}</td>
-      <td class="td-type col-type"><span class="tag tag-${dt}">${dt}</span>${manualBadge}${clsBadge}${typePencil(h.ip)}</td>
+      <td class="td-type col-type"><span class="tag tag-${escHtml(dt)}">${escHtml(dt)}</span>${manualBadge}${clsBadge}${typePencil(h.ip)}</td>
       <td class="col-os" style="font-size:11px;color:var(--text-3)">${textCell(h, 'os_guess', (h.os_guess||"").substring(0,34))}</td>
       <td class="col-ports"><div class="port-list">${portHtml}${more}</div></td>
-      <td class="td-seen col-seen mono" style="color:var(--text-3)">${(h.last_seen||"—").substring(0,16)}</td>
+      <td class="td-seen col-seen mono" style="color:var(--text-3)">${escHtml((h.last_seen||"—").substring(0,16))}</td>
       <td class="col-notes">${renderNoteCell(h)}</td>
     `;
     tr.addEventListener("click", () => showHostDetail(h.ip));
@@ -532,7 +572,7 @@ function renderHostsTable() {
       subTr.innerHTML = `<td colspan="10" class="alias-sub-cell">
         <div class="alias-chips-row">
           <span style="font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin-right:4px">Aliases</span>
-          ${aliases.map(a => `<span class="alias-chip-inline mono">${a}</span>`).join("")}
+          ${aliases.map(a => `<span class="alias-chip-inline mono" title="${escHtml(aliasSeenTitle(h, a))}">${aliasDot(h, a)}${escHtml(a)}</span>`).join("")}
         </div>
       </td>`;
       tbody.appendChild(subTr);
@@ -572,6 +612,15 @@ function livenessDot(online) {
           : online === 0 ? ["offline", "var(--bad, #f85149)", "Offline"]
           :                ["unknown", "var(--text-3)",       "Liveness unknown"];
   return `<span class="live-dot live-${s[0]}" title="${s[2]}" style="background:${s[1]}"></span>`;
+}
+
+// Alias IPs are pinged on their own; alias_info carries each one's status.
+function _aliasInfo(h, ip) { return (h.alias_info || []).find(x => x.ip === ip) || {}; }
+function aliasDot(h, ip) { return livenessDot(_aliasInfo(h, ip).online ?? null); }
+function aliasSeenTitle(h, ip) {
+  const i = _aliasInfo(h, ip);
+  const state = i.online === 1 ? "Online" : i.online === 0 ? "Offline" : "Not pinged yet";
+  return i.last_seen ? `${state} · last seen ${fmtLocal(i.last_seen)}` : state;
 }
 
 function toggleAliasRow(ip) {
@@ -632,7 +681,7 @@ function buildLinksTab(ip, myTier) {
   const links = getHostLinks(ip);
   const hostSelect = allHosts
     .filter(h => h.ip !== ip)
-    .map(h => `<option value="${h.ip}">${h.ip.startsWith("node-") ? "" : h.ip + " — "}${h.hostname || h.device_type || "unknown"}</option>`)
+    .map(h => `<option value="${escHtml(h.ip)}">${h.ip.startsWith("node-") ? "" : escHtml(h.ip) + " — "}${escHtml(h.hostname || h.device_type || "unknown")}</option>`)
     .join("");
 
   const rows = links.map(e => {
@@ -650,16 +699,16 @@ function buildLinksTab(ip, myTier) {
     }
     const dirColor = dir === "↑" ? "var(--text-3)" : dir === "↓" ? "var(--accent)" : "var(--text-2)";
 
-    const speed    = e.data.speed    ? `<span class="port-badge mono">${e.data.speed}</span>` : "";
-    const mode     = e.data.port_mode ? `<span class="port-badge">${e.data.port_mode}</span>` : "";
+    const speed    = e.data.speed    ? `<span class="port-badge mono">${escHtml(e.data.speed)}</span>` : "";
+    const mode     = e.data.port_mode ? `<span class="port-badge">${escHtml(e.data.port_mode)}</span>` : "";
     const vlanBadges = (e.data.vlans || []).map(v =>
-      `<span class="vlan-swatch-sm" style="background:${v.color};display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle"></span>`
+      `<span class="vlan-swatch-sm" style="background:${escHtml(v.color)};display:inline-block;width:8px;height:8px;border-radius:50%;vertical-align:middle"></span>`
     ).join("");
 
     return `<div class="link-peer-row">
       <span style="font-size:13px;font-weight:600;color:${dirColor};width:16px;flex-shrink:0">${dir}</span>
-      <span class="tag tag-${peerDt}" style="font-size:10px;flex-shrink:0">${peerDt}</span>
-      <span style="flex:1;font-size:12px;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${peerIp}">${peerLabel}${peerIp.startsWith("node-") ? "" : `<br><span class="mono" style="font-size:10px;color:var(--text-3)">${peerIp}</span>`}</span>
+      <span class="tag tag-${escHtml(peerDt)}" style="font-size:10px;flex-shrink:0">${escHtml(peerDt)}</span>
+      <span style="flex:1;font-size:12px;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(peerIp)}">${escHtml(peerLabel)}${peerIp.startsWith("node-") ? "" : `<br><span class="mono" style="font-size:10px;color:var(--text-3)">${escHtml(peerIp)}</span>`}</span>
       <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">${speed}${mode}${vlanBadges}</div>
       <button class="btn-ghost" style="font-size:11px;padding:2px 6px;flex-shrink:0" onclick="openEditConnById(${e.data.connection_id})">✎</button>
     </div>`;
@@ -681,7 +730,7 @@ function buildLinksTab(ip, myTier) {
         <select id="newLinkSpeed">${LINK_SPEEDS.map(s => `<option value="${s}">${s || "—"}</option>`).join("")}</select>
       </div>
       <div style="display:flex;gap:6px;align-items:flex-end;padding-bottom:1px">
-        <button class="btn btn-primary" style="font-size:11px" onclick="addLinkFromDetail('${ip}')">+ Connect</button>
+        <button class="btn btn-primary" style="font-size:11px" onclick="addLinkFromDetail(${jsq(ip)})">+ Connect</button>
         <button class="btn" style="font-size:11px" onclick="openAddHost()">+ New Host</button>
       </div>
     </div>`;
@@ -724,25 +773,25 @@ async function showHostDetail(ip) {
     <div class="sheet-handle" id="sheetHandle">
       <div class="sheet-pill"></div>
       <div class="sheet-handle-row">
-        <span class="sheet-handle-label mono">${sheetLabel}</span>
+        <span class="sheet-handle-label mono">${escHtml(sheetLabel)}</span>
         <span class="sheet-handle-hint" id="sheetHint">tap to expand</span>
         <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:17px;padding:1px 6px;line-height:1;flex-shrink:0">×</button>
       </div>
     </div>
     <div class="detail-header">
       <div>
-        <div class="detail-ip">${host.ip.startsWith("node-") ? (host.hostname || "(no IP)") : host.ip}</div>
-        ${host.hostname && !host.ip.startsWith("node-") ? `<div class="detail-hostname">${host.hostname}</div>` : ""}
+        <div class="detail-ip">${escHtml(host.ip.startsWith("node-") ? (host.hostname || "(no IP)") : host.ip)}</div>
+        ${host.hostname && !host.ip.startsWith("node-") ? `<div class="detail-hostname">${escHtml(host.hostname)}</div>` : ""}
       </div>
-      <span class="tag tag-${dt}" style="font-size:11px">${dt}</span>
+      <span class="tag tag-${escHtml(dt)}" style="font-size:11px">${escHtml(dt)}</span>
       <div class="detail-header-right">
         <select id="analyzeModel" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
-        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="analyzeHost('${ip}')">Analyze</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openEditHost('${ip}')">Edit</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openMergeHost('${ip}')">⇌ Merge</button>
+        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="analyzeHost(${jsq(ip)})">Analyze</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openEditHost(${jsq(ip)})">Edit</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openMergeHost(${jsq(ip)})">⇌ Merge</button>
         <select id="probeProfile" title="Scan profile for the probe" style="font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)">${_probeProfileOptions()}</select>
-        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="probeHost('${ip}')">⟳ Probe</button>
-        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" onclick="deleteHost('${ip}')">Delete</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="probeHost(${jsq(ip)})">⟳ Probe</button>
+        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" onclick="deleteHost(${jsq(ip)})">Delete</button>
         <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:18px;padding:2px 8px">×</button>
       </div>
     </div>
@@ -753,22 +802,22 @@ async function showHostDetail(ip) {
       <button class="detail-tab" data-tab="ports" onclick="switchDetailTab('ports')">Ports (${(host.ports||[]).length})</button>
       <button class="detail-tab" data-tab="services" onclick="switchDetailTab('services')">Services (${(host.services||[]).length})</button>
       <button class="detail-tab" data-tab="analysis" onclick="switchDetailTab('analysis')">Analysis</button>
-      <button class="detail-tab" data-tab="ssh" onclick="switchDetailTab('ssh');loadHostSshSection('${ip}')">SSH</button>
-      <button class="detail-tab" data-tab="changes" onclick="switchDetailTab('changes');loadHostChanges('${ip}')">Changes</button>
+      <button class="detail-tab" data-tab="ssh" onclick="switchDetailTab('ssh');loadHostSshSection(${jsq(ip)})">SSH</button>
+      <button class="detail-tab" data-tab="changes" onclick="switchDetailTab('changes');loadHostChanges(${jsq(ip)})">Changes</button>
     </div>
 
     <div class="detail-body">
       <!-- Info tab -->
       <div class="detail-tab-panel active" id="dtab-info">
         <div class="info-grid">
-          <div class="info-field"><label>IP Address</label><span class="mono">${host.ip}</span></div>
-          <div class="info-field"><label>MAC Address</label><span class="mono">${host.mac||"—"}</span></div>
-          <div class="info-field"><label>Vendor</label><span>${host.vendor||"—"}</span></div>
-          <div class="info-field"><label>Hostname</label><span>${host.hostname||"—"}</span></div>
-          <div class="info-field"><label>OS / Firmware</label><span>${host.os_guess||"—"}</span></div>
-          <div class="info-field"><label>Device Type</label><span>${host.device_type||"unknown"}</span></div>
-          <div class="info-field"><label>First Seen</label><span class="mono">${(host.first_seen||"—").substring(0,16)}</span></div>
-          <div class="info-field"><label>Last Seen</label><span class="mono">${(host.last_seen||"—").substring(0,16)}</span></div>
+          <div class="info-field"><label>IP Address</label><span class="mono">${escHtml(host.ip)}</span></div>
+          <div class="info-field"><label>MAC Address</label><span class="mono">${escHtml(host.mac||"—")}</span></div>
+          <div class="info-field"><label>Vendor</label><span>${escHtml(host.vendor||"—")}</span></div>
+          <div class="info-field"><label>Hostname</label><span>${escHtml(host.hostname||"—")}</span></div>
+          <div class="info-field"><label>OS / Firmware</label><span>${escHtml(host.os_guess||"—")}</span></div>
+          <div class="info-field"><label>Device Type</label><span>${escHtml(host.device_type||"unknown")}</span></div>
+          <div class="info-field"><label>First Seen</label><span class="mono">${escHtml((host.first_seen||"—").substring(0,16))}</span></div>
+          <div class="info-field"><label>Last Seen</label><span class="mono">${escHtml((host.last_seen||"—").substring(0,16))}</span></div>
         </div>
         ${host.ip.startsWith("node-") ? "" : `
         <div class="host-uptime-section">
@@ -783,13 +832,13 @@ async function showHostDetail(ip) {
           <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text-3)">Additional IPs</span>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px">
             ${(host.aliases||[]).map(a => `
-              <span class="alias-chip">
-                <span class="mono">${a}</span>
-                <button class="btn-ghost" style="padding:0 3px;font-size:11px;line-height:1" onclick="removeAlias('${ip}','${a}')" title="Remove alias">×</button>
+              <span class="alias-chip" title="${escHtml(aliasSeenTitle(host, a))}">
+                ${aliasDot(host, a)}<span class="mono">${escHtml(a)}</span>
+                <button class="btn-ghost" style="padding:0 3px;font-size:11px;line-height:1" onclick="removeAlias(${jsq(ip)},${jsq(a)})" title="Remove alias">×</button>
               </span>`).join("")}
           </div>
         </div>` : ""}
-        ${host.notes ? `<div class="notes-box">${host.notes}</div>` : ""}
+        ${host.notes ? `<div class="notes-box">${escHtml(host.notes)}</div>` : ""}
       </div>
 
       <!-- Links tab -->
@@ -803,11 +852,11 @@ async function showHostDetail(ip) {
           ${(host.ports||[]).length
             ? (host.ports||[]).map(p => `
               <div class="port-row">
-                <span class="port-num">${p.port}/${p.protocol}</span>
-                <span class="port-svc">${p.service||"unknown"}</span>
-                <span class="port-ver">${p.version||""}</span>
+                <span class="port-num">${escHtml(p.port)}/${escHtml(p.protocol)}</span>
+                <span class="port-svc">${escHtml(p.service||"unknown")}</span>
+                <span class="port-ver">${escHtml(p.version||"")}</span>
                 ${p.manual ? '<span class="port-manual-tag">manual</span>' : '<span></span>'}
-                <button class="btn-ghost btn-danger" onclick="deletePort(${p.id},'${ip}')" style="font-size:12px;padding:2px 6px">✕</button>
+                <button class="btn-ghost btn-danger" onclick="deletePort(${p.id},${jsq(ip)})" style="font-size:12px;padding:2px 6px">✕</button>
               </div>`).join("")
             : `<div style="padding:16px 10px;font-size:12px;color:var(--text-3)">No ports detected.</div>`
           }
@@ -817,7 +866,7 @@ async function showHostDetail(ip) {
           <div class="field"><label>Proto</label><select id="newProto" class="sel-proto"><option>tcp</option><option>udp</option></select></div>
           <div class="field"><label>Service</label><input type="text" id="newService" placeholder="http" class="inp-svc"></div>
           <div class="field"><label>Version</label><input type="text" id="newVersion" placeholder="nginx 1.24" class="inp-ver"></div>
-          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addPort('${ip}')">+ Add</button>
+          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addPort(${jsq(ip)})">+ Add</button>
         </div>
       </div>
 
@@ -829,7 +878,7 @@ async function showHostDetail(ip) {
         </div>
         <div class="add-port-form">
           <div class="field"><label>Name</label><input type="text" id="newSvcName" placeholder="e.g. Plex"></div>
-          <div class="field"><label>Port</label><input type="number" id="newSvcPort" placeholder="8080" class="mono" oninput="autoFillSvcUrl('${ip}', this.value, 'newSvcUrl')"></div>
+          <div class="field"><label>Port</label><input type="number" id="newSvcPort" placeholder="8080" class="mono" oninput="autoFillSvcUrl(${jsq(ip)}, this.value, 'newSvcUrl')"></div>
           <div class="field"><label>Status</label>
             <select id="newSvcStatus">
               <option value="unknown">Unknown</option>
@@ -838,7 +887,7 @@ async function showHostDetail(ip) {
             </select>
           </div>
           <div class="field" style="flex:2"><label>URL</label><input type="text" id="newSvcUrl" placeholder="http://…" oninput="if(this.value!==this.dataset.auto)this.dataset.auto=''"></div>
-          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addServiceToHost('${ip}')">+ Add</button>
+          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addServiceToHost(${jsq(ip)})">+ Add</button>
         </div>
       </div>
 
@@ -854,8 +903,8 @@ async function showHostDetail(ip) {
       <div class="detail-tab-panel" id="dtab-analysis">
         <div id="analysisResult">
           ${host.analyses?.length
-            ? `<div class="analysis-meta">${host.analyses[0].model} · ${(host.analyses[0].created_at||"").substring(0,16)}</div>
-               <div class="analysis-box">${host.analyses[0].analysis}</div>`
+            ? `<div class="analysis-meta">${escHtml(host.analyses[0].model)} · ${escHtml((host.analyses[0].created_at||"").substring(0,16))}</div>
+               <div class="analysis-box">${escHtml(host.analyses[0].analysis)}</div>`
             : `<div style="padding:16px 0;font-size:12px;color:var(--text-3)">No analysis yet. Click Analyze to run the LLM.</div>`
           }
         </div>
@@ -886,8 +935,8 @@ async function loadHostUptime(ip) {
   try {
     const d = await api("GET", `/api/hosts/${ip}/uptime`);
     const stat = (label, u) =>
-      !u ? `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${label}</span></div>`
-         : `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${label}</span></div>`;
+      !u ? `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${escHtml(label)}</span></div>`
+         : `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${escHtml(label)}</span></div>`;
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     const outages = (d.outages && d.outages.length)
       ? `<div class="outage-list">${d.outages.map(o => {
@@ -897,7 +946,7 @@ async function loadHostUptime(ip) {
             : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
         }).join("")}</div>`
       : `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
-    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" onclick="resetHostUptime('${ip}')">↺ Reset uptime</button></div>`;
+    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" onclick="resetHostUptime(${jsq(ip)})">↺ Reset uptime</button></div>`;
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }
@@ -1130,7 +1179,7 @@ function openMergeHost(ip) {
   if (!others.length) return alert("No other hosts to merge with.");
   const sel = document.getElementById("mergeTargetIp");
   sel.innerHTML = others.map(h =>
-    `<option value="${h.ip}">${h.ip.startsWith("node-") ? "" : h.ip + " — "}${h.hostname || h.device_type || "unknown"}</option>`
+    `<option value="${escHtml(h.ip)}">${h.ip.startsWith("node-") ? "" : escHtml(h.ip) + " — "}${escHtml(h.hostname || h.device_type || "unknown")}</option>`
   ).join("");
   document.getElementById("mergePrimaryIp").value = ip;
   const primaryLabel = document.getElementById("mergePrimaryLabel");
@@ -1245,11 +1294,11 @@ async function analyzeHost(ip) {
   try {
     const data = await api("POST", `/api/hosts/${ip}/analyze`, { model });
     resultDiv.innerHTML = `
-      <div class="analysis-meta">${data.model} · just now</div>
-      <div class="analysis-box">${data.analysis}</div>`;
+      <div class="analysis-meta">${escHtml(data.model)} · just now</div>
+      <div class="analysis-box">${escHtml(data.analysis)}</div>`;
     await loadHosts(); renderHostsTable(); await loadGraph();
   } catch (e) {
-    resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${e.message}</div>`;
+    resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
   }
 }
 
@@ -1284,10 +1333,10 @@ async function runNetworkAnalysis() {
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\n/g, "<br>");
     resultDiv.innerHTML = `
-      <div class="analysis-meta" style="margin-bottom:10px">${data.model} · just now</div>
+      <div class="analysis-meta" style="margin-bottom:10px">${escHtml(data.model)} · just now</div>
       <div class="analysis-box" style="white-space:normal;line-height:1.6">${html}</div>`;
   } catch (e) {
-    resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${e.message}</div>`;
+    resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
   }
 }
 
@@ -1394,7 +1443,7 @@ function renderIpHistory() {
   const c = data.counts;
   const shown = c.in_use + c.recent + c.stale + c.gone;
   const chip = (st, label, n) =>
-    `<button class="iph-chip ${st !== "all" ? _IPH_STATUS[st].cls : ""}${_iphStatus === st ? " active" : ""}" onclick="setIpHistoryStatus('${st}')">${label} <b>${n}</b></button>`;
+    `<button class="iph-chip ${st !== "all" ? _IPH_STATUS[st].cls : ""}${_iphStatus === st ? " active" : ""}" onclick="setIpHistoryStatus(${jsq(st)})">${escHtml(label)} <b>${n}</b></button>`;
   document.getElementById("iphChips").innerHTML =
     chip("all", "All seen", shown) +
     ["in_use", "recent", "stale", "gone", "never"].map(st => chip(st, _IPH_STATUS[st].label, c[st])).join("");
@@ -1460,18 +1509,18 @@ function renderIpHistory() {
 
 const _CHANGE_META = {
   host_new:         { icon: "✦", cls: "chg-new",    text: () => "New host discovered" },
-  port_opened:      { icon: "▲", cls: "chg-open",   text: e => `Port ${e.port} opened` },
-  port_closed:      { icon: "▼", cls: "chg-closed", text: e => `Port ${e.port} closed` },
-  mac_changed:      { icon: "⇄", cls: "chg-id",     text: e => `MAC changed: ${e.old_value||"?"} → ${e.new_value||"?"}` },
-  hostname_changed: { icon: "⇄", cls: "chg-id",     text: e => `Hostname: ${e.old_value||"?"} → ${e.new_value||"?"}` },
+  port_opened:      { icon: "▲", cls: "chg-open",   text: e => `Port ${escHtml(e.port)} opened` },
+  port_closed:      { icon: "▼", cls: "chg-closed", text: e => `Port ${escHtml(e.port)} closed` },
+  mac_changed:      { icon: "⇄", cls: "chg-id",     text: e => `MAC changed: ${escHtml(e.old_value||"?")} → ${escHtml(e.new_value||"?")}` },
+  hostname_changed: { icon: "⇄", cls: "chg-id",     text: e => `Hostname: ${escHtml(e.old_value||"?")} → ${escHtml(e.new_value||"?")}` },
 };
 
 function changeEventHTML(e, showIp = true) {
   const m = _CHANGE_META[e.type] || { icon: "•", cls: "", text: () => e.type };
   const when = fmtLocal(e.ts);
   // In the global feed the row is clickable → jump to that host's panel.
-  const click = showIp ? ` style="cursor:pointer" onclick="showHostDetail('${e.ip}')" title="Open ${e.ip}"` : "";
-  const ipPart = showIp ? `<span style="color:var(--accent)">${e.ip}</span> · ` : "";
+  const click = showIp ? ` style="cursor:pointer" onclick="showHostDetail(${jsq(e.ip)})" title="Open ${escHtml(e.ip)}"` : "";
+  const ipPart = showIp ? `<span style="color:var(--accent)">${escHtml(e.ip)}</span> · ` : "";
   return `<div class="chg-row"${click}>
     <span class="chg-icon ${m.cls}">${m.icon}</span>
     <div style="flex:1;min-width:0">
@@ -1514,7 +1563,7 @@ function populateScanTarget() {
   const sel = document.getElementById("scanTarget");
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = subnets.map(s => `<option value="${s.id}">${s.name} — ${s.cidr}</option>`).join("")
+  sel.innerHTML = subnets.map(s => `<option value="${s.id}">${escHtml(s.name)} — ${escHtml(s.cidr)}</option>`).join("")
     || `<option value="">No subnets — add one first</option>`;
   if (cur && sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
   sel.onchange = updateScanPreview;
@@ -1525,7 +1574,7 @@ async function loadScanProfiles() {
   const sel = document.getElementById("scanProfile");
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = scanProfiles.map(p => `<option value="${p.id}">${p.name}${p.builtin ? "" : " ·custom"}</option>`).join("");
+  sel.innerHTML = scanProfiles.map(p => `<option value="${p.id}">${escHtml(p.name)}${p.builtin ? "" : " ·custom"}</option>`).join("");
   if (cur && sel.querySelector(`option[value="${cur}"]`)) sel.value = cur;
   else { const std = scanProfiles.find(p => p.name === "Standard"); if (std) sel.value = String(std.id); }
 }
@@ -1643,8 +1692,8 @@ async function loadScans() {
     ${scans.map(s => {
       const isProbe = s.type === "probe";
       const target = isProbe
-        ? `<span class="mono" style="color:var(--accent)">${s.host_ip || "?"}</span>`
-        : `${s.subnet_name || "?"} <span class="mono" style="color:var(--text-3);font-weight:400">${s.cidr || ""}</span>`;
+        ? `<span class="mono" style="color:var(--accent)">${escHtml(s.host_ip || "?")}</span>`
+        : `${escHtml(s.subnet_name || "?")} <span class="mono" style="color:var(--text-3);font-weight:400">${escHtml(s.cidr || "")}</span>`;
       const started = fmtLocal(s.started_at);
       const running = s.status === "running";
       const live = s.live_status || (running ? "starting" : s.status);
@@ -1653,7 +1702,7 @@ async function loadScans() {
         : live === "scanning" ? `scanning ${pct}%`
         : live === "starting" ? "starting…" : "running…";
       const bits = s.status === "skipped"
-        ? [started, `<span style="color:var(--yellow)">skipped${s.note ? ": " + s.note : ""}</span>`]
+        ? [started, `<span style="color:var(--yellow)">skipped${s.note ? ": " + escHtml(s.note) : ""}</span>`]
         : running
         ? [started, `${runLabel} · <span class="scan-elapsed" data-started="${_ts(s.started_at)}">${fmtDur((Date.now() - _ts(s.started_at)) / 1000)}</span>`]
         : [started, `${s.hosts_found || 0} hosts`, scanDurationHTML(s)].filter(Boolean);
@@ -1664,11 +1713,11 @@ async function loadScans() {
       const typeBadge = isProbe
         ? `<span class="tag" style="background:oklch(40% 0.1 280);color:oklch(80% 0.1 280);font-size:10px">probe</span>`
         : s.schedule_name
-        ? `<span class="tag" style="background:oklch(38% 0.09 200);color:oklch(82% 0.1 200);font-size:10px" title="Scheduled: ${s.schedule_name}">⏱ ${s.schedule_name}</span>`
+        ? `<span class="tag" style="background:oklch(38% 0.09 200);color:oklch(82% 0.1 200);font-size:10px" title="Scheduled: ${escHtml(s.schedule_name)}">⏱ ${escHtml(s.schedule_name)}</span>`
         : `<span class="tag" style="background:var(--surface2);color:var(--text-3);font-size:10px">scan</span>`;
       const statusTag = running
         ? `<span class="tag tag-running" style="font-size:10px">${live === "scanning" ? "scanning" : "running"}</span>`
-        : `<span class="tag tag-${s.status}" style="font-size:10px">${s.status}</span>`;
+        : `<span class="tag tag-${escHtml(s.status)}" style="font-size:10px">${escHtml(s.status)}</span>`;
       const cancelBtn = running
         ? `<button class="btn-ghost" style="font-size:11px;padding:2px 7px;flex-shrink:0;color:var(--yellow)" onclick="cancelScanRun(${s.id})" title="Stop">■</button>`
         : "";
@@ -1809,11 +1858,11 @@ function _schedTimingText(s) {
   const days = (s.days_of_week || "").split(",").filter(d => d !== "");
   const label = days.length === 7 ? "daily"
     : days.map(d => _DAY_NAMES[+d]).join(", ");
-  return `${label} at ${s.at_time || "?"}${win}`;
+  return `${escHtml(label)} at ${s.at_time || "?"}${win}`;
 }
 
 function _schedTargetText(s) {
-  const where = s.subnet_id ? (s.subnet_name || `subnet ${s.subnet_id}`) : "All subnets";
+  const where = s.subnet_id ? escHtml(s.subnet_name || `subnet ${s.subnet_id}`) : "All subnets";
   const filt = s.host_filter === "all" ? "whole range" : `${s.host_filter} only`;
   return `${where} · ${filt}`;
 }
@@ -1839,9 +1888,9 @@ async function loadSchedules() {
           <span class="switch-slider"></span>
         </label>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:500;font-size:12px">${s.name}${s.enabled ? "" : ` <span style="color:var(--text-3);font-weight:400">(paused)</span>`}</div>
+          <div style="font-weight:500;font-size:12px">${escHtml(s.name)}${s.enabled ? "" : ` <span style="color:var(--text-3);font-weight:400">(paused)</span>`}</div>
           <div class="mono" style="font-size:10px;color:var(--text-3);margin-top:2px">
-            ${_schedTargetText(s)} · ${s.profile_name || "no profile"} · ${_schedTimingText(s)}
+            ${_schedTargetText(s)} · ${escHtml(s.profile_name || "no profile")} · ${_schedTimingText(s)}
           </div>
           <div style="font-size:10px;color:var(--text-3);margin-top:1px">${last} · ${next}</div>
         </div>
@@ -1856,10 +1905,10 @@ function openScheduleEditor(sched) {
   // Subnet dropdown: All + each subnet
   document.getElementById("schedSubnet").innerHTML =
     `<option value="">All subnets</option>` +
-    subnets.map(s => `<option value="${s.id}">${s.name} — ${s.cidr}</option>`).join("");
+    subnets.map(s => `<option value="${s.id}">${escHtml(s.name)} — ${escHtml(s.cidr)}</option>`).join("");
   // Profile dropdown (built-ins + custom)
   document.getElementById("schedProfile").innerHTML =
-    (scanProfiles || []).map(p => `<option value="${p.id}">${p.name}${p.builtin ? "" : " ·custom"}</option>`).join("");
+    (scanProfiles || []).map(p => `<option value="${p.id}">${escHtml(p.name)}${p.builtin ? "" : " ·custom"}</option>`).join("");
   // Day checkboxes
   document.getElementById("schedDays").innerHTML = _DAY_NAMES.map((d, i) =>
     `<label><input type="checkbox" class="sched-day" value="${i}"> ${d}</label>`).join("");
@@ -2061,21 +2110,21 @@ function svcIconHTML(name, size = 26) {
 }
 
 function svcRowHTML(s, hostIp) {
-  const portBadge = s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : "";
+  const portBadge = s.port ? `<span class="port-badge mono">${escHtml(s.port)}/${escHtml(s.protocol||"tcp")}</span>` : "";
   return `<div class="svc-row" id="svc-row-${s.id}">
     ${svcIconHTML(s.name)}
-    <span class="svc-name">${s.name}${s.description ? `<br><span class="svc-desc">${s.description}</span>` : ""}</span>
+    <span class="svc-name">${escHtml(s.name)}${s.description ? `<br><span class="svc-desc">${escHtml(s.description)}</span>` : ""}</span>
     <div class="svc-port-status" style="align-items:flex-end">
       ${portBadge}
-      <button class="svc-status ${s.status}" onclick="cycleServiceStatus(${s.id},'${s.status}','${hostIp}')">${s.status}</button>
+      <button class="svc-status ${escHtml(s.status)}" onclick="cycleServiceStatus(${s.id},${jsq(s.status)},${jsq(hostIp)})">${escHtml(s.status)}</button>
     </div>
     <div class="svc-actions">
       <button class="svc-kebab" onclick="toggleSvcMenu('r${s.id}')" title="Actions">⋮</button>
       <div class="svc-menu" id="svcmenu-r${s.id}">
-        ${s.url ? `<a href="${s.url}" target="_blank" class="svc-menu-item">↗ Open URL</a>` : ""}
+        ${s.url ? `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener" class="svc-menu-item">↗ Open URL</a>` : ""}
         <button class="svc-menu-item" onclick="closeSvcMenus();openManageDeps(${s.id})">⊕ Dependencies</button>
         <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
-        <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvc(${s.id},'${hostIp}')">✕ Delete</button>
+        <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvc(${s.id},${jsq(hostIp)})">✕ Delete</button>
       </div>
     </div>
   </div>`;
@@ -2085,8 +2134,6 @@ const STATUS_CYCLE = { running: "stopped", stopped: "unknown", unknown: "running
 
 async function cycleServiceStatus(id, current, hostIp) {
   const next = STATUS_CYCLE[current] || "unknown";
-  // Route through saveSvcField so description/port/url are carried along
-  // (the update endpoint writes those without COALESCE).
   await saveSvcField(id, "status", next);
 }
 
@@ -2171,7 +2218,7 @@ async function saveSvcPortProto(id, port, proto) {
   const prevPort = s ? s.port : null, prevProto = s ? s.protocol : null;
   if (s) { s.port = port; s.protocol = proto; }
   renderServicesTable();
-  const payload = { description: s ? s.description : null, url: s ? s.url : null, port, protocol: proto };
+  const payload = { port, protocol: proto };
   try {
     await api("PUT", `/api/services/${id}`, payload);
   } catch (e) {
@@ -2215,7 +2262,7 @@ function _fillHostSelect(sel, selectedIp) {
   if (!sel) return;
   const regularHosts   = allHosts.filter(h => h.device_type !== "container");
   const containerHosts = allHosts.filter(h => h.device_type === "container");
-  const hostOpts = host => `<option value="${host.ip}">${host.ip}${host.hostname ? " — " + host.hostname : ""}</option>`;
+  const hostOpts = host => `<option value="${escHtml(host.ip)}">${escHtml(host.ip)}${host.hostname ? " — " + escHtml(host.hostname) : ""}</option>`;
   sel.innerHTML =
     regularHosts.map(hostOpts).join("") +
     (containerHosts.length ? `<optgroup label="── Containers ──">${containerHosts.map(hostOpts).join("")}</optgroup>` : "");
@@ -2335,9 +2382,9 @@ function renderContainerPick() {
     containers.map(h => {
       const label = h.hostname || h.ip;
       const sub   = h.hostname ? h.ip : "";
-      return `<div class="container-chip" onclick="pickContainer('${h.ip}','${label}')">
-        <span class="container-chip-name">${label}</span>
-        ${sub ? `<span class="container-chip-ip">${sub}</span>` : ""}
+      return `<div class="container-chip" onclick="pickContainer(${jsq(h.ip)},${jsq(label)})">
+        <span class="container-chip-name">${escHtml(label)}</span>
+        ${sub ? `<span class="container-chip-ip">${escHtml(sub)}</span>` : ""}
       </div>`;
     }).join("") +
   `</div>`;
@@ -2451,7 +2498,7 @@ function populateSvcHostFilter() {
   const hosts = [...new Map(allServices.map(s => [s.ip, {ip: s.ip, hostname: s.hostname}])).values()]
     .sort((a, b) => (a.hostname || a.ip).localeCompare(b.hostname || b.ip));
   sel.innerHTML = `<option value="">All hosts</option>` +
-    hosts.map(h => `<option value="${h.ip}"${h.ip === current ? " selected" : ""}>${h.hostname || h.ip}</option>`).join("");
+    hosts.map(h => `<option value="${escHtml(h.ip)}"${h.ip === current ? " selected" : ""}>${escHtml(h.hostname || h.ip)}</option>`).join("");
 }
 
 async function loadServicesTab() {
@@ -2497,15 +2544,15 @@ function renderServicesTable() {
         <div class="svc-desc-line">${s.description ? `<span class="svc-desc-txt">${escHtml(s.description)}</span>` : '<span class="note-add">＋ description</span>'}${svcEditPencil(s.id,'description')}</div>
       </td>
       <td class="svc-host-cell col-svc-host">
-        <span class="svc-host-ip">${livenessDot(s.host_online)}${s.ip}</span>
-        ${s.hostname ? `<span class="svc-host-name">${s.hostname}</span>` : ""}
+        <span class="svc-host-ip">${livenessDot(s.host_online)}${escHtml(s.ip)}</span>
+        ${s.hostname ? `<span class="svc-host-name">${escHtml(s.hostname)}</span>` : ""}
       </td>
       <td class="col-svc-ps">
         <div class="svc-port-status">
-          <span class="svc-portproto">${s.port ? `<span class="port-badge mono">${s.port}/${s.protocol||"tcp"}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}</span>
+          <span class="svc-portproto">${s.port ? `<span class="port-badge mono">${escHtml(s.port)}/${escHtml(s.protocol||"tcp")}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}</span>
           ${s.monitored
-            ? `<span class="svc-status ${s.status} locked" title="Set automatically by the monitor">${s.status}</span>`
-            : `<button class="svc-status ${s.status}" onclick="event.stopPropagation();cycleServiceStatus(${s.id},'${s.status}','${s.ip}')">${s.status}</button>`}
+            ? `<span class="svc-status ${escHtml(s.status)} locked" title="Set automatically by the monitor">${escHtml(s.status)}</span>`
+            : `<button class="svc-status ${escHtml(s.status)}" onclick="event.stopPropagation();cycleServiceStatus(${s.id},${jsq(s.status)},${jsq(s.ip)})">${escHtml(s.status)}</button>`}
           ${svcPortProtoPencil(s.id)}
         </div>
       </td>
@@ -2524,7 +2571,7 @@ function svcToggleAll(checked) {
 
 // ── Services inline editing (mirrors the Hosts table) ────────────────────────
 function svcEditPencil(id, field) {
-  return `<button class="cell-edit" title="Edit ${field}" onclick="event.stopPropagation();editSvcField(${id},'${field}',this)">✎</button>`;
+  return `<button class="cell-edit" title="Edit ${field}" onclick="event.stopPropagation();editSvcField(${id},${jsq(field)},this)">✎</button>`;
 }
 
 function svcUrlCell(s) {
@@ -2532,7 +2579,7 @@ function svcUrlCell(s) {
   if (!raw) return `<span class="note-add">＋ url</span>${svcEditPencil(s.id, 'url')}`;
   const full = escHtml(raw);
   const trunc = escHtml(raw.length > 40 ? raw.slice(0, 40) + "…" : raw);
-  return `<a class="note-link svc-url-txt" href="${full}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${full}">${trunc}</a>${svcEditPencil(s.id, 'url')}`;
+  return `<a class="note-link svc-url-txt" href="${safeUrl(raw)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${full}">${trunc}</a>${svcEditPencil(s.id, 'url')}`;
 }
 
 function editSvcField(id, field, btn) {
@@ -2571,14 +2618,7 @@ async function saveSvcField(id, field, value) {
   const prev = s ? s[field] : null;
   if (s) s[field] = value;
   renderServicesTable();
-  // description/port/url are written without COALESCE server-side — carry them so
-  // editing one field can't blank the others.
-  const payload = {
-    description: s ? s.description : null,
-    port:        s ? s.port : null,
-    url:         s ? s.url : null,
-  };
-  payload[field] = value;
+  const payload = { [field]: value };   // the server changes only the fields sent
   try {
     await api("PUT", `/api/services/${id}`, payload);
   } catch (e) {
@@ -2651,7 +2691,7 @@ function monDotHTML(s) {
   const st  = s.monitor_status || "unknown";
   const cls = st === "up" ? "mon-up" : st === "down" ? "mon-down" : "mon-unknown";
   const title = st === "up" ? "Monitored — up" : st === "down" ? "Monitored — down" : "Monitored — checking…";
-  return `<span class="mon-dot ${cls}" title="${title}"></span>`;
+  return `<span class="mon-dot ${cls}" title="${escHtml(title)}"></span>`;
 }
 
 // Root-cause chip: a monitored service that's down while its host is offline.
@@ -2925,7 +2965,7 @@ function toggleLinkHostsForm() {
     const ips = [...new Set(allServices.map(s => s.ip))];
     const opts = ips.map(ip => {
       const h = allHosts.find(h => h.ip === ip);
-      return `<option value="${ip}">${ip}${h?.hostname ? " — " + h.hostname : ""}</option>`;
+      return `<option value="${escHtml(ip)}">${escHtml(ip)}${h?.hostname ? " — " + escHtml(h.hostname) : ""}</option>`;
     }).join("");
     document.getElementById("linkSrc").innerHTML = opts;
     document.getElementById("linkDst").innerHTML = opts;
@@ -2981,8 +3021,8 @@ function renderDepsModal(svcId) {
     list.innerHTML = myDeps.map(d => {
       const t = allServices.find(s => s.id === d.to_service_id);
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-        <span style="flex:1;font-size:12px">${t ? t.name : `#${d.to_service_id}`}
-          ${t ? `<span style="font-size:10px;color:var(--text-3)"> — ${t.hostname || t.ip}</span>` : ""}
+        <span style="flex:1;font-size:12px">${t ? escHtml(t.name) : `#${d.to_service_id}`}
+          ${t ? `<span style="font-size:10px;color:var(--text-3)"> — ${escHtml(t.hostname || t.ip)}</span>` : ""}
         </span>
         <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeSvcDep(${d.id},${id})">✕</button>
       </div>`;
@@ -2995,7 +3035,7 @@ function renderDepsModal(svcId) {
   sel.innerHTML   = available.length === 0
     ? `<option value="">No other services</option>`
     : `<option value="">Pick a service…</option>` +
-      available.map(s => `<option value="${s.id}">${s.name} (${s.hostname || s.ip})</option>`).join("");
+      available.map(s => `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.hostname || s.ip)})</option>`).join("");
 }
 
 async function addSvcDep() {
@@ -3090,8 +3130,8 @@ async function loadSvcUptime(id, monitored) {
   try {
     const d = await api("GET", `/api/services/${id}/uptime`);
     const stat = (label, u) => {
-      if (!u) return `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${label}</span></div>`;
-      return `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${label}</span></div>`;
+      if (!u) return `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${escHtml(label)}</span></div>`;
+      return `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${escHtml(label)}</span></div>`;
     };
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     let outages = "";
@@ -3190,7 +3230,7 @@ function updateSvcDetailUrlBtn() {
   const val = document.getElementById("svcDetailUrl")?.value.trim();
   const btn = document.getElementById("svcDetailUrlBtn");
   if (!btn) return;
-  if (val) {
+  if (val && /^https?:\/\//i.test(val)) {   // only real web links are clickable
     btn.href    = val;
     btn.style.display = "";
   } else {
@@ -3247,11 +3287,11 @@ function renderSvcDetailDeps(svcId) {
   const chips = [
     ...outgoing.map(d => {
       const target = allServices.find(s => s.id === d.to_service_id);
-      return `<span class="dep-chip outgoing">→ ${target ? target.name : d.to_service_id}</span>`;
+      return `<span class="dep-chip outgoing">→ ${escHtml(target ? target.name : d.to_service_id)}</span>`;
     }),
     ...incoming.map(d => {
       const src = allServices.find(s => s.id === d.from_service_id);
-      return `<span class="dep-chip incoming">← ${src ? src.name : d.from_service_id}</span>`;
+      return `<span class="dep-chip incoming">← ${escHtml(src ? src.name : d.from_service_id)}</span>`;
     }),
   ];
   const hint = `<span style="font-size:11px;color:var(--text-3)">Manage dependencies from the Topology view.</span>`;
@@ -3280,15 +3320,15 @@ function openBulkAddContainers() {
   grid.innerHTML = containers.map(h => {
     const label = h.hostname || h.ip;
     const sub   = h.hostname ? h.ip : "";
-    return `<div class="container-chip" id="bulk-chip-${h.ip.replace(/\./g,'_')}" onclick="toggleBulkChip('${h.ip}','${label.replace(/'/g,"\\'")}')">
-      <span class="container-chip-name">${label}</span>
-      ${sub ? `<span class="container-chip-ip">${sub}</span>` : ""}
+    return `<div class="container-chip" id="bulk-chip-${h.ip.replace(/\./g,'_')}" onclick="toggleBulkChip(${jsq(h.ip)},${jsq(label)})">
+      <span class="container-chip-name">${escHtml(label)}</span>
+      ${sub ? `<span class="container-chip-ip">${escHtml(sub)}</span>` : ""}
     </div>`;
   }).join("");
   const sel = document.getElementById("bulkHostIp");
   const regularH   = allHosts.filter(h => h.device_type !== "container");
   const containerH = allHosts.filter(h => h.device_type === "container");
-  const bulkOpt = h => `<option value="${h.ip}">${h.ip}${h.hostname ? " — " + h.hostname : ""}</option>`;
+  const bulkOpt = h => `<option value="${escHtml(h.ip)}">${escHtml(h.ip)}${h.hostname ? " — " + escHtml(h.hostname) : ""}</option>`;
   sel.innerHTML = regularH.map(bulkOpt).join("") +
     (containerH.length ? `<optgroup label="── Containers ──">${containerH.map(bulkOpt).join("")}</optgroup>` : "");
   const last = localStorage.getItem("boltarr_last_svc_host");
@@ -3452,18 +3492,18 @@ function hierNodeHTML(ip, childrenMap, hostMap, tiers, connEdge, depth) {
   const children = (childrenMap[ip] || []).sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip));
 
   return `<div class="hier-node">
-    <div class="hier-node-row" onclick="showHostDetail('${ip}')">
+    <div class="hier-node-row" onclick="showHostDetail(${jsq(ip)})">
       <span class="hier-tier-badge">${tierBadge}</span>
       <span class="hier-dot" style="background:${color}"></span>
-      <span class="hier-ip mono">${ip}</span>
-      <span class="hier-hostname">${host.hostname || '<span style="color:var(--text-3)">—</span>'}</span>
-      <span class="tag tag-${dt}" style="font-size:9px;padding:1px 5px;line-height:1.6">${dt}</span>
+      <span class="hier-ip mono">${escHtml(ip)}</span>
+      <span class="hier-hostname">${host.hostname ? escHtml(host.hostname) : '<span style="color:var(--text-3)">—</span>'}</span>
+      <span class="tag tag-${escHtml(dt)}" style="font-size:9px;padding:1px 5px;line-height:1.6">${escHtml(dt)}</span>
       ${pill}
       <span class="hier-node-actions">
         <button class="btn" style="font-size:10px;padding:2px 7px"
-          onclick="event.stopPropagation();hierLinkFrom('${ip}')">Link</button>
+          onclick="event.stopPropagation();hierLinkFrom(${jsq(ip)})">Link</button>
         <button class="btn" style="font-size:10px;padding:2px 7px"
-          onclick="event.stopPropagation();hierMultiLinkFrom('${ip}')">Multi</button>
+          onclick="event.stopPropagation();hierMultiLinkFrom(${jsq(ip)})">Multi</button>
       </span>
     </div>
     ${children.length ? `<div class="hier-children">${children.map(c =>
@@ -3562,9 +3602,9 @@ function renderVlans() {
   }
   list.innerHTML = allVlans.map(v => `
     <div class="vlan-row" id="vlan-row-${v.id}">
-      <div class="vlan-swatch" style="background:${v.color}"></div>
-      <span class="vlan-tag mono">VLAN ${v.tag}</span>
-      <span class="vlan-name">${v.name}</span>
+      <div class="vlan-swatch" style="background:${escHtml(v.color)}"></div>
+      <span class="vlan-tag mono">VLAN ${escHtml(v.tag)}</span>
+      <span class="vlan-name">${escHtml(v.name)}</span>
       <button class="btn-ghost" onclick="openEditVlan(${v.id})" style="font-size:11px;padding:2px 5px" title="Edit">✎</button>
       <button class="btn-ghost btn-danger" onclick="deleteVlan(${v.id})" style="font-size:11px;padding:2px 5px" title="Delete">✕</button>
     </div>
@@ -3651,9 +3691,9 @@ function updateConnVlans(sectionId, portMode) {
           ? allVlans.map(v => `
             <label class="vlan-check-item">
               <input type="${isTrunk ? "checkbox" : "radio"}" name="vlan_${sectionId}" value="${v.id}">
-              <span class="vlan-swatch-sm" style="background:${v.color}"></span>
-              <span class="mono" style="font-size:10px">VLAN ${v.tag}</span>
-              <span style="font-size:11px;color:var(--text-2)">${v.name}</span>
+              <span class="vlan-swatch-sm" style="background:${escHtml(v.color)}"></span>
+              <span class="mono" style="font-size:10px">VLAN ${escHtml(v.tag)}</span>
+              <span style="font-size:11px;color:var(--text-2)">${escHtml(v.name)}</span>
             </label>`).join("")
           : `<span style="font-size:11px;color:var(--text-3)">No VLANs defined — add via ◈ VLANs button</span>`
         }
@@ -3716,6 +3756,7 @@ async function loadAppTz() {
 }
 
 async function openSettings() {
+  renderLoginSettings();
   try {
     const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history } = await api("GET", "/api/settings");
     populateTimezones();
@@ -3782,6 +3823,7 @@ async function openSettings() {
     document.getElementById("setCaOffline").checked          = ca.host_offline     !== false;
     document.getElementById("setCaOnline").checked           = ca.host_online      !== false;
     document.getElementById("setCaIncludeMac").checked       = !!ca.include_mac;
+    document.getElementById("setCaIncludeAliases").checked   = ca.include_aliases !== false;
     document.getElementById("setCaOnScan").checked           = ca.on_scan          !== false;
     document.getElementById("setCaDigest").checked           = ca.digest_enabled   !== false;
     document.getElementById("setCaDigestTime").value         = ca.digest_time || "08:00";
@@ -3869,24 +3911,28 @@ async function saveSettings() {
     host_offline:     document.getElementById("setCaOffline").checked,
     host_online:      document.getElementById("setCaOnline").checked,
     include_mac:      document.getElementById("setCaIncludeMac").checked,
+    include_aliases:  document.getElementById("setCaIncludeAliases").checked,
     on_scan:          document.getElementById("setCaOnScan").checked,
     digest_enabled:   document.getElementById("setCaDigest").checked,
     digest_time:      document.getElementById("setCaDigestTime").value,
   };
   const generalPayload = { timezone: document.getElementById("setTimezone").value };
   try {
-    await api("PUT", "/api/settings/general", generalPayload);
-    APP_TZ = generalPayload.timezone;
-    await api("PUT", "/api/settings", payload);
-    await api("PUT", "/api/settings/notifications", ntfyPayload);
-    await api("PUT", "/api/settings/statuspage", spPayload);
-    await api("PUT", "/api/settings/change-tracking", ctPayload);
-    await api("PUT", "/api/settings/liveness", lvPayload);
-    await api("PUT", "/api/settings/ip-history", {
-      stale_days: parseInt(document.getElementById("setIphStale").value, 10) || 30,
-      gone_days:  parseInt(document.getElementById("setIphGone").value, 10)  || 60,
+    // One request: the server checks every section and saves all or nothing
+    await api("PUT", "/api/settings/all", {
+      general:         generalPayload,
+      llm:             payload,
+      notifications:   ntfyPayload,
+      statuspage:      spPayload,
+      change_tracking: ctPayload,
+      liveness:        lvPayload,
+      ip_history: {
+        stale_days: parseInt(document.getElementById("setIphStale").value, 10) || 30,
+        gone_days:  parseInt(document.getElementById("setIphGone").value, 10)  || 60,
+      },
+      change_alerts:   caPayload,
     });
-    await api("PUT", "/api/settings/change-alerts", caPayload);
+    APP_TZ = generalPayload.timezone;
     closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
@@ -3897,7 +3943,7 @@ async function saveSettings() {
     if (currentHostsTab === "iphistory" && document.getElementById("panel-hosts").classList.contains("active")) loadIpHistory();
     showToast("Settings saved");
   } catch (e) {
-    alert("Failed to save settings: " + e.message);
+    alert("Settings not saved — nothing was changed.\n\n" + e.message);
   }
 }
 
@@ -4039,8 +4085,8 @@ function renderSshKeys() {
     return `
     <div class="ssh-key-row" id="sshkrow-${k.id}">
       <div class="ssh-key-info">
-        <div class="ssh-key-name">${k.name}</div>
-        <div class="ssh-key-preview mono" id="sshkprev-${k.id}">${preview}</div>
+        <div class="ssh-key-name">${escHtml(k.name)}</div>
+        <div class="ssh-key-preview mono" id="sshkprev-${k.id}">${escHtml(preview)}</div>
       </div>
       <div class="ssh-key-inline-actions">
         <button class="btn-icon" title="${eyeTitle}" onclick="toggleSshKeyView(${k.id})">${eyeIcon}</button>
@@ -4147,23 +4193,23 @@ async function loadHostSshSection(ip) {
   const usersHTML = Object.entries(byUser).map(([user, entries]) => {
     const rows = entries.map(a => `
       <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
-        <div style="flex:1;font-size:12px;color:var(--text)">${a.name}</div>
-        <div style="font-size:10px;font-family:monospace;color:var(--text-3);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.fingerprint || ""}</div>
-        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeHostSshAccess(${a.id},'${ip}')">✕</button>
+        <div style="flex:1;font-size:12px;color:var(--text)">${escHtml(a.name)}</div>
+        <div style="font-size:10px;font-family:monospace;color:var(--text-3);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.fingerprint || "")}</div>
+        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeHostSshAccess(${a.id},${jsq(ip)})">✕</button>
       </div>`).join("");
 
     return `
       <div style="margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          <span style="font-size:11px;font-weight:600;color:var(--accent);font-family:monospace">${user}</span>
-          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="copySshCurl('${ip}','${user}')" title="Copies a command that deploys these keys into ${user}'s ~/.ssh/authorized_keys">Copy deploy cmd</button>
-          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="downloadAuthorizedKeys('${ip}','${user}')">Download</button>
+          <span style="font-size:11px;font-weight:600;color:var(--accent);font-family:monospace">${escHtml(user)}</span>
+          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="copySshCurl(${jsq(ip)},${jsq(user)})" title="Copies a command that deploys these keys into ${escHtml(user)}'s ~/.ssh/authorized_keys">Copy deploy cmd</button>
+          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="downloadAuthorizedKeys(${jsq(ip)},${jsq(user)})">Download</button>
         </div>
         ${rows}
       </div>`;
   }).join("");
 
-  const keyOptions = keys.map(k => `<option value="${k.id}">${k.name}</option>`).join("");
+  const keyOptions = keys.map(k => `<option value="${k.id}">${escHtml(k.name)}</option>`).join("");
 
   el.innerHTML = `
     ${usersHTML || `<div style="font-size:12px;color:var(--text-3);padding:8px 0;margin-bottom:12px">No SSH access configured for this host yet.</div>`}
@@ -4178,7 +4224,7 @@ async function loadHostSshSection(ip) {
         <label style="font-size:10px">Username</label>
         <input type="text" id="sshAccessUser" value="root" placeholder="root" style="width:100%">
       </div>
-      <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;white-space:nowrap" onclick="addHostSshAccess('${ip}')">+ Grant Access</button>
+      <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;white-space:nowrap" onclick="addHostSshAccess(${jsq(ip)})">+ Grant Access</button>
     </div>
   `;
 }
@@ -4229,28 +4275,221 @@ async function downloadAuthorizedKeys(ip, user) {
 
 // ── Backup & Restore ─────────────────────────────────────────────────────────
 
-function downloadBackup() {
-  const a = document.createElement("a");
-  a.href = "/api/backup";
-  a.download = "";
-  a.click();
+function downloadBackup() { openBackupModal(); }
+
+function openBackupModal() {
+  const $ = id => document.getElementById(id);
+  $("backupProtect").checked = true;
+  $("backupPw").value = ""; $("backupPw2").value = "";
+  $("backupErr").textContent = "";
+  onBackupProtectChange();
+  $("backupModal").classList.add("open");
+  $("backupPw").focus();
 }
+
+function closeBackupModal() { document.getElementById("backupModal").classList.remove("open"); }
+
+function onBackupProtectChange() {
+  const on = document.getElementById("backupProtect").checked;
+  document.getElementById("backupPwRows").hidden = !on;
+  document.getElementById("backupNoPwWarn").hidden = on;
+}
+
+async function doBackup(e) {
+  e?.preventDefault();
+  const $ = id => document.getElementById(id);
+  const protect = $("backupProtect").checked, pw = $("backupPw").value;
+  $("backupErr").textContent = "";
+  if (protect) {
+    if (pw.length < 8) return void ($("backupErr").textContent = "Password must be at least 8 characters.");
+    if (pw !== $("backupPw2").value) return void ($("backupErr").textContent = "The two passwords don't match.");
+  }
+  $("backupGoBtn").disabled = true;
+  try {
+    const r = await fetch("/api/backup", { method: "POST", headers: { "Content-Type": "application/json" },
+                                           body: JSON.stringify({ password: protect ? pw : null }) });
+    if (!r.ok) throw new Error(apiErrorText(await r.text()));
+    const name = (r.headers.get("content-disposition") || "").match(/filename=([^;]+)/)?.[1] || "boltarr-backup.zip";
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    closeBackupModal();
+    showToast(protect ? "Protected backup downloaded" : "Backup downloaded");
+  } catch (err) {
+    $("backupErr").textContent = "Backup failed: " + err.message;
+  } finally {
+    $("backupGoBtn").disabled = false;
+  }
+}
+
+// Restore is two steps: upload + check (nothing changes, the summary is shown),
+// then apply. The apply runs in place on the server — no restart — and the
+// page reloads itself afterwards, then shows a "restored" banner.
+let restoreToken = null;
+
+function _uploadWithProgress(url, file, onPct, password) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("X-Boltarr", "1");
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onPct(Math.round(e.loaded / e.total * 100)); };
+    xhr.onload = () => {
+      let body = null;
+      try { body = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status >= 200 && xhr.status < 300) return resolve(body);
+      const d = body && body.detail;
+      const err = new Error(d && d.message ? d.message : (apiErrorText(xhr.responseText) || `Upload failed (${xhr.status})`));
+      err.code = d && d.code;
+      reject(err);
+    };
+    xhr.onerror = () => reject(new Error("Upload failed — check the connection"));
+    const form = new FormData();
+    form.append("file", file);
+    if (password) form.append("password", password);
+    xhr.send(form);
+  });
+}
+
+let restoreFile = null;
 
 async function restoreBackup(input) {
   const file = input.files[0];
   input.value = "";
   if (!file) return;
-  if (!confirm(`Restore from "${file.name}"?\n\nThis will replace ALL current data. This cannot be undone.`)) return;
+  closeSettings();
+  restoreToken = null;
+  restoreFile = file;
+  document.getElementById("restoreFileName").textContent = file.name;
+  document.getElementById("restoreModal").classList.add("open");
+  await _checkRestoreFile();
+}
+
+async function _checkRestoreFile(password) {
+  const $ = id => document.getElementById(id);
+  $("restoreUpload").hidden = false;
+  $("restorePwBox").hidden = true;
+  $("restoreSummary").hidden = true;
+  $("restoreGoBtn").disabled = true;
+  const setPct = p => { $("restoreUploadBar").style.width = p + "%"; $("restoreUploadPct").textContent = p < 100 ? `${p}%` : "Checking backup…"; };
+  setPct(0);
   try {
-    const form = new FormData();
-    form.append("file", file);
-    const res = await fetch("/api/restore", { method: "POST", body: form });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "Restore failed");
-    alert("✅ Restore complete.\n\nRestart Boltarr to finish loading the restored data — e.g.\n    docker restart boltarr\n(or restart the service). Until you do, some pages may error, because the app is still holding the old database open.");
+    const chk = await _uploadWithProgress("/api/restore/check", restoreFile, setPct, password);
+    restoreToken = chk.token;
+    showRestoreSummary(chk);
   } catch (e) {
-    alert("Restore failed: " + e.message);
+    if (e.code === "password_required" || e.code === "wrong_password") {
+      $("restoreUpload").hidden = true;
+      $("restorePwMsg").textContent = e.code === "wrong_password"
+        ? "That password didn't work — try again." : "This backup is password-protected.";
+      $("restorePwBox").hidden = false;
+      $("restorePw").value = "";
+      $("restorePw").focus();
+      return;
+    }
+    $("restoreModal").classList.remove("open");
+    alert("This backup can't be restored — nothing was changed.\n\n" + e.message);
   }
+}
+
+function _cmpVersion(a, b) {
+  const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  return 0;
+}
+
+function showRestoreSummary(chk) {
+  const $ = id => document.getElementById(id);
+  const b = chk.backup, cur = chk.current;
+  $("restoreDate").textContent = fmtLocal(b.created_at) || b.created_at;
+  $("restoreVersion").textContent = b.version ? `v${b.version}` : "unknown (older backup)";
+  $("restoreSettings").textContent = b.has_settings ? "Yes — settings are replaced too" : "No — current settings are kept";
+  $("restoreProtected").textContent = b.protected ? "Yes 🔒" : "No";
+  const rows = [["Hosts", "hosts"], ["Services", "services"], ["Subnets", "subnets"], ["Links", "connections"]];
+  $("restoreCompare").innerHTML = rows.map(([label, k]) => {
+    const now = cur[k] ?? "—", after = b.counts[k] ?? "—";
+    const diff = typeof now === "number" && typeof after === "number" && now !== after ? " restore-diff" : "";
+    return `<tr><td>${label}</td><td class="mono">${now}</td><td class="mono${diff}">${after}</td></tr>`;
+  }).join("");
+  let note = "";
+  if (chk.scan_running) note = "⏳ A scan is running. Wait for it to finish (or cancel it) before restoring.";
+  else if (b.version && _cmpVersion(b.version, chk.current_version) > 0)
+    note = `This backup was made by a newer Boltarr (v${b.version}) than this one (v${chk.current_version}). It will usually work, but update Boltarr first if you can.`;
+  else if (b.version && _cmpVersion(b.version, chk.current_version) < 0)
+    note = `Made by an older Boltarr (v${b.version}) — it's upgraded automatically while restoring.`;
+  $("restoreNote").textContent = note;
+  $("restoreNote").hidden = !note;
+  $("restoreUpload").hidden = true;
+  $("restoreSummary").hidden = false;
+  $("restoreGoBtn").disabled = !!chk.scan_running;
+}
+
+function cancelRestore() {
+  if (restoreToken) api("DELETE", `/api/restore/${restoreToken}`).catch(() => {});
+  restoreToken = null;
+  restoreFile = null;
+  document.getElementById("restoreModal").classList.remove("open");
+}
+
+function _restoreStep(name, state) {   // state: active | done | fail
+  const li = document.querySelector(`#restoreSteps [data-step="${name}"]`);
+  if (li) li.className = state;
+}
+
+async function applyRestore() {
+  if (!restoreToken) return;
+  const $ = id => document.getElementById(id);
+  const token = restoreToken;
+  $("restoreModal").classList.remove("open");
+  $("restoreSteps").querySelectorAll("li").forEach(li => li.className = "");
+  $("restoreOverlayTitle").textContent = "Restoring…";
+  $("restoreOverlayMsg").textContent = "";
+  $("restoreOverlayClose").hidden = true;
+  $("restoreOverlay").hidden = false;
+  _restoreStep("upload", "done");
+  _restoreStep("restore", "active");
+  window.onbeforeunload = () => "A restore is in progress.";
+  try {
+    const res = await api("POST", `/api/restore/${token}`);
+    restoreToken = null;
+    _restoreStep("restore", "done");
+    _restoreStep("monitor", "active");
+    await new Promise(r => setTimeout(r, 600));   // loops resume as the request returns
+    _restoreStep("monitor", "done");
+    _restoreStep("reload", "active");
+    $("restoreOverlayTitle").textContent = "✅ Restore complete";
+    try { sessionStorage.setItem("boltarrRestored", res.backup.created_at); } catch (_) {}
+    window.onbeforeunload = null;
+    for (let n = 3; n > 0; n--) {
+      $("restoreOverlayMsg").textContent = `Reloading in ${n}…`;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    location.reload();
+  } catch (e) {
+    window.onbeforeunload = null;
+    _restoreStep("restore", "fail");
+    $("restoreOverlayTitle").textContent = "Restore didn't happen";
+    $("restoreOverlayMsg").textContent = e.message + " Your data is unchanged.";
+    $("restoreOverlayClose").hidden = false;
+  }
+}
+
+function closeRestoreOverlay() {
+  document.getElementById("restoreOverlay").hidden = true;
+}
+
+// After the post-restore reload: a banner saying which backup is now loaded
+function showRestoredBanner() {
+  let ts = null;
+  try { ts = sessionStorage.getItem("boltarrRestored"); sessionStorage.removeItem("boltarrRestored"); } catch (_) {}
+  if (!ts) return;
+  const bar = document.createElement("div");
+  bar.className = "restored-banner";
+  bar.setAttribute("role", "status");
+  bar.innerHTML = `<span>✅ Restored from the backup made <strong>${escHtml(fmtLocal(ts) || ts)}</strong>.</span>
+    <button class="btn-ghost" aria-label="Dismiss" onclick="this.parentElement.remove()">×</button>`;
+  document.body.prepend(bar);
 }
 
 function openFactoryReset() {
@@ -4287,3 +4526,104 @@ async function initAiStatus() {
 }
 
 document.addEventListener("DOMContentLoaded", () => { boot(); initAiStatus(); });
+
+
+// ── Login ─────────────────────────────────────────────────────────────────────
+
+let loginState = { enabled: false };
+
+async function loadLoginState() {
+  try { loginState = await api("GET", "/api/auth/status"); } catch (_) { return; }
+  // Log out makes no sense when an outside login service signed you in
+  document.getElementById("logoutBtn").hidden = !(loginState.enabled && !loginState.via_proxy);
+  if (!loginState.enabled) showNoPasswordBanner();
+}
+
+// Reminder while login is off; "Not now" hides it for 30 days on this browser
+function showNoPasswordBanner() {
+  try {
+    const until = +localStorage.getItem("boltarrNoPwSnooze") || 0;
+    if (Date.now() < until) return;
+  } catch (_) {}
+  if (document.querySelector(".nopw-banner")) return;
+  const bar = document.createElement("div");
+  bar.className = "restored-banner nopw-banner";
+  bar.setAttribute("role", "status");
+  bar.innerHTML = `<span>🔓 Boltarr has no password — anyone on your network can change it.</span>
+    <button class="btn" style="font-size:12px" onclick="openLoginSettings()">Set a password</button>
+    <button class="btn-ghost" style="font-size:12px" onclick="snoozeNoPwBanner()">Not now</button>`;
+  document.body.prepend(bar);
+}
+
+function snoozeNoPwBanner() {
+  try { localStorage.setItem("boltarrNoPwSnooze", String(Date.now() + 30 * 86400000)); } catch (_) {}
+  document.querySelector(".nopw-banner")?.remove();
+}
+
+async function openLoginSettings() {
+  document.querySelector(".nopw-banner")?.remove();
+  await openSettings();
+  const sec = document.getElementById("setLoginSection");
+  sec.open = true;
+  sec.scrollIntoView({ block: "start" });
+  document.getElementById("loginNewPw")?.focus();
+}
+
+async function renderLoginSettings() {
+  let s;
+  try { s = await api("GET", "/api/auth/settings"); } catch (_) { return; }
+  const $ = id => document.getElementById(id);
+  $("loginOff").hidden = !!s.enabled;
+  $("loginOn").hidden = !s.enabled;
+  $("loginUserName").textContent = s.username || "admin";
+  $("loginTrustProxy").checked = !!s.trust_proxy;
+  $("loginProxies").value = s.trusted_proxies || "";
+  $("loginProxyHeader").value = s.proxy_header || "Remote-User";
+  ["loginNewPw", "loginNewPw2", "loginCurPw", "loginChgPw", "loginChgPw2", "loginOffPw"].forEach(id => { $(id).value = ""; });
+}
+
+async function enableLogin() {
+  const $ = id => document.getElementById(id);
+  const pw = $("loginNewPw").value;
+  if (pw !== $("loginNewPw2").value) return alert("The two passwords don't match.");
+  try {
+    await api("POST", "/api/auth/setup", { username: $("loginNewUser").value.trim() || "admin", password: pw });
+  } catch (e) { return alert("Login not turned on: " + e.message); }
+  showToast("Login is on — this browser stays signed in");
+  await renderLoginSettings();
+  await loadLoginState();
+}
+
+async function changeLoginPassword() {
+  const $ = id => document.getElementById(id);
+  if ($("loginChgPw").value !== $("loginChgPw2").value) return alert("The two new passwords don't match.");
+  try {
+    await api("POST", "/api/auth/password", { current: $("loginCurPw").value, new: $("loginChgPw").value });
+  } catch (e) { return alert("Password not changed: " + e.message); }
+  showToast("Password changed");
+  await renderLoginSettings();
+}
+
+async function saveLoginProxy() {
+  const $ = id => document.getElementById(id);
+  try {
+    await api("PUT", "/api/auth/settings", { trusted_proxies: $("loginProxies").value,
+      proxy_header: $("loginProxyHeader").value, trust_proxy: $("loginTrustProxy").checked });
+  } catch (e) { return alert("Not saved: " + e.message); }
+  showToast("Saved");
+  await renderLoginSettings();
+}
+
+async function disableLogin() {
+  try {
+    await api("POST", "/api/auth/disable", { password: document.getElementById("loginOffPw").value });
+  } catch (e) { return alert("Login is still on: " + e.message); }
+  showToast("Login is off");
+  await renderLoginSettings();
+  await loadLoginState();
+}
+
+async function logout() {
+  try { await api("POST", "/api/auth/logout"); } catch (_) {}
+  location.href = "/login.html";
+}

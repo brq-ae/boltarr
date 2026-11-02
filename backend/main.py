@@ -11,18 +11,19 @@ from pathlib import Path
 from typing import Optional
 
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .database import init_db, get_conn
 from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_command
-from .config import get_config, get_llm_config, get_notifications_config, save_config
+from .config import get_config, get_llm_config, get_notifications_config, save_config, invalidate_config_cache
 from . import notify
 from . import monitor
 from . import liveness
 from . import scheduler
+from . import auth
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, chat_stream, is_configured, get_default_model,
@@ -38,7 +39,17 @@ FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
 @app.on_event("startup")
 def startup():
+    from .config import CONFIG_PATH
+    fresh = not CONFIG_PATH.exists()
     init_db()
+    if fresh:
+        with get_conn() as conn:
+            empty = not conn.execute("SELECT 1 FROM hosts UNION ALL SELECT 1 FROM subnets LIMIT 1").fetchone()
+        if empty:   # brand-new install: ask for an admin password first
+            cfg = get_config()
+            cfg["auth"]["setup_pending"] = True
+            auth.ensure_secret(cfg)
+            save_config(cfg)
     # BOLTARR_DISABLE_LOOPS skips the background probe/scan loops — for a preview
     # instance with sample data (so it isn't marked all-down against fake IPs).
     if os.environ.get("BOLTARR_DISABLE_LOOPS", "").lower() not in ("1", "true", "yes"):
@@ -50,6 +61,180 @@ def startup():
 @app.get("/api/version")
 def get_version():
     return {"version": APP_VERSION}
+
+
+# ── Login gate ────────────────────────────────────────────────────────────────
+
+@app.middleware("http")
+async def login_gate(request: Request, call_next):
+    path = request.url.path
+    a = auth.auth_config()
+    gated = auth.login_required(a)
+    if gated and path not in auth.OPEN_PATHS and not path.startswith(auth.OPEN_PREFIXES):
+        if a.get("setup_pending") and not a.get("password_hash"):
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "Create an admin password first"}, status_code=401)
+            return RedirectResponse("/login.html", status_code=303)
+        if not auth.current_user(a, request):
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "Login required"}, status_code=401)
+            return RedirectResponse("/login.html", status_code=303)
+    # Forged cross-site requests: changes must come from Boltarr's own pages
+    if (gated and path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS")
+            and auth.CSRF_HEADER not in request.headers):
+        return JSONResponse({"detail": "Missing X-Boltarr header"}, status_code=403)
+    return await call_next(request)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+def _set_session_cookie(resp, request: Request, a: dict):
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "") == "https"
+    resp.set_cookie(auth.COOKIE, auth.make_session(a), max_age=int(a.get("session_days") or 30) * 86400,
+                    httponly=True, samesite="lax", secure=secure, path="/")
+
+
+class LoginIn(BaseModel):
+    username: str = ""
+    password: str
+
+
+class SetupIn(BaseModel):
+    username: str = "admin"
+    password: str
+
+
+class PasswordChangeIn(BaseModel):
+    current: str
+    new: str
+
+
+class DisableLoginIn(BaseModel):
+    password: str
+
+
+class AuthSettingsIn(BaseModel):
+    trust_proxy:     Optional[bool] = None
+    proxy_header:    Optional[str]  = None
+    trusted_proxies: Optional[str]  = None
+
+
+def _check_new_password(pw: str):
+    if len(pw or "") < auth.MIN_PASSWORD:
+        raise HTTPException(422, f"Password must be at least {auth.MIN_PASSWORD} characters")
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request):
+    a = auth.auth_config()
+    on = bool(a.get("enabled") and a.get("password_hash"))
+    client = _client_ip(request)
+    via_proxy = bool(on and auth.proxy_user(a, client, request.headers))
+    user = auth.current_user(a, request) if on else None
+    return {"enabled": on, "setup_pending": bool(a.get("setup_pending") and not a.get("password_hash")),
+            "logged_in": bool(user), "username": user, "via_proxy": via_proxy}
+
+
+@app.post("/api/auth/login")
+def auth_login(data: LoginIn, request: Request):
+    a = auth.auth_config()
+    if not (a.get("enabled") and a.get("password_hash")):
+        raise HTTPException(400, "Login is not turned on")
+    ip = _client_ip(request)
+    wait = auth.retry_after(ip)
+    if wait:
+        raise HTTPException(429, f"Too many wrong tries — wait {wait} seconds", headers={"Retry-After": str(wait)})
+    name_ok = not data.username.strip() or data.username.strip() == a.get("username")
+    if not (auth.verify_password(data.password, a["password_hash"]) and name_ok):
+        auth.record_failure(ip)
+        raise HTTPException(401, "Wrong username or password")
+    auth.record_success(ip)
+    resp = JSONResponse({"ok": True, "username": a.get("username")})
+    _set_session_cookie(resp, request, a)
+    return resp
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE, path="/")
+    return resp
+
+
+@app.post("/api/auth/setup")
+def auth_setup(data: SetupIn, request: Request):
+    """Set the first password (fresh install, or turning login on in Settings)."""
+    if auth.auth_config().get("password_hash"):
+        raise HTTPException(409, "A password is already set — use Change password")
+    _check_new_password(data.password)
+    a = auth.set_password(data.username, data.password)
+    resp = JSONResponse({"ok": True, "username": a["username"]})
+    _set_session_cookie(resp, request, a)
+    return resp
+
+
+@app.post("/api/auth/skip-setup")
+def auth_skip_setup():
+    """Fresh install: 'set it later' — run without a password for now."""
+    cfg = get_config()
+    if not cfg["auth"].get("password_hash"):
+        cfg["auth"]["setup_pending"] = False
+        save_config(cfg)
+    return {"ok": True}
+
+
+@app.post("/api/auth/password")
+def auth_change_password(data: PasswordChangeIn, request: Request):
+    a = auth.auth_config()
+    if not auth.verify_password(data.current, a.get("password_hash") or ""):
+        raise HTTPException(401, "Current password is wrong")
+    _check_new_password(data.new)
+    a = auth.set_password(a.get("username") or "admin", data.new)
+    resp = JSONResponse({"ok": True})
+    _set_session_cookie(resp, request, a)     # this browser stays in; others are logged out
+    return resp
+
+
+@app.post("/api/auth/disable")
+def auth_disable(data: DisableLoginIn):
+    a = auth.auth_config()
+    if not auth.verify_password(data.password, a.get("password_hash") or ""):
+        raise HTTPException(401, "Password is wrong")
+    auth.clear_password()
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/auth/settings")
+def auth_settings_get():
+    a = auth.auth_config()
+    return {k: a.get(k) for k in ("enabled", "username", "trust_proxy", "proxy_header",
+                                   "trusted_proxies", "session_days")}
+
+
+@app.put("/api/auth/settings")
+def auth_settings_put(data: AuthSettingsIn):
+    cfg = get_config()
+    a = cfg["auth"]
+    if data.proxy_header is not None:
+        a["proxy_header"] = data.proxy_header.strip() or "Remote-User"
+    if data.trusted_proxies is not None:
+        try:
+            auth.parse_proxies(data.trusted_proxies)
+        except ValueError as e:
+            raise HTTPException(422, f"Not an IP address or range: {e}")
+        a["trusted_proxies"] = data.trusted_proxies.strip()
+    if data.trust_proxy is not None:
+        if data.trust_proxy and not a.get("password_hash"):
+            raise HTTPException(422, "Turn login on first")
+        if data.trust_proxy and not auth.parse_proxies(a.get("trusted_proxies", "")):
+            raise HTTPException(422, "Add the proxy's IP address first")
+        a["trust_proxy"] = data.trust_proxy
+    save_config(cfg)
+    return auth_settings_get()
 
 
 # ── Subnets ───────────────────────────────────────────────────────────────────
@@ -157,7 +342,8 @@ def subnet_ip_history(subnet_id: int):
         hosts = {h["ip"]: dict(h) for h in conn.execute(
             "SELECT id, ip, mac, hostname, vendor, device_type, online, first_seen, last_seen FROM hosts")}
         by_id = {h["id"]: h for h in hosts.values()}
-        aliases = {a["ip"]: by_id.get(a["host_id"]) for a in conn.execute("SELECT host_id, ip FROM host_aliases")}
+        aliases = {a["ip"]: (by_id.get(a["host_id"]), dict(a)) for a in conn.execute(
+            "SELECT host_id, ip, online, last_seen FROM host_aliases")}
         mac_changes = {}
         for e in conn.execute(
                 "SELECT ip, ts, old_value, new_value FROM change_events WHERE type='mac_changed' ORDER BY ts"):
@@ -172,9 +358,12 @@ def subnet_ip_history(subnet_id: int):
             continue
         ip_s = str(ip)
         h, alias_of = hosts.get(ip_s), None
-        if not h and aliases.get(ip_s):
-            h = aliases[ip_s]
-            alias_of = h["ip"]
+        if not h and aliases.get(ip_s) and aliases[ip_s][0]:
+            owner, al = aliases[ip_s]
+            alias_of = owner["ip"]
+            h = dict(owner)
+            if al["last_seen"]:           # pinged on its own — use its own times
+                h["online"], h["last_seen"] = al["online"], al["last_seen"]
         row = {"ip": ip_s, "alias_of": alias_of, "mac_change": mac_changes.get(ip_s)}
         if not h:
             row["status"] = "never"
@@ -428,9 +617,11 @@ def delete_scan_profile(pid: int):
 @app.get("/api/change-events")
 def list_change_events(ip: Optional[str] = None, limit: int = 200):
     with get_conn() as conn:
-        if ip:
-            rows = conn.execute("SELECT * FROM change_events WHERE ip=? ORDER BY ts DESC LIMIT ?",
-                                (ip, limit)).fetchall()
+        if ip:   # a host's own IP plus its alias IPs
+            rows = conn.execute("""
+                SELECT * FROM change_events WHERE ip=? OR ip IN (
+                    SELECT a.ip FROM host_aliases a JOIN hosts h ON h.id = a.host_id WHERE h.ip=?)
+                ORDER BY ts DESC LIMIT ?""", (ip, ip, limit)).fetchall()
         else:
             rows = conn.execute("SELECT * FROM change_events ORDER BY ts DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]
@@ -532,6 +723,11 @@ def _get_aliases(conn, host_id: int) -> list[str]:
     ).fetchall()]
 
 
+def _get_alias_info(conn, host_id: int) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT ip, online, last_seen FROM host_aliases WHERE host_id=? ORDER BY ip", (host_id,))]
+
+
 class SshKeyIn(BaseModel):
     name: str
     public_key: str
@@ -541,20 +737,26 @@ class SshAccessIn(BaseModel):
     username: str = "root"
 
 
+def _rows_by_host(conn, sql: str, params=()) -> dict:
+    """Run one query whose rows carry host_id and group them per host — replaces
+    a query-per-host loop (N+1) with a single query."""
+    out: dict = {}
+    for r in conn.execute(sql, params):
+        out.setdefault(r["host_id"], []).append(dict(r))
+    return out
+
+
 @app.get("/api/hosts")
 def list_hosts():
     with get_conn() as conn:
         hosts = [dict(h) for h in conn.execute("SELECT * FROM hosts ORDER BY ip")]
         subnets = [dict(s) for s in conn.execute("SELECT cidr, dhcp_start, dhcp_end FROM subnets")]
-        alias_rows = conn.execute("SELECT host_id, ip FROM host_aliases ORDER BY ip").fetchall()
-        alias_map: dict = {}
-        for a in alias_rows:
-            alias_map.setdefault(a["host_id"], []).append(a["ip"])
+        alias_by = _rows_by_host(conn, "SELECT host_id, ip, online, last_seen FROM host_aliases ORDER BY ip")
+        ports_by = _rows_by_host(conn, "SELECT * FROM ports ORDER BY host_id, port")
         for h in hosts:
-            h["ports"]   = [dict(p) for p in conn.execute(
-                "SELECT * FROM ports WHERE host_id=? ORDER BY port", (h["id"],)
-            )]
-            h["aliases"] = alias_map.get(h["id"], [])
+            h["ports"]      = ports_by.get(h["id"], [])
+            h["alias_info"] = [{k: a[k] for k in ("ip", "online", "last_seen")} for a in alias_by.get(h["id"], [])]
+            h["aliases"]    = [a["ip"] for a in h["alias_info"]]
             h["classification"] = classify_host(h["ip"], subnets, h.get("static_override"))
         return hosts
 
@@ -669,6 +871,7 @@ def get_host(ip: str):
             )
         ]
         host["aliases"] = _get_aliases(conn, host["id"])
+        host["alias_info"] = _get_alias_info(conn, host["id"])
         return host
 
 
@@ -702,6 +905,19 @@ def create_host(data: HostCreate):
         return dict(row)
 
 
+def _update_row(conn, table: str, where: str, key, fields: dict) -> None:
+    """UPDATE only the given columns (column → value). Callers put a column in
+    `fields` only when the request actually sent it, so unsent fields are never
+    touched — an edit of one field can't blank another."""
+    if fields:
+        cols = ", ".join(f"{c}=?" for c in fields)
+        conn.execute(f"UPDATE {table} SET {cols} WHERE {where}=?", (*fields.values(), key))
+
+
+def _flag(v):
+    return None if v is None else (1 if v else 0)
+
+
 class HostUpdate(BaseModel):
     hostname:    Optional[str] = None
     mac:         Optional[str] = None
@@ -732,25 +948,20 @@ def update_host(ip: str, data: HostUpdate):
         host = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
         if not host:
             raise HTTPException(404, "Host not found")
-        conn.execute("""
-            UPDATE hosts SET
-                hostname    = COALESCE(?, hostname),
-                mac         = COALESCE(?, mac),
-                device_type = COALESCE(?, device_type),
-                vendor      = COALESCE(?, vendor),
-                os_guess    = COALESCE(?, os_guess),
-                notes       = ?,
-                port_count  = COALESCE(?, port_count),
-                has_wifi    = COALESCE(?, has_wifi),
-                is_dns      = COALESCE(?, is_dns),
-                is_dhcp     = COALESCE(?, is_dhcp)
-            WHERE ip=?
-        """, (data.hostname, data.mac or None, data.device_type, data.vendor, data.os_guess,
-              data.notes, data.port_count,
-              1 if data.has_wifi else (0 if data.has_wifi is not None else None),
-              1 if data.is_dns  else (0 if data.is_dns  is not None else None),
-              1 if data.is_dhcp else (0 if data.is_dhcp is not None else None),
-              ip))
+        sent = data.model_fields_set
+        fields = {}
+        for f in ("hostname", "vendor", "os_guess", "notes"):        # clearable text
+            if f in sent:
+                fields[f] = getattr(data, f)
+        if "mac" in sent:
+            fields["mac"] = data.mac or None
+        for f in ("device_type", "port_count"):                     # never set to NULL
+            if f in sent and getattr(data, f) is not None:
+                fields[f] = getattr(data, f)
+        for f in ("has_wifi", "is_dns", "is_dhcp"):
+            if f in sent and getattr(data, f) is not None:
+                fields[f] = _flag(getattr(data, f))
+        _update_row(conn, "hosts", "ip", ip, fields)
         if data.set_tier:
             conn.execute("UPDATE hosts SET tier=? WHERE ip=?", (data.tier, ip))
         if data.set_dhcp:
@@ -898,8 +1109,8 @@ def merge_host(ip: str, data: MergeReq):
 
         # 5. Transfer victim's existing aliases to primary, then add merge_ip itself
         conn.execute("UPDATE host_aliases SET host_id=? WHERE host_id=?", (pid, vid))
-        conn.execute("INSERT OR IGNORE INTO host_aliases (host_id, ip) VALUES (?,?)",
-                     (pid, merge_ip))
+        conn.execute("INSERT OR IGNORE INTO host_aliases (host_id, ip, online, last_seen) VALUES (?,?,?,?)",
+                     (pid, merge_ip, victim["online"], victim["last_seen"]))
 
         # 6. Delete victim (cascades its ports; services/analyses already reparented)
         conn.execute("DELETE FROM hosts WHERE id=?", (vid,))
@@ -1037,31 +1248,29 @@ def update_service(svc_id: int, data: ServiceUpdate):
         s = conn.execute("SELECT id FROM services WHERE id=?", (svc_id,)).fetchone()
         if not s:
             raise HTTPException(404, "Service not found")
-        monitored = None if data.monitored is None else (1 if data.monitored else 0)
         new_host_id = None
         if data.host_ip:
             hrow = conn.execute("SELECT id FROM hosts WHERE ip=?", (data.host_ip,)).fetchone()
             if not hrow:
                 raise HTTPException(404, "Host not found")
             new_host_id = hrow["id"]
-        conn.execute("""
-            UPDATE services SET
-                host_id      = COALESCE(?, host_id),
-                name         = COALESCE(?, name),
-                description  = ?,
-                port         = ?,
-                protocol     = COALESCE(?, protocol),
-                status       = COALESCE(?, status),
-                url          = ?,
-                icon         = COALESCE(?, icon),
-                monitored    = COALESCE(?, monitored),
-                container_ip = CASE WHEN ? IS NULL THEN container_ip ELSE NULLIF(TRIM(?), '') END,
-                check_type   = CASE WHEN ? IS NULL THEN check_type   ELSE NULLIF(LOWER(TRIM(?)), '') END
-            WHERE id=?
-        """, (new_host_id, data.name, data.description, data.port, data.protocol,
-              data.status, data.url, data.icon, monitored,
-              data.container_ip, data.container_ip,
-              data.check_type, data.check_type, svc_id))
+        sent = data.model_fields_set
+        fields = {}
+        if new_host_id is not None:
+            fields["host_id"] = new_host_id
+        for f in ("description", "port", "url"):                     # clearable
+            if f in sent:
+                fields[f] = getattr(data, f)
+        for f in ("name", "protocol", "status", "icon"):             # never set to NULL
+            if f in sent and getattr(data, f) is not None:
+                fields[f] = getattr(data, f)
+        if "monitored" in sent and data.monitored is not None:
+            fields["monitored"] = _flag(data.monitored)
+        if "container_ip" in sent and data.container_ip is not None:  # "" clears the override
+            fields["container_ip"] = data.container_ip.strip() or None
+        if "check_type" in sent and data.check_type is not None:
+            fields["check_type"] = data.check_type.strip().lower() or None
+        _update_row(conn, "services", "id", svc_id, fields)
         conn.commit()
         row = conn.execute("""
             SELECT s.*, h.ip, h.hostname FROM services s
@@ -1354,16 +1563,13 @@ def update_connection(conn_id: int, data: ConnectionUpdate):
         c = conn.execute("SELECT id FROM connections WHERE id=?", (conn_id,)).fetchone()
         if not c:
             raise HTTPException(404, "Connection not found")
-        tagged_only_val = (int(bool(data.tagged_only)) if data.tagged_only is not None else None)
-        conn.execute("""
-            UPDATE connections SET
-                type        = COALESCE(?, type),
-                label       = ?,
-                port_mode   = ?,
-                speed       = ?,
-                tagged_only = COALESCE(?, tagged_only)
-            WHERE id=?
-        """, (data.type, data.label, data.port_mode, data.speed, tagged_only_val, conn_id))
+        sent = data.model_fields_set
+        fields = {f: getattr(data, f) for f in ("label", "port_mode", "speed") if f in sent}
+        if "type" in sent and data.type is not None:
+            fields["type"] = data.type
+        if "tagged_only" in sent and data.tagged_only is not None:
+            fields["tagged_only"] = _flag(data.tagged_only)
+        _update_row(conn, "connections", "id", conn_id, fields)
         if data.set_vlans:
             conn.execute("DELETE FROM connection_vlans WHERE connection_id=?", (conn_id,))
             if data.vlan_ids:
@@ -1472,13 +1678,11 @@ async def analyze_network(req: AnalyzeReq):
         hosts   = [dict(h) for h in conn.execute("SELECT * FROM hosts ORDER BY ip")]
 
         # Attach ports and services to each host
+        ports_by = _rows_by_host(conn, "SELECT * FROM ports ORDER BY host_id, port")
+        svcs_by  = _rows_by_host(conn, "SELECT * FROM services ORDER BY host_id, name")
         for h in hosts:
-            h["ports"] = [dict(p) for p in conn.execute(
-                "SELECT * FROM ports WHERE host_id=? ORDER BY port", (h["id"],)
-            )]
-            h["services"] = [dict(s) for s in conn.execute(
-                "SELECT * FROM services WHERE host_id=? ORDER BY name", (h["id"],)
-            )]
+            h["ports"]    = ports_by.get(h["id"], [])
+            h["services"] = svcs_by.get(h["id"], [])
 
         # Connections with full VLAN info
         raw_conns = [dict(c) for c in conn.execute("SELECT * FROM connections ORDER BY id")]
@@ -1522,6 +1726,8 @@ def _chat_context() -> str:
         host_entries = []                        # (priority, rendered_line, device_type)
         down_hosts, down_svcs = [], []
         mon_services, host_min = [], []          # for the recent-outages section
+        open_by = _rows_by_host(conn, "SELECT host_id, port, service FROM ports WHERE state='open'")
+        svc_by  = _rows_by_host(conn, "SELECT host_id, id, name, port, status, monitored, monitor_status FROM services")
         for h in hosts:
             label = h.get("hostname") or h.get("device_type") or "unknown"
             live = h.get("online")
@@ -1533,17 +1739,12 @@ def _chat_context() -> str:
             if h.get("has_wifi"): parts.append("wifi=yes")
             if live == 0:
                 down_hosts.append(f"{h['ip']} ({label})")
-            ports = conn.execute(
-                "SELECT port, service FROM ports WHERE host_id=? AND state='open'",
-                (h["id"],),
-            ).fetchall()
+            ports = open_by.get(h["id"], [])
             if ports:
                 _p = ports[:15]
                 _ptail = f" +{len(ports) - 15} more" if len(ports) > 15 else ""
                 parts.append("open=" + ",".join(f"{p['port']}/{p['service'] or '?'}" for p in _p) + _ptail)
-            svc_rows = [dict(s) for s in conn.execute(
-                "SELECT id, name, port, status, monitored, monitor_status FROM services WHERE host_id=?", (h["id"],)
-            )]
+            svc_rows = svc_by.get(h["id"], [])
             if svc_rows:
                 svc_strs = []
                 for s in svc_rows:
@@ -1786,38 +1987,9 @@ class ChangeTrackingIn(BaseModel):
     retention_days:   Optional[int]  = None
 
 
-@app.put("/api/settings/change-tracking")
-def update_change_tracking(data: ChangeTrackingIn):
-    cfg = get_config()
-    ct = cfg.get("change_tracking", {})
-    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
-              "hostname_changed", "host_offline", "host_online"):
-        v = getattr(data, f)
-        if v is not None:
-            ct[f] = v
-    if data.retention_days is not None:
-        ct["retention_days"] = max(1, int(data.retention_days))
-    cfg["change_tracking"] = ct
-    save_config(cfg)
-    return {"ok": True, "change_tracking": ct}
-
-
 class IpHistoryIn(BaseModel):
     stale_days: Optional[int] = None
     gone_days:  Optional[int] = None
-
-
-@app.put("/api/settings/ip-history")
-def update_ip_history(data: IpHistoryIn):
-    cfg = get_config()
-    ih = cfg.get("ip_history", {})
-    if data.stale_days is not None: ih["stale_days"] = max(1, int(data.stale_days))
-    if data.gone_days is not None:  ih["gone_days"]  = max(1, int(data.gone_days))
-    if ih.get("gone_days", 60) < ih.get("stale_days", 30):
-        raise HTTPException(422, "'Gone after' must be at least 'Stale after'")
-    cfg["ip_history"] = ih
-    save_config(cfg)
-    return {"ok": True, "ip_history": ih}
 
 
 class LivenessIn(BaseModel):
@@ -1828,35 +2000,6 @@ class LivenessIn(BaseModel):
 
 class GeneralIn(BaseModel):
     timezone: Optional[str] = None
-
-
-@app.put("/api/settings/general")
-def update_general(data: GeneralIn):
-    if data.timezone:
-        try:
-            from zoneinfo import ZoneInfo
-            ZoneInfo(data.timezone)   # validate the IANA name
-        except Exception:
-            raise HTTPException(422, f"Unknown timezone: {data.timezone}")
-    cfg = get_config()
-    g = cfg.get("general", {})
-    if data.timezone is not None:
-        g["timezone"] = data.timezone
-    cfg["general"] = g
-    save_config(cfg)
-    return {"ok": True, "general": g}
-
-
-@app.put("/api/settings/liveness")
-def update_liveness(data: LivenessIn):
-    cfg = get_config()
-    lv = cfg.get("liveness", {})
-    if data.enabled is not None:          lv["enabled"] = data.enabled
-    if data.interval_minutes is not None: lv["interval_minutes"] = max(1, int(data.interval_minutes))
-    if data.offline_after is not None:    lv["offline_after"] = max(1, int(data.offline_after))
-    cfg["liveness"] = lv
-    save_config(cfg)
-    return {"ok": True, "liveness": lv}
 
 
 class ChangeAlertsIn(BaseModel):
@@ -1870,35 +2013,30 @@ class ChangeAlertsIn(BaseModel):
     host_offline:     Optional[bool] = None
     host_online:      Optional[bool] = None
     include_mac:      Optional[bool] = None
+    include_aliases:  Optional[bool] = None
     on_scan:          Optional[bool] = None
     digest_enabled:   Optional[bool] = None
     digest_time:      Optional[str]  = None
 
 
-@app.put("/api/settings/change-alerts")
-def update_change_alerts(data: ChangeAlertsIn):
-    cfg = get_config()
-    ca = cfg.get("change_alerts", {})
-    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
-              "hostname_changed", "host_offline", "host_online", "include_mac", "on_scan", "digest_enabled"):
-        v = getattr(data, f)
-        if v is not None:
-            ca[f] = v
-    if data.digest_time is not None:
-        ca["digest_time"] = data.digest_time.strip()
-    if data.scope is not None and data.scope in ("static", "dynamic", "all"):
-        ca["scope"] = data.scope
-    cfg["change_alerts"] = ca
-    save_config(cfg)
-    ca_out = dict(ca)
-    ca_out.pop("last_digest", None)
-    return {"ok": True, "change_alerts": ca_out}
+# Each _apply_* validates one Settings section and writes it into `cfg` (a copy
+# from get_config). They raise HTTPException on bad input and never save, so the
+# combined PUT /api/settings/all can apply them all and save once — or nothing.
+
+def _apply_general(cfg: dict, data: GeneralIn):
+    if data.timezone:
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(data.timezone)   # validate the IANA name
+        except Exception:
+            raise HTTPException(422, f"Unknown timezone: {data.timezone}")
+    g = cfg.setdefault("general", {})
+    if data.timezone is not None:
+        g["timezone"] = data.timezone
 
 
-@app.put("/api/settings")
-def update_settings(data: LLMSettingsIn):
-    cfg = get_config()
-    llm = cfg.get("llm", {})
+def _apply_llm(cfg: dict, data: LLMSettingsIn):
+    llm = cfg.setdefault("llm", {})
     if data.provider     is not None: llm["provider"]     = data.provider
     if data.base_url     is not None: llm["base_url"]     = data.base_url.strip()
     if data.model        is not None: llm["model"]        = data.model.strip()
@@ -1907,25 +2045,16 @@ def update_settings(data: LLMSettingsIn):
     # Only update api_key if it's not the masked placeholder
     if data.api_key is not None and data.api_key != _MASKED:
         llm["api_key"] = data.api_key
-    cfg["llm"] = llm
-    save_config(cfg)
-    result = dict(llm)
-    result["api_key"] = _MASKED if llm.get("api_key") else ""
-    result["configured"] = llm.get("provider", "none") != "none"
-    return {"ok": True, "llm": result}
 
 
-@app.put("/api/settings/notifications")
-def update_notification_settings(data: NotificationSettingsIn):
-    cfg = get_config()
-    ntfy = cfg.get("notifications", {})
+def _apply_notifications(cfg: dict, data: NotificationSettingsIn):
+    ntfy = cfg.setdefault("notifications", {})
     if data.enabled is not None: ntfy["enabled"] = data.enabled
     if data.server  is not None: ntfy["server"]  = data.server.strip().rstrip("/")
     if data.topic   is not None: ntfy["topic"]   = data.topic.strip()
     # Only update token if it's not the masked placeholder
     if data.token is not None and data.token != _MASKED:
         ntfy["token"] = data.token.strip()
-    cfg["notifications"] = ntfy
     mon = cfg.setdefault("monitoring", {})
     if data.check_seconds is not None:
         mon["check_seconds"] = max(15, min(600, int(data.check_seconds)))
@@ -1939,15 +2068,142 @@ def update_notification_settings(data: NotificationSettingsIn):
         mon["quiet_end"] = data.quiet_end.strip()
     if data.suppress_when_host_down is not None:
         mon["suppress_when_host_down"] = data.suppress_when_host_down
+
+
+def _apply_statuspage(cfg: dict, data: StatusPageSettingsIn):
+    sp = cfg.setdefault("statuspage", {})
+    if data.enabled is not None: sp["enabled"] = data.enabled
+    if data.url     is not None: sp["url"]     = data.url.strip().rstrip("/")
+    if data.token is not None and data.token != _MASKED:
+        sp["token"] = data.token.strip()
+
+
+def _apply_change_tracking(cfg: dict, data: ChangeTrackingIn):
+    ct = cfg.setdefault("change_tracking", {})
+    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
+              "hostname_changed", "host_offline", "host_online"):
+        v = getattr(data, f)
+        if v is not None:
+            ct[f] = v
+    if data.retention_days is not None:
+        ct["retention_days"] = max(1, int(data.retention_days))
+
+
+def _apply_liveness(cfg: dict, data: LivenessIn):
+    lv = cfg.setdefault("liveness", {})
+    if data.enabled is not None:          lv["enabled"] = data.enabled
+    if data.interval_minutes is not None: lv["interval_minutes"] = max(1, int(data.interval_minutes))
+    if data.offline_after is not None:    lv["offline_after"] = max(1, int(data.offline_after))
+
+
+def _apply_ip_history(cfg: dict, data: IpHistoryIn):
+    ih = cfg.setdefault("ip_history", {})
+    if data.stale_days is not None: ih["stale_days"] = max(1, int(data.stale_days))
+    if data.gone_days is not None:  ih["gone_days"]  = max(1, int(data.gone_days))
+    if ih.get("gone_days", 60) < ih.get("stale_days", 30):
+        raise HTTPException(422, "'Gone after' must be at least 'Stale after'")
+
+
+def _apply_change_alerts(cfg: dict, data: ChangeAlertsIn):
+    ca = cfg.setdefault("change_alerts", {})
+    for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
+              "hostname_changed", "host_offline", "host_online", "include_mac", "include_aliases",
+              "on_scan", "digest_enabled"):
+        v = getattr(data, f)
+        if v is not None:
+            ca[f] = v
+    if data.digest_time is not None:
+        ca["digest_time"] = data.digest_time.strip()
+    if data.scope is not None and data.scope in ("static", "dynamic", "all"):
+        ca["scope"] = data.scope
+
+
+class AllSettingsIn(BaseModel):
+    general:         Optional[GeneralIn]              = None
+    llm:             Optional[LLMSettingsIn]          = None
+    notifications:   Optional[NotificationSettingsIn] = None
+    statuspage:      Optional[StatusPageSettingsIn]   = None
+    change_tracking: Optional[ChangeTrackingIn]       = None
+    liveness:        Optional[LivenessIn]             = None
+    ip_history:      Optional[IpHistoryIn]            = None
+    change_alerts:   Optional[ChangeAlertsIn]         = None
+
+
+_SECTION_APPLY = {
+    "general": _apply_general, "llm": _apply_llm, "notifications": _apply_notifications,
+    "statuspage": _apply_statuspage, "change_tracking": _apply_change_tracking,
+    "liveness": _apply_liveness, "ip_history": _apply_ip_history,
+    "change_alerts": _apply_change_alerts,
+}
+
+
+@app.put("/api/settings/all")
+def update_all_settings(data: AllSettingsIn):
+    """The Settings dialog's Save: validate every section first, then write the
+    config file once. One bad value means nothing is saved."""
+    cfg = get_config()
+    for section, apply in _SECTION_APPLY.items():
+        part = getattr(data, section)
+        if part is not None:
+            apply(cfg, part)
     save_config(cfg)
-    result = dict(ntfy)
-    result["token"] = _MASKED if ntfy.get("token") else ""
-    result["check_seconds"] = mon.get("check_seconds", 60)
-    result["alert_after_minutes"] = mon.get("alert_after_minutes", 5)
-    result["quiet_enabled"] = mon.get("quiet_enabled", False)
-    result["quiet_start"]   = mon.get("quiet_start", "")
-    result["quiet_end"]     = mon.get("quiet_end", "")
-    return {"ok": True, "notifications": result}
+    return {"ok": True, **get_settings()}
+
+
+@app.put("/api/settings/change-tracking")
+def update_change_tracking(data: ChangeTrackingIn):
+    cfg = get_config()
+    _apply_change_tracking(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "change_tracking": cfg["change_tracking"]}
+
+
+@app.put("/api/settings/ip-history")
+def update_ip_history(data: IpHistoryIn):
+    cfg = get_config()
+    _apply_ip_history(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "ip_history": cfg["ip_history"]}
+
+
+@app.put("/api/settings/general")
+def update_general(data: GeneralIn):
+    cfg = get_config()
+    _apply_general(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "general": cfg["general"]}
+
+
+@app.put("/api/settings/liveness")
+def update_liveness(data: LivenessIn):
+    cfg = get_config()
+    _apply_liveness(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "liveness": cfg["liveness"]}
+
+
+@app.put("/api/settings/change-alerts")
+def update_change_alerts(data: ChangeAlertsIn):
+    cfg = get_config()
+    _apply_change_alerts(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "change_alerts": get_settings()["change_alerts"]}
+
+
+@app.put("/api/settings")
+def update_settings(data: LLMSettingsIn):
+    cfg = get_config()
+    _apply_llm(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "llm": get_settings()["llm"]}
+
+
+@app.put("/api/settings/notifications")
+def update_notification_settings(data: NotificationSettingsIn):
+    cfg = get_config()
+    _apply_notifications(cfg, data)
+    save_config(cfg)
+    return {"ok": True, "notifications": get_settings()["notifications"]}
 
 
 @app.post("/api/notifications/test")
@@ -1974,16 +2230,9 @@ def test_notification(data: NotificationSettingsIn):
 @app.put("/api/settings/statuspage")
 def update_statuspage_settings(data: StatusPageSettingsIn):
     cfg = get_config()
-    sp = cfg.get("statuspage", {})
-    if data.enabled is not None: sp["enabled"] = data.enabled
-    if data.url     is not None: sp["url"]     = data.url.strip().rstrip("/")
-    if data.token is not None and data.token != _MASKED:
-        sp["token"] = data.token.strip()
-    cfg["statuspage"] = sp
+    _apply_statuspage(cfg, data)
     save_config(cfg)
-    result = dict(sp)
-    result["token"] = _MASKED if sp.get("token") else ""
-    return {"ok": True, "statuspage": result}
+    return {"ok": True, "statuspage": get_settings()["statuspage"]}
 
 
 @app.post("/api/statuspage/test")
@@ -2038,11 +2287,9 @@ def get_graph():
             node_alias_map.setdefault(a["host_id"], []).append(a["ip"])
 
         nodes = []
+        open_by = _rows_by_host(conn, "SELECT host_id, port, service FROM ports WHERE state='open'")
         for h in hosts:
-            ports = conn.execute(
-                "SELECT port, service FROM ports WHERE host_id=? AND state='open'",
-                (h["id"],),
-            ).fetchall()
+            ports = open_by.get(h["id"], [])
             synthetic = h["ip"].startswith("node-")
             label = h.get("hostname") or ("" if synthetic else h["ip"])
             nodes.append({
@@ -2136,10 +2383,20 @@ def delete_ssh_key(key_id: int):
 
 _DATA_DIR = Path(os.environ.get("BOLTARR_DATA_DIR") or (Path(__file__).parent.parent / "data"))
 
-@app.get("/api/backup")
-def backup():
+_BACKUP_MIN_PASSWORD = 8
+
+
+def _build_backup(password: Optional[str] = None) -> bytes:
+    """Zip of boltarr.db + config.yaml + manifest.json. With a password every
+    file is AES-256 encrypted (a standard encrypted zip: 7-Zip/WinRAR open it)."""
+    import pyzipper
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    if password:
+        zf = pyzipper.AESZipFile(buf, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES)
+        zf.setpassword(password.encode())
+    else:
+        zf = zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED)
+    with zf:
         db_path = _DATA_DIR / "boltarr.db"
         cfg_path = _DATA_DIR / "config.yaml"
         if db_path.exists():
@@ -2153,43 +2410,114 @@ def backup():
             zf.write(db_path, "boltarr.db")
         if cfg_path.exists():
             zf.write(cfg_path, "config.yaml")
-    buf.seek(0)
+        # What this backup is — shown before a restore (older backups lack it)
+        zf.writestr("manifest.json", json.dumps({
+            "app": "boltarr", "version": APP_VERSION, "protected": bool(password),
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
+    return buf.getvalue()
+
+
+def _backup_response(data: bytes, protected: bool):
     date = datetime.now().strftime("%Y-%m-%d")
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename=boltarr-backup-{date}.zip"},
-    )
+    name = f"boltarr-backup-{date}{'-protected' if protected else ''}.zip"
+    return StreamingResponse(io.BytesIO(data), media_type="application/zip",
+                             headers={"Content-Disposition": f"attachment; filename={name}"})
 
 
-@app.post("/api/restore")
-async def restore(file: UploadFile = File(...)):
-    data = await file.read()
+@app.get("/api/backup")
+def backup():
+    """Unprotected backup (scripts and older clients)."""
+    return _backup_response(_build_backup(), False)
+
+
+class BackupIn(BaseModel):
+    password: Optional[str] = None   # empty/None = no protection
+
+
+@app.post("/api/backup")
+def backup_with_options(data: BackupIn):
+    pw = data.password or None
+    if pw and len(pw) < _BACKUP_MIN_PASSWORD:
+        raise HTTPException(422, f"Backup password must be at least {_BACKUP_MIN_PASSWORD} characters")
+    return _backup_response(_build_backup(pw), bool(pw))
+
+
+# A restore is two calls: /api/restore/check uploads and inspects the backup
+# (nothing live changes) and parks it; /api/restore/{token} then applies it.
+# Only one backup is parked at a time, for up to 30 minutes.
+_STAGE_TTL = 1800
+_staged: dict = {}
+
+
+def _db_counts(conn) -> dict:
+    out = {}
+    for key, table in (("hosts", "hosts"), ("services", "services"), ("subnets", "subnets"),
+                       ("connections", "connections")):
+        try:
+            out[key] = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        except Exception:
+            out[key] = None
+    return out
+
+
+def _backup_password_error(code: str, message: str):
+    return HTTPException(422, {"code": code, "message": message})
+
+
+def _inspect_backup(data: bytes, password: Optional[str] = None) -> tuple[dict, bytes, Optional[bytes]]:
+    """Validate a backup zip without touching live data. Returns (summary,
+    db bytes, config bytes or None); raises HTTPException(400) if unusable, or
+    422 {code: password_required | wrong_password} for a protected backup."""
+    import pyzipper
     try:
-        zf = zipfile.ZipFile(io.BytesIO(data))
-    except zipfile.BadZipFile:
+        zf = pyzipper.AESZipFile(io.BytesIO(data))
+    except (zipfile.BadZipFile, pyzipper.BadZipFile):
         raise HTTPException(400, "Not a valid ZIP file")
-
     names = zf.namelist()
-    if "boltarr.db" not in names:
-        raise HTTPException(400, "ZIP does not contain boltarr.db")
-
+    protected = any(i.flag_bits & 0x1 for i in zf.infolist())
+    if protected:
+        if not password:
+            raise _backup_password_error("password_required", "This backup is password-protected")
+        zf.setpassword(password.encode())
+        try:
+            zf.read(names[0])
+        except RuntimeError:
+            raise _backup_password_error("wrong_password", "Wrong password for this backup")
     # Zip slip protection
     for name in names:
         if name.startswith("/") or ".." in name:
             raise HTTPException(400, "Invalid file in ZIP")
+    if "boltarr.db" not in names:
+        raise HTTPException(400, "ZIP does not contain boltarr.db")
 
-    # Validate the database before touching anything live
+    manifest = {}
+    if "manifest.json" in names:
+        try:
+            manifest = json.loads(zf.read("manifest.json"))
+        except Exception:
+            manifest = {}
     db_bytes = zf.read("boltarr.db")
+    cfg_bytes = zf.read("config.yaml") if "config.yaml" in names else None
+    if cfg_bytes is not None:
+        try:
+            import yaml
+            if not isinstance(yaml.safe_load(cfg_bytes) or {}, dict):
+                raise ValueError
+        except Exception:
+            raise HTTPException(400, "config.yaml in the backup is not valid")
+
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         tmp.write(db_bytes)
         tmp_path = tmp.name
     try:
         conn = _sqlite3.connect(tmp_path)
-        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            raise HTTPException(400, "Database file is corrupt")
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+        if "hosts" not in tables:
+            raise HTTPException(400, "This doesn't look like a Boltarr database")
+        counts = _db_counts(conn)
         conn.close()
-        if not tables:
-            raise HTTPException(400, "Database appears empty or corrupt")
     except HTTPException:
         raise
     except Exception:
@@ -2197,23 +2525,111 @@ async def restore(file: UploadFile = File(...)):
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    # All good — replace live files
-    _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    (_DATA_DIR / "boltarr.db").write_bytes(db_bytes)
-    for wal in ["boltarr.db-wal", "boltarr.db-shm"]:
-        (_DATA_DIR / wal).unlink(missing_ok=True)
-    if "config.yaml" in names:
-        (_DATA_DIR / "config.yaml").write_bytes(zf.read("config.yaml"))
+    created = manifest.get("created_at")
+    if not created:   # older backup: fall back to when the DB was zipped
+        info = zf.getinfo("boltarr.db")
+        created = datetime(*info.date_time).isoformat(timespec="seconds")
+    return ({"created_at": created, "version": manifest.get("version"),
+             "has_manifest": bool(manifest), "has_settings": cfg_bytes is not None,
+             "protected": protected, "counts": counts}, db_bytes, cfg_bytes)
 
-    # Bring the restored DB up to the current schema in place, so restoring an
-    # older backup into a newer Boltarr doesn't leave the running app on an
-    # out-of-date schema until a manual restart. init_db() is idempotent.
-    try:
+
+def _scan_running() -> bool:
+    return any(j.get("status") == "running" for j in scan_jobs.values())
+
+
+def _apply_restore(db_bytes: bytes, cfg_bytes: Optional[bytes]) -> None:
+    """Copy the backup into the live database in place (SQLite backup API), so
+    open connections see the restored data at once — no restart needed."""
+    from . import maintenance
+    with maintenance.exclusive():
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False, dir=str(_DATA_DIR)) as tmp:
+            tmp.write(db_bytes)
+            tmp_path = tmp.name
+        try:
+            src = _sqlite3.connect(tmp_path)
+            dst = get_conn()
+            try:
+                src.backup(dst)          # one step: atomic for other readers/writers
+            finally:
+                src.close(); dst.close()
+        finally:
+            Path(tmp_path).unlink(missing_ok=True)
+        if cfg_bytes is not None:
+            cfg_tmp = _DATA_DIR / "config.yaml.tmp"
+            cfg_tmp.write_bytes(cfg_bytes)
+            os.replace(cfg_tmp, _DATA_DIR / "config.yaml")
+            invalidate_config_cache()
+        # Bring an older backup up to the current schema (idempotent, additive)
         init_db()
+
+
+def _announce_restore(summary: dict) -> None:
+    try:
+        notify.send(title="Boltarr was restored from a backup",
+                    message=f"Backup dated {summary['created_at'][:16].replace('T', ' ')}"
+                            + (f" (Boltarr {summary['version']})" if summary.get("version") else "")
+                            + f" — {summary['counts'].get('hosts') or 0} hosts, "
+                              f"{summary['counts'].get('services') or 0} services.",
+                    tags=["recycle"])
     except Exception:
         pass
 
-    return {"ok": True, "tables": [t[0] for t in tables]}
+
+@app.post("/api/restore/check")
+async def restore_check(file: UploadFile = File(...), password: Optional[str] = Form(None)):
+    """Step 1: inspect an uploaded backup. Nothing live changes."""
+    summary, db_bytes, cfg_bytes = _inspect_backup(await file.read(), password)
+    with get_conn() as conn:
+        current = _db_counts(conn)
+    token = uuid.uuid4().hex
+    _staged.clear()
+    _staged[token] = {"summary": summary, "db": db_bytes, "cfg": cfg_bytes,
+                      "expires": datetime.now(timezone.utc) + timedelta(seconds=_STAGE_TTL)}
+    return {"token": token, "backup": summary, "current": current,
+            "current_version": APP_VERSION, "scan_running": _scan_running()}
+
+
+@app.delete("/api/restore/{token}")
+def restore_cancel(token: str):
+    _staged.pop(token, None)
+    return {"ok": True}
+
+
+@app.post("/api/restore/{token}")
+def restore_apply(token: str):
+    """Step 2: apply a backup parked by /api/restore/check."""
+    st = _staged.get(token)
+    if not st or st["expires"] < datetime.now(timezone.utc):
+        _staged.pop(token, None)
+        raise HTTPException(410, "This upload has expired — please choose the backup file again")
+    if _scan_running():
+        raise HTTPException(409, "A scan is running — wait for it to finish (or cancel it), then restore")
+    try:
+        _apply_restore(st["db"], st["cfg"])
+    except (TimeoutError, RuntimeError) as e:
+        raise HTTPException(409, str(e))
+    except _sqlite3.Error as e:   # the copy is all-or-nothing, so live data is untouched
+        raise HTTPException(500, f"Restore failed, nothing was changed: {e}")
+    _staged.pop(token, None)
+    _announce_restore(st["summary"])
+    return {"ok": True, "backup": st["summary"]}
+
+
+@app.post("/api/restore")
+async def restore(file: UploadFile = File(...), password: Optional[str] = Form(None)):
+    """One-shot restore (check + apply) for scripts and older clients."""
+    summary, db_bytes, cfg_bytes = _inspect_backup(await file.read(), password)
+    if _scan_running():
+        raise HTTPException(409, "A scan is running — wait for it to finish (or cancel it), then restore")
+    try:
+        _apply_restore(db_bytes, cfg_bytes)
+    except (TimeoutError, RuntimeError) as e:
+        raise HTTPException(409, str(e))
+    except _sqlite3.Error as e:
+        raise HTTPException(500, f"Restore failed, nothing was changed: {e}")
+    _announce_restore(summary)
+    return {"ok": True, "backup": summary}
 
 
 class FactoryResetIn(BaseModel):
@@ -2234,6 +2650,7 @@ def factory_reset(data: FactoryResetIn):
     init_db()   # re-ensure schema + re-seed the built-in scan profiles
     if not data.keep_settings:
         (_DATA_DIR / "config.yaml").unlink(missing_ok=True)   # back to defaults
+        invalidate_config_cache()
     return {"ok": True, "settings_kept": data.keep_settings}
 
 

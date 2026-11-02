@@ -25,6 +25,8 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 - **VLAN management** — define VLANs, assign them to connections, visualize on topology
 - **AI analysis** — per-host and network-wide analysis; AI chat assistant with full network context
 - **AI optional** — works without AI; supports Ollama, OpenAI-compatible APIs, and Anthropic
+- **Optional login** — one admin password (or trust an auth proxy like Authelia/Authentik); new installs are asked to set one, upgrades can turn it on in Settings
+- **Backup & restore** — one-click backup, optionally password-protected (AES-encrypted zip); restore shows what's inside first and applies it without a restart
 
 ## Quick start (Docker)
 
@@ -178,6 +180,14 @@ All data is stored in `data/`:
 - `config.yaml` — AI settings (auto-created by the UI, or copy from `config.yaml.example`)
 
 Mount `./data` as a Docker volume to persist data across container restarts (done automatically in the provided compose files).
+
+Backups (Settings → Data) contain your tokens and keys — keep the password-protected option on.
+
+**Forgot the login password?** Turn login off from the host, then set a new one in Settings:
+
+```bash
+docker exec boltarr reset-password
+```
 
 ## Updating
 

@@ -28,6 +28,8 @@ CODE_OF_CONDUCT.md
 SECURITY.md
 LICENSE
 docker-compose*.yml
+tests/
+requirements-dev.txt
 
 # Editor / OS noise
 .DS_Store

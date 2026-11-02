@@ -1,4 +1,6 @@
+import copy
 import os
+import threading
 from pathlib import Path
 from datetime import datetime
 try:
@@ -89,6 +91,7 @@ _DEFAULTS: dict = {
         "host_offline": True,      # immediate, static-scoped
         "host_online": True,
         "include_mac": False,      # attach the device MAC to offline/online alerts
+        "include_aliases": True,   # alias IPs going offline/online alert too
         "on_scan": True,           # send a summary when a scan finishes
         "digest_enabled": True,    # daily morning digest
         "digest_time": "08:00",
@@ -100,10 +103,55 @@ _DEFAULTS: dict = {
         "stale_days": 30,
         "gone_days": 60,
     },
+    # Login (off until a password is set; see backend/auth.py)
+    "auth": {
+        "enabled": False,
+        "username": "admin",
+        "password_hash": "",
+        "secret": "",              # signs session cookies; rotating it logs everyone out
+        "session_days": 30,
+        "setup_pending": False,    # fresh install: show "create password" first
+        "trust_proxy": False,      # an auth proxy in front (Authelia/Authentik) logs users in
+        "proxy_header": "Remote-User",
+        "trusted_proxies": "",     # IPs/CIDRs allowed to send that header, comma-separated
+    },
 }
 
 
+# Parsed config is cached in memory and re-read only when config.yaml changes on
+# disk (mtime/size), so hot paths — e.g. one lookup per recorded change event —
+# don't re-parse YAML. Callers get a deep copy, so mutating it can't corrupt the cache.
+_cache_lock = threading.Lock()
+_cache: tuple | None = None          # (file signature, cfg)
+
+
+def _file_sig():
+    try:
+        st = CONFIG_PATH.stat()
+        return (st.st_mtime_ns, st.st_size)
+    except FileNotFoundError:
+        return None
+
+
 def get_config() -> dict:
+    global _cache
+    sig = _file_sig()
+    with _cache_lock:
+        if _cache is not None and _cache[0] == sig:
+            return copy.deepcopy(_cache[1])
+    cfg = _load_config()
+    with _cache_lock:
+        _cache = (sig, cfg)
+    return copy.deepcopy(cfg)
+
+
+def invalidate_config_cache() -> None:
+    global _cache
+    with _cache_lock:
+        _cache = None
+
+
+def _load_config() -> dict:
     cfg: dict = {
         "general": dict(_DEFAULTS["general"]),
         "llm": dict(_DEFAULTS["llm"]),
@@ -114,6 +162,7 @@ def get_config() -> dict:
         "change_tracking": dict(_DEFAULTS["change_tracking"]),
         "change_alerts": dict(_DEFAULTS["change_alerts"]),
         "ip_history": dict(_DEFAULTS["ip_history"]),
+        "auth": dict(_DEFAULTS["auth"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -136,6 +185,8 @@ def get_config() -> dict:
             cfg["change_alerts"].update({k: v for k, v in raw["change_alerts"].items() if v is not None})
         if "ip_history" in raw:
             cfg["ip_history"].update({k: v for k, v in raw["ip_history"].items() if v is not None})
+        if "auth" in raw:
+            cfg["auth"].update({k: v for k, v in raw["auth"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {
@@ -251,5 +302,18 @@ def local_now() -> datetime:
 
 def save_config(cfg: dict) -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w") as f:
+    # Write a temp file next to it, then swap it in — a crash mid-write can
+    # never leave a truncated config.yaml behind.
+    tmp = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    with open(tmp, "w") as f:
         yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        os.replace(tmp, CONFIG_PATH)
+    except OSError:
+        # config.yaml bind-mounted as a single file can't be swapped — write in place
+        tmp.unlink(missing_ok=True)
+        with open(CONFIG_PATH, "w") as f:
+            yaml.dump(cfg, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    invalidate_config_cache()

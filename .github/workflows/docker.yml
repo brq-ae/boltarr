@@ -7,7 +7,22 @@ on:
   workflow_dispatch:  # allow manual trigger from GitHub UI
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run tests
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q tests
+
   build:
+    needs: test  # no image is built unless every test passes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

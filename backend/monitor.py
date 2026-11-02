@@ -25,6 +25,7 @@ import httpx
 from .database import get_conn
 from .config import get_monitoring_config, get_statuspage_config, get_check_seconds, local_now
 from . import notify
+from . import maintenance
 
 CHECK_INTERVAL = 60          # default probe interval; live value = get_check_seconds()
 HTTP_TIMEOUT   = 6           # seconds per HTTP probe
@@ -669,36 +670,37 @@ def _loop() -> None:
     last_sweep = 0.0
     while not _stop.is_set():
         try:
-            check = get_check_seconds()
-            now_ts = _now_dt().timestamp()
-            # Probe services only when the configured interval has elapsed. This
-            # is the detection cadence — slower interval = slower to notice a
-            # change, but cheaper.
-            if now_ts - last_sweep >= check:
-                _sweep()
-                last_sweep = now_ts
-            # Heartbeat push to the public status page (tiny, LAN-only). Runs
-            # every cycle — decoupled from probing so the bars/percentages stay
-            # fresh even when the probe interval is long.
-            try:
-                push_status()
-            except Exception:
-                pass
-            # daily change-alert digest (fires once/day past the configured time)
-            try:
-                from . import changes
-                changes.maybe_send_digest()
-            except Exception:
-                pass
-            # prune roughly once a day
-            if _now_dt().timestamp() - last_prune > 86400:
-                prune_events()
+            with maintenance.loop_work():
+                check = get_check_seconds()
+                now_ts = _now_dt().timestamp()
+                # Probe services only when the configured interval has elapsed. This
+                # is the detection cadence — slower interval = slower to notice a
+                # change, but cheaper.
+                if now_ts - last_sweep >= check:
+                    _sweep()
+                    last_sweep = now_ts
+                # Heartbeat push to the public status page (tiny, LAN-only). Runs
+                # every cycle — decoupled from probing so the bars/percentages stay
+                # fresh even when the probe interval is long.
                 try:
-                    from . import changes
-                    changes.prune()
+                    push_status()
                 except Exception:
                     pass
-                last_prune = _now_dt().timestamp()
+                # daily change-alert digest (fires once/day past the configured time)
+                try:
+                    from . import changes
+                    changes.maybe_send_digest()
+                except Exception:
+                    pass
+                # prune roughly once a day
+                if _now_dt().timestamp() - last_prune > 86400:
+                    prune_events()
+                    try:
+                        from . import changes
+                        changes.prune()
+                    except Exception:
+                        pass
+                    last_prune = _now_dt().timestamp()
         except Exception:
             pass
         # Tick cadence: the heartbeat runs at least once a minute (or faster if

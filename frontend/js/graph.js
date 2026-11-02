@@ -438,7 +438,7 @@ function openMultiConnModal() {
   if (!multiConnectSource || !multiConnectTargets.length) return;
   document.getElementById("multiConnSrc").textContent = multiConnectSource;
   document.getElementById("multiConnTargetList").innerHTML =
-    multiConnectTargets.map(ip => `<span class="port-badge mono">${ip}</span>`).join("");
+    multiConnectTargets.map(ip => `<span class="port-badge mono">${escHtml(ip)}</span>`).join("");
   document.getElementById("multiConnType").value     = "wired";
   document.getElementById("multiConnPortMode").value = "";
   document.getElementById("multiConnLabel").value    = "";
@@ -573,7 +573,7 @@ function showCtxMenu(x, y, items) {
   menu.innerHTML = items.map(item =>
     item === "---"
       ? `<div class="ctx-sep"></div>`
-      : `<button class="ctx-item" data-action="${item.action}">${item.label}</button>`
+      : `<button class="ctx-item" data-action="${escHtml(item.action)}">${escHtml(item.label)}</button>`
   ).join("");
   menu.querySelectorAll(".ctx-item").forEach(btn => {
     const item = items.find(i => i !== "---" && i.action === btn.dataset.action);

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Boltarr — Log in</title>
+  <link rel="icon" type="image/svg+xml" href="/img/BoltarrLogo.svg">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<main class="login-page">
+  <div class="login-card">
+    <div class="login-brand"><img src="/img/BoltarrLogo.svg" alt=""><span>Boltarr</span></div>
+
+    <!-- normal login -->
+    <form id="loginForm" hidden>
+      <h1>Log in</h1>
+      <div class="form-row"><label for="lgUser">Username</label><input id="lgUser" type="text" autocomplete="username"></div>
+      <div class="form-row"><label for="lgPw">Password</label><input id="lgPw" type="password" autocomplete="current-password" required></div>
+      <div class="login-error" id="lgErr" role="alert"></div>
+      <button class="btn btn-primary" type="submit" id="lgBtn">Log in</button>
+      <p class="login-foot">Forgot the password? Run <code>reset-password</code> in the Boltarr container's console, then set a new one in Settings.</p>
+    </form>
+
+    <!-- first run: create the admin password -->
+    <form id="setupForm" hidden>
+      <h1>Welcome — create your admin login</h1>
+      <p class="login-lead">Boltarr can change things on your network map, so protect it with a password. You'll stay logged in for 30 days on this browser.</p>
+      <div class="form-row"><label for="suUser">Username</label><input id="suUser" type="text" value="admin" autocomplete="username"></div>
+      <div class="form-row"><label for="suPw">Password (8+ characters)</label><input id="suPw" type="password" autocomplete="new-password" required minlength="8"></div>
+      <div class="form-row"><label for="suPw2">Repeat password</label><input id="suPw2" type="password" autocomplete="new-password" required></div>
+      <div class="login-error" id="suErr" role="alert"></div>
+      <button class="btn btn-primary" type="submit" id="suBtn">Create login</button>
+      <button class="login-skip" type="button" id="suSkip">Skip for now — set it later in Settings</button>
+    </form>
+  </div>
+</main>
+<script src="/js/login.js"></script>
+</body>
+</html>

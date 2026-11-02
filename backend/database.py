@@ -164,6 +164,10 @@ def init_db():
             "ALTER TABLE subnets ADD COLUMN dhcp_start TEXT",
             "ALTER TABLE subnets ADD COLUMN dhcp_end TEXT",
             "ALTER TABLE hosts ADD COLUMN static_override TEXT",  # NULL=auto | 'static' | 'dynamic'
+            # Alias IPs are pinged on their own (F-10): each keeps its own liveness
+            "ALTER TABLE host_aliases ADD COLUMN online INTEGER",
+            "ALTER TABLE host_aliases ADD COLUMN miss_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE host_aliases ADD COLUMN last_seen TEXT",
             """CREATE TABLE IF NOT EXISTS monitor_events (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,

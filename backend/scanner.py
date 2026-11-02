@@ -184,6 +184,8 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                                     run_id=run_id)
                 if arow:
                     conn.execute("UPDATE hosts SET last_seen=datetime('now') WHERE id=?", (arow["host_id"],))
+                    conn.execute("UPDATE host_aliases SET online=1, miss_count=0, last_seen=datetime('now') "
+                                 "WHERE ip=?", (ip,))
                 else:
                     conn.execute("""
                         INSERT INTO hosts (ip, mac, hostname, vendor, last_seen)
@@ -259,6 +261,8 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
                 if alias_row:
                     host_id = alias_row["host_id"]
                     conn.execute("UPDATE hosts SET last_seen=datetime('now') WHERE id=?", (host_id,))
+                    conn.execute("UPDATE host_aliases SET online=1, miss_count=0, last_seen=datetime('now') "
+                                 "WHERE ip=?", (ip,))
                 else:
                     conn.execute("""
                         INSERT INTO hosts (ip, mac, hostname, os_guess, vendor, last_seen)

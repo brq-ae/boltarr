@@ -290,6 +290,12 @@ def is_alert_worthy(conn, ev: dict, subnets: list[dict]) -> bool:
     row = conn.execute(
         "SELECT static_override, no_mac_alert, no_offline_alert FROM hosts WHERE ip=?",
         (ev["ip"],)).fetchone()
+    if not row:   # an alias IP: follow its host's settings
+        row = conn.execute(
+            "SELECT h.static_override, h.no_mac_alert, h.no_offline_alert FROM hosts h "
+            "JOIN host_aliases a ON a.host_id = h.id WHERE a.ip=?", (ev["ip"],)).fetchone()
+        if row and ev["type"] in ("host_offline", "host_online") and not a.get("include_aliases", True):
+            return False
     override = row["static_override"] if row else None
     cls = classify_host(ev["ip"], subnets, override)
     # Host-scope filter — applies to every alert type. 'unknown' never alerts.
@@ -349,6 +355,11 @@ def alert_transition(conn, ip: str, event_type: str) -> None:
     icon, sing, _ = _LABEL.get(event_type, ("•", event_type, ""))
     host = conn.execute("SELECT hostname, mac FROM hosts WHERE ip=?", (ip,)).fetchone()
     label = ip + (f" ({host['hostname']})" if host and host["hostname"] else "")
+    if not host:   # alias IP: name the host it belongs to
+        host = conn.execute("SELECT h.ip, h.hostname, h.mac FROM hosts h JOIN host_aliases a "
+                            "ON a.host_id = h.id WHERE a.ip=?", (ip,)).fetchone()
+        if host:
+            label = f"{ip} (alias of {host['hostname'] or host['ip']})"
     message = f"{label} {sing}."
     # Optionally attach the MAC — a roaming device keeps its MAC across IPs/APs.
     if get_change_alerts_config().get("include_mac") and host and host["mac"]:

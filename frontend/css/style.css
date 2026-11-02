@@ -40,6 +40,10 @@
   --font-mono: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', ui-monospace, monospace;
 }
 
+/* The hidden attribute always wins over a component's own display rule */
+[hidden] { display: none !important; }
+
+
 /* ── Reset ─────────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -2038,3 +2042,55 @@ tbody td {
 .iph-chip.iph-gone.active   { border-color: oklch(65% 0.15 25); }
 #iphTable tr.iph-row-link { cursor: pointer; }
 #iphTable tr.iph-row-never td { color: var(--text-3); }
+
+/* ── Restore flow ──────────────────────────────────────────────────────────── */
+.restore-bar { height: 6px; background: var(--surface3); border-radius: 3px; overflow: hidden; }
+.restore-bar > div { height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+.restore-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.restore-facts label { display: block; font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.restore-facts span { font-size: 12px; color: var(--text); }
+.restore-compare { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
+.restore-compare th { text-align: left; font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.restore-compare td { padding: 5px 6px; border-bottom: 1px solid var(--border); color: var(--text-2); }
+.restore-compare td.restore-diff { color: var(--accent); font-weight: 600; }
+.restore-note { font-size: 12px; line-height: 1.5; color: var(--text-2); background: var(--surface2); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 10px; }
+.restore-warn { font-size: 12px; line-height: 1.55; color: var(--text-2); border: 1px solid oklch(58% 0.21 25 / 0.5); background: oklch(58% 0.21 25 / 0.08); border-radius: var(--radius-sm); padding: 9px 11px; }
+.restore-warn strong { color: var(--red); }
+.restore-warn a { color: var(--accent); }
+
+.restore-overlay { position: fixed; inset: 0; z-index: 200; background: oklch(6% 0.02 250 / 0.88); display: flex; align-items: center; justify-content: center; padding: 20px; }
+.restore-panel { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius); padding: 24px 26px; width: 400px; max-width: 100%; }
+.restore-panel-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+.restore-steps { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: var(--text-3); }
+.restore-steps li { display: flex; align-items: center; gap: 10px; }
+.restore-steps li::before { content: ""; flex: none; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border2); }
+.restore-steps li.active { color: var(--text); }
+.restore-steps li.active::before { border-color: var(--accent); border-top-color: transparent; animation: restore-spin .8s linear infinite; }
+.restore-steps li.done { color: var(--text-2); }
+.restore-steps li.done::before { background: var(--green); border-color: var(--green); }
+.restore-steps li.fail { color: var(--red); }
+.restore-steps li.fail::before { background: var(--red); border-color: var(--red); }
+.restore-panel-msg { font-size: 13px; color: var(--text-2); min-height: 1.2em; margin-bottom: 8px; }
+@keyframes restore-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .restore-steps li.active::before { animation: none; border-top-color: var(--accent); } }
+
+.restored-banner { position: fixed; top: calc(var(--topbar-h) + 8px); left: 50%; transform: translateX(-50%); z-index: 150; display: flex; align-items: center; gap: 12px; max-width: calc(100% - 32px); background: var(--surface2); border: 1px solid oklch(70% 0.165 145 / 0.5); color: var(--text); font-size: 13px; padding: 8px 10px 8px 14px; border-radius: var(--radius); box-shadow: 0 6px 24px oklch(0% 0 0 / 0.35); }
+.restored-banner button { font-size: 16px; line-height: 1; padding: 0 4px; }
+
+/* ── Login ─────────────────────────────────────────────────────────────────── */
+.settings-sub { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.nopw-banner { border-color: oklch(82% 0.17 85 / 0.45); flex-wrap: wrap; }
+
+.login-page { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--bg); }
+.login-card { width: 360px; max-width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius); padding: 28px 26px 24px; }
+.login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.login-brand img { width: 34px; height: 34px; }
+.login-brand span { font-size: 17px; font-weight: 600; letter-spacing: .01em; }
+.login-card h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+.login-card .login-lead { font-size: 12px; line-height: 1.55; color: var(--text-2); margin: 0 0 18px; }
+.login-card input { width: 100%; }
+.login-card .btn-primary { width: 100%; justify-content: center; margin-top: 4px; padding: 9px; font-size: 13px; }
+.login-error { font-size: 12px; color: var(--red); min-height: 1.3em; margin: 4px 0 6px; }
+.login-skip { display: block; text-align: center; margin-top: 14px; font-size: 12px; color: var(--text-3); background: none; border: 0; cursor: pointer; width: 100%; }
+.login-skip:hover { color: var(--text-2); text-decoration: underline; }
+.login-foot { margin-top: 18px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
