@@ -189,6 +189,8 @@ Backups (Settings → Data) contain your tokens and keys — keep the password-p
 docker exec boltarr reset-password
 ```
 
+Use your container's name if it isn't `boltarr`. Without Docker, run `venv/bin/python -m backend.reset_password` from the Boltarr folder.
+
 ## Updating
 
 ```bash
