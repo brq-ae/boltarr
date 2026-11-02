@@ -16,10 +16,21 @@
     <form id="loginForm" hidden>
       <h1>Log in</h1>
       <div class="form-row"><label for="lgUser">Username</label><input id="lgUser" type="text" autocomplete="username"></div>
-      <div class="form-row"><label for="lgPw">Password</label><input id="lgPw" type="password" autocomplete="current-password" required></div>
+      <div class="form-row"><label for="lgPw">Password</label><input id="lgPw" type="password" data-peek autocomplete="current-password" required></div>
       <div class="login-error" id="lgErr" role="alert"></div>
       <button class="btn btn-primary" type="submit" id="lgBtn">Log in</button>
-      <p class="login-foot">Forgot the password? Run <code>reset-password</code> in the Boltarr container's console, then set a new one in Settings.</p>
+      <details class="login-help">
+        <summary>Forgot your password?</summary>
+        <p>Run one of these on the machine Boltarr runs on. It switches login off — no password needed:</p>
+        <ul>
+          <li><strong>Docker</strong> — <code>docker exec boltarr reset-password</code><br>
+            <span>Use your container's name if it isn't <code>boltarr</code>.</span></li>
+          <li><strong>Unraid</strong> — Docker tab → Boltarr icon → <em>Console</em> → type <code>reset-password</code></li>
+          <li><strong>Without Docker</strong> — in the Boltarr folder:<br><code>venv/bin/python -m backend.reset_password</code></li>
+        </ul>
+        <p>Then reload this page — Boltarr opens without a password — and set a new one in Settings → 🔒 Login.</p>
+        <p class="login-help-more"><a href="https://github.com/brq-ae/boltarr#data" target="_blank" rel="noopener noreferrer">More help ↗</a></p>
+      </details>
     </form>
 
     <!-- first run: create the admin password -->
@@ -27,14 +38,15 @@
       <h1>Welcome — create your admin login</h1>
       <p class="login-lead">Boltarr can change things on your network map, so protect it with a password. You'll stay logged in for 30 days on this browser.</p>
       <div class="form-row"><label for="suUser">Username</label><input id="suUser" type="text" value="admin" autocomplete="username"></div>
-      <div class="form-row"><label for="suPw">Password (8+ characters)</label><input id="suPw" type="password" autocomplete="new-password" required minlength="8"></div>
-      <div class="form-row"><label for="suPw2">Repeat password</label><input id="suPw2" type="password" autocomplete="new-password" required></div>
+      <div class="form-row"><label for="suPw">Password (8+ characters)</label><input id="suPw" type="password" data-peek autocomplete="new-password" required minlength="8"></div>
+      <div class="form-row"><label for="suPw2">Repeat password</label><input id="suPw2" type="password" data-peek autocomplete="new-password" required></div>
       <div class="login-error" id="suErr" role="alert"></div>
       <button class="btn btn-primary" type="submit" id="suBtn">Create login</button>
       <button class="login-skip" type="button" id="suSkip">Skip for now — set it later in Settings</button>
     </form>
   </div>
 </main>
+<script src="/js/peek.js"></script>
 <script src="/js/login.js"></script>
 </body>
 </html>

@@ -2300,7 +2300,13 @@ async def test_llm_connection():
 
 @app.get("/api/models")
 async def get_models():
-    return {"models": await list_models()}
+    """Models to pick from, plus the default from Settings → AI (every model
+    picker starts on it). A default the provider doesn't list is kept first."""
+    models = await list_models()
+    default = get_llm_config().get("model") or ""
+    if models and default and default not in models:
+        models = [default, *models]
+    return {"models": models, "default": default if models else ""}
 
 
 # ── Graph ─────────────────────────────────────────────────────────────────────

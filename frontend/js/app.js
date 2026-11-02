@@ -242,7 +242,7 @@ async function probeHost(ip) {
     activeRunId = run_id;
     showToast(`Probing ${ip}…`);
     startProbePolling(run_id, ip);
-    loadScans();   // show the probe in History live (like a scan), not only when done
+    loadScans();   // show the probe in Scan Log live (like a scan), not only when done
   } catch (e) {
     alert("Probe error: " + e.message);
   }
@@ -912,16 +912,7 @@ async function showHostDetail(ip) {
     </div>
   `;
 
-  // Populate model selector
-  const modelSel = document.getElementById("analyzeModel");
-  const globalModel = document.getElementById("globalModel");
-  if (globalModel) {
-    Array.from(globalModel.options).forEach(o => {
-      const opt = document.createElement("option");
-      opt.value = o.value; opt.textContent = o.textContent; opt.selected = o.selected;
-      modelSel.appendChild(opt);
-    });
-  }
+  fillModelSelect(document.getElementById("analyzeModel"));
 
   panel.classList.add("open");
   initSheetDrag();
@@ -1287,7 +1278,7 @@ async function deletePort(portId, ip) {
 
 async function analyzeHost(ip) {
   const model = document.getElementById("analyzeModel")?.value
-             || document.getElementById("globalModel")?.value;
+             || AI_DEFAULT_MODEL;
   const resultDiv = document.getElementById("analysisResult");
   resultDiv.innerHTML = '<div class="analysis-box" style="color:var(--text-3)">Analyzing…</div>';
   switchDetailTab("analysis");
@@ -1305,14 +1296,7 @@ async function analyzeHost(ip) {
 function openNetworkAnalysis() {
   const modal = document.getElementById("networkAnalysisModal");
   const modelSel = document.getElementById("netAnalyzeModel");
-  const globalModel = document.getElementById("globalModel");
-  if (modelSel && globalModel && !modelSel.options.length) {
-    Array.from(globalModel.options).forEach(o => {
-      const opt = document.createElement("option");
-      opt.value = o.value; opt.textContent = o.textContent; opt.selected = o.selected;
-      modelSel.appendChild(opt);
-    });
-  }
+  if (modelSel && !modelSel.options.length) fillModelSelect(modelSel);
   modal.classList.add("open");
 }
 
@@ -1322,7 +1306,7 @@ function closeNetworkAnalysis() {
 
 async function runNetworkAnalysis() {
   const model = document.getElementById("netAnalyzeModel")?.value
-             || document.getElementById("globalModel")?.value;
+             || AI_DEFAULT_MODEL;
   const resultDiv = document.getElementById("networkAnalysisResult");
   resultDiv.innerHTML = '<div class="analysis-box" style="color:var(--text-3)">Analyzing full network… this may take a moment.</div>';
   try {
@@ -1350,7 +1334,7 @@ async function loadGraph() {
 
 // ── Scans ─────────────────────────────────────────────────────────────────────
 
-// ── Scan tab: Run/History sub-tabs + nmap builder ─────────────────────────────
+// ── Scan tab: Run/Scan Log sub-tabs + nmap builder ─────────────────────────────
 
 async function loadScansTab() {
   populateScanTarget();
@@ -1746,7 +1730,7 @@ function _scheduleScansPoll(anyRunning) {
   clearTimeout(_scansPollTimer);
   if (!anyRunning) return;
   _scansPollTimer = setTimeout(() => {
-    // only keep polling while the History sub-tab is visible
+    // only keep polling while the Scan Log sub-tab is visible
     if (document.getElementById("scan-panel-history")?.style.display !== "none") loadScans();
   }, 2000);
 }
@@ -1805,7 +1789,7 @@ function scanDurationHTML(s) {
   return `took ${fmtDur((end - start) / 1000)}`;
 }
 
-// Tick the live elapsed timer on running History rows once a second. Only the
+// Tick the live elapsed timer on running Scan Log rows once a second. Only the
 // elapsed span is updated; the "scanning N%" label is refreshed by the 2s poll.
 setInterval(() => {
   document.querySelectorAll(".scan-elapsed[data-started]").forEach(el => {
@@ -2007,10 +1991,10 @@ async function runScheduleNow(id) {
   try {
     const r = await api("POST", `/api/scan-schedules/${id}/run`);
     const started = (r.started || []).length, skipped = (r.skipped || []).length;
-    showToast(started ? `Started ${started} scan${started > 1 ? "s" : ""}${skipped ? `, ${skipped} skipped` : ""} — see History`
+    showToast(started ? `Started ${started} scan${started > 1 ? "s" : ""}${skipped ? `, ${skipped} skipped` : ""} — see Scan Log`
                       : (skipped ? `Skipped ${skipped} (already running or no matching hosts)` : "Nothing to run"));
     if (started) {
-      setScanTab("history");     // jump to History so progress is visible
+      setScanTab("history");     // jump to Scan Log so progress is visible
       await loadScans();
     } else {
       await loadSchedules();
@@ -2020,35 +2004,55 @@ async function runScheduleNow(id) {
 
 // ── Models ────────────────────────────────────────────────────────────────────
 
+// Every model picker (chat, host Analyze, Analyze Network) starts on the
+// default model from Settings → AI and can be changed per use.
+let AI_MODELS = [], AI_DEFAULT_MODEL = "";
+
+function fillModelSelect(el) {
+  if (!el) return;
+  el.innerHTML = "";
+  AI_MODELS.forEach(m => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m.replace(":latest","");
+    opt.selected = m === AI_DEFAULT_MODEL;
+    el.appendChild(opt);
+  });
+}
+
 async function loadModels() {
   try {
-    const { models } = await api("GET", "/api/models");
-    ["globalModel","chatModel"].forEach(id => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      el.innerHTML = "";
-      models.forEach(m => {
-        const opt = document.createElement("option");
-        opt.value = m;
-        opt.textContent = m.replace(":latest","");
-        el.appendChild(opt);
-      });
-    });
+    const { models, default: def } = await api("GET", "/api/models");
+    AI_MODELS = models || [];
+    AI_DEFAULT_MODEL = def || "";
+    fillModelSelect(document.getElementById("chatModel"));
+    const net = document.getElementById("netAnalyzeModel");
+    if (net) net.innerHTML = "";     // refilled next time Analyze Network opens
   } catch (e) { console.warn("Models:", e.message); }
 }
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Hierarchy", services: "Services", sshkeys: "SSH Keys" };
+const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys" };
+// Hierarchy is a sub-tab of Topology (Graph | Hierarchy): its own panel, but the
+// nav highlights Topology, and Topology reopens whichever view was used last.
+const NAV_TAB = { hierarchy: "topology" };
+let lastTopoView = "topology";
+
+function openTopology() {
+  setTab(lastTopoView);
+}
 
 function setTab(name) {
+  if (name === "topology" || name === "hierarchy") lastTopoView = name;
+  const nav = NAV_TAB[name] || name;
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
   document.querySelectorAll(".sidebar-nav-item").forEach(t => t.classList.remove("active"));
   document.querySelectorAll(".bottom-nav-btn").forEach(t => t.classList.remove("active"));
 
   document.getElementById("panel-" + name).classList.add("active");
-  document.querySelector(`.sidebar-nav-item[data-tab="${name}"]`)?.classList.add("active");
-  document.querySelector(`.bottom-nav-btn[data-tab="${name}"]`)?.classList.add("active");
+  document.querySelector(`.sidebar-nav-item[data-tab="${nav}"]`)?.classList.add("active");
+  document.querySelector(`.bottom-nav-btn[data-tab="${nav}"]`)?.classList.add("active");
 
   const title = document.getElementById("topbarTitle");
   if (title) title.textContent = TAB_TITLES[name] || name;

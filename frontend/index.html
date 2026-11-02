@@ -20,11 +20,8 @@
     </div>
 
     <nav class="sidebar-nav">
-      <button class="sidebar-nav-item active" data-tab="topology" onclick="setTab('topology')">
+      <button class="sidebar-nav-item active" data-tab="topology" onclick="openTopology()">
         <span class="nav-icon">⬡</span> Topology
-      </button>
-      <button class="sidebar-nav-item" data-tab="hierarchy" onclick="setTab('hierarchy')">
-        <span class="nav-icon">⊟</span> Hierarchy
       </button>
       <button class="sidebar-nav-item" data-tab="services" onclick="setTab('services')">
         <span class="nav-icon">◈</span> Services
@@ -56,8 +53,6 @@
         <span id="aiStatusDot" class="ai-status-dot ai-status-none"></span>
         ⚙ Settings
       </button>
-      <label style="margin-top:6px">Model override</label>
-      <select id="globalModel" title="Leave empty to use the default from settings"></select>
     </div>
   </aside>
 
@@ -185,6 +180,10 @@
         <div id="cy" oncontextmenu="return false"></div>
 
         <div class="graph-toolbar">
+          <div class="svc-subtabs topo-subtabs">
+            <button class="svc-subtab active" onclick="setTab('topology')">Graph</button>
+            <button class="svc-subtab" onclick="setTab('hierarchy')">Hierarchy</button>
+          </div>
           <button class="btn" onclick="openNetworkAnalysis()">⬡ Analyze Network</button>
           <button class="btn" id="vlanBtn" onclick="openVlanPanel()">◈ VLANs</button>
           <button class="btn" id="connectBtn" onclick="toggleConnectMode()">◎ Link</button>
@@ -311,7 +310,7 @@
           <div class="svc-subtabs">
             <button class="svc-subtab active" id="scanTabBtn-run" onclick="setScanTab('run')">Run</button>
             <button class="svc-subtab" id="scanTabBtn-schedules" onclick="setScanTab('schedules')">Schedules</button>
-            <button class="svc-subtab" id="scanTabBtn-history" onclick="setScanTab('history')">History</button>
+            <button class="svc-subtab" id="scanTabBtn-history" onclick="setScanTab('history')">Scan Log</button>
             <button class="svc-subtab" id="scanTabBtn-changes" onclick="setScanTab('changes')">Changes</button>
           </div>
         </div>
@@ -392,7 +391,7 @@
           <div id="schedulesWrap" style="padding:0 16px 16px"></div>
         </div>
 
-        <!-- History -->
+        <!-- Scan Log -->
         <div id="scan-panel-history" style="display:none">
           <div class="scans-wrap" id="scansWrap"></div>
         </div>
@@ -495,9 +494,14 @@
       </div>
 
       <!-- Hierarchy tab -->
+      <!-- Topology → Hierarchy sub-tab (its own panel; the nav shows it as Topology) -->
       <div class="tab-panel" id="panel-hierarchy">
         <div class="hierarchy-wrap">
           <div class="hierarchy-toolbar">
+          <div class="svc-subtabs topo-subtabs">
+            <button class="svc-subtab" onclick="setTab('topology')">Graph</button>
+            <button class="svc-subtab active" onclick="setTab('hierarchy')">Hierarchy</button>
+          </div>
             <button class="btn" onclick="loadHierarchy()">↻ Recalculate</button>
             <button class="btn" onclick="window.print()">⎙ Print / PDF</button>
             <span style="font-size:11px;color:var(--text-3);margin-left:4px">
@@ -541,14 +545,11 @@
 <!-- Mobile bottom nav -->
 <nav class="bottom-nav">
   <div class="bottom-nav-inner">
-    <button class="bottom-nav-btn active" data-tab="topology" onclick="setTab('topology')">
-      <span class="bottom-nav-icon">⬡</span>Graph
+    <button class="bottom-nav-btn active" data-tab="topology" onclick="openTopology()">
+      <span class="bottom-nav-icon">⬡</span>Topo
     </button>
     <button class="bottom-nav-btn" data-tab="services" onclick="setTab('services')">
       <span class="bottom-nav-icon">◈</span>Svcs
-    </button>
-    <button class="bottom-nav-btn" data-tab="hierarchy" onclick="setTab('hierarchy')">
-      <span class="bottom-nav-icon">⊟</span>Hier.
     </button>
     <button class="bottom-nav-btn" data-tab="hosts" onclick="setTab('hosts')">
       <span class="bottom-nav-icon">▤</span>Hosts
@@ -1249,8 +1250,8 @@
               Login is <strong style="color:var(--text-2)">off</strong> — anyone who can reach Boltarr on your network can see and change everything. Set a password to require a login.
             </p>
             <div class="form-row"><label>Username</label><input id="loginNewUser" type="text" value="admin" autocomplete="username"></div>
-            <div class="form-row"><label>Password (8+ characters)</label><input id="loginNewPw" type="password" autocomplete="new-password"></div>
-            <div class="form-row"><label>Repeat password</label><input id="loginNewPw2" type="password" autocomplete="new-password"></div>
+            <div class="form-row"><label>Password (8+ characters)</label><input id="loginNewPw" type="password" data-peek autocomplete="new-password"></div>
+            <div class="form-row"><label>Repeat password</label><input id="loginNewPw2" type="password" data-peek autocomplete="new-password"></div>
             <button class="btn btn-primary" style="font-size:12px" onclick="enableLogin()">Turn on login</button>
           </div>
           <!-- login on -->
@@ -1260,9 +1261,9 @@
               Forgot it? Run <code>reset-password</code> in the container console.
             </p>
             <div class="settings-sub">Change password</div>
-            <div class="form-row"><label>Current password</label><input id="loginCurPw" type="password" autocomplete="current-password"></div>
-            <div class="form-row"><label>New password</label><input id="loginChgPw" type="password" autocomplete="new-password"></div>
-            <div class="form-row"><label>Repeat new password</label><input id="loginChgPw2" type="password" autocomplete="new-password"></div>
+            <div class="form-row"><label>Current password</label><input id="loginCurPw" type="password" data-peek autocomplete="current-password"></div>
+            <div class="form-row"><label>New password</label><input id="loginChgPw" type="password" data-peek autocomplete="new-password"></div>
+            <div class="form-row"><label>Repeat new password</label><input id="loginChgPw2" type="password" data-peek autocomplete="new-password"></div>
             <button class="btn" style="font-size:12px" onclick="changeLoginPassword()">Change password</button>
             <p class="text-3" style="font-size:11px;margin:6px 0 0">Other browsers are logged out when you change it.</p>
 
@@ -1279,7 +1280,7 @@
             <button class="btn" style="font-size:12px" onclick="saveLoginProxy()">Save</button>
 
             <div class="settings-sub">Turn login off</div>
-            <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" autocomplete="current-password"></div>
+            <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" data-peek autocomplete="current-password"></div>
             <button class="btn btn-danger" style="font-size:12px" onclick="disableLogin()">Turn off login</button>
           </div>
         </div>
@@ -1674,6 +1675,7 @@
 
 <script src="/js/graph.js"></script>
 <script src="/js/chat.js"></script>
+<script src="/js/peek.js"></script>
 <script src="/js/app.js"></script>
 </body>
 </html>

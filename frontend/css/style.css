@@ -259,27 +259,6 @@ body {
   border-top: 1px solid var(--border);
   flex-shrink: 0;
 }
-.sidebar-footer select {
-  width: 100%;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  padding: 5px 8px;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-family: var(--font-ui);
-  outline: none;
-  cursor: pointer;
-}
-.sidebar-footer select:focus { border-color: var(--accent); }
-.sidebar-footer label {
-  display: block;
-  font-size: 10px;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
-  margin-bottom: 5px;
-}
 
 /* ── AI settings button ────────────────────────────────────────────────────── */
 .ai-settings-btn {
@@ -1388,7 +1367,7 @@ tbody td {
   transition: background 0.15s, color 0.15s;
 }
 .svc-subtab:hover  { color: var(--text-1); }
-.svc-subtab.active { background: var(--surface3, oklch(22% 0.02 240)); color: var(--text-1); font-weight: 500; }
+.svc-subtab.active { background: var(--accent-dim); color: var(--accent); font-weight: 500; }   /* same as the active sidebar item */
 
 /* Services topology canvas */
 #svc-panel-topology {
@@ -1724,7 +1703,9 @@ tbody td {
 
 /* ── Hierarchy tree ─────────────────────────────────────────────────────────── */
 .hierarchy-wrap {
-  padding: 16px 20px;
+  /* top/left match .graph-toolbar (12px), so the Graph | Hierarchy switch
+     stays in exactly the same spot when you change view */
+  padding: 12px 20px 16px 12px;
   overflow-y: auto;
   height: 100%;
 }
@@ -2093,7 +2074,16 @@ tbody td {
 .login-error { font-size: 12px; color: var(--red); min-height: 1.3em; margin: 4px 0 6px; }
 .login-skip { display: block; text-align: center; margin-top: 14px; font-size: 12px; color: var(--text-3); background: none; border: 0; cursor: pointer; width: 100%; }
 .login-skip:hover { color: var(--text-2); text-decoration: underline; }
-.login-foot { margin-top: 18px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.login-help { margin-top: 18px; font-size: 11px; color: var(--text-3); line-height: 1.55; }
+.login-help summary { cursor: pointer; width: fit-content; }
+.login-help summary:hover { color: var(--text-2); }
+.login-help[open] summary { color: var(--text-2); margin-bottom: 6px; }
+.login-help p { margin: 6px 0; }
+.login-help ul { margin: 6px 0; padding-left: 16px; }
+.login-help li { margin-bottom: 6px; }
+.login-help li span { color: var(--text-3); }
+.login-help code { font-size: 10.5px; overflow-wrap: anywhere; color: var(--text-2); }
+.login-help-more a { color: var(--accent); }
 
 /* Settings → Security: strict-mode check list */
 .csp-list { max-height: 220px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
@@ -2101,3 +2091,22 @@ tbody td {
 .csp-row:last-child { border-bottom: 0; }
 .csp-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .csp-enforced { background: color-mix(in srgb, var(--red) 10%, transparent); }
+
+/* Topology: Graph | Hierarchy switch sits first in each toolbar. On phones the
+   graph toolbar wraps instead of running off-screen; its empty area lets
+   touches through to the graph. */
+@media (max-width: 799px) {
+  .graph-toolbar { right: 12px; flex-wrap: wrap; pointer-events: none; }
+  .graph-toolbar > * { pointer-events: auto; }
+  .hierarchy-toolbar { flex-wrap: wrap; }
+}
+
+/* Press-and-hold eye inside password boxes (login page, Settings → Login) — peek.js */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap input { padding-right: 36px; }
+.pw-wrap input::-ms-reveal { display: none; }          /* Edge's own toggle eye */
+.pw-peek { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; align-items: center;
+  justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--text-3); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pw-peek:hover, .pw-peek.on { color: var(--accent); }
+.pw-peek:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

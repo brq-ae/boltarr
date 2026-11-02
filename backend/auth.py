@@ -32,7 +32,7 @@ MIN_PASSWORD = 8
 
 # Reachable without logging in: the login page and what it needs, the version
 # endpoint (Docker health checks), and the browser's security reports.
-OPEN_PATHS = {"/login.html", "/js/login.js", "/css/style.css", "/api/version",
+OPEN_PATHS = {"/login.html", "/js/login.js", "/js/peek.js", "/css/style.css", "/api/version",
               "/api/auth/status", "/api/auth/login", "/api/auth/setup", "/api/auth/skip-setup",
               "/api/auth/logout", "/api/csp-report"}
 OPEN_PREFIXES = ("/img/", "/vendor/")
