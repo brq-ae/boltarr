@@ -1,9 +1,20 @@
+/* Bundled fonts (SIL Open Font License 1.1, see static/fonts/LICENSE.md) — only
+   downloaded when Branding → Font picks them. */
+@font-face{font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;src:url(/static/fonts/inter-latin-ext.woff2) format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400 700;font-display:swap;src:url(/static/fonts/inter-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'Cairo';font-style:normal;font-weight:400 700;font-display:swap;src:url(/static/fonts/cairo-arabic.woff2) format('woff2');unicode-range:U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC}
+@font-face{font-family:'Cairo';font-style:normal;font-weight:400 700;font-display:swap;src:url(/static/fonts/cairo-latin-ext.woff2) format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:'Cairo';font-style:normal;font-weight:400 700;font-display:swap;src:url(/static/fonts/cairo-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
 :root{--bg:#0a0c11;--card:#14161f;--border:#232833;--text:#e6edf3;--muted:#8b949e;
   --up:#3fb950;--down:#f85149;--maint:#f59e0b;--unknown:#7d8590;--accent:#eab308;
   --brand-gradient:transparent}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font-family:-apple-system,Segoe UI,Roboto,sans-serif}
+body.font-inter{font-family:'Inter',-apple-system,Segoe UI,Roboto,sans-serif}
+body.font-cairo{font-family:'Cairo',-apple-system,Segoe UI,Roboto,sans-serif}
+body.font-inter input,body.font-inter select,body.font-inter textarea,body.font-inter button,
+body.font-cairo input,body.font-cairo select,body.font-cairo textarea,body.font-cairo button{font-family:inherit}
 .wrap{max-width:760px;margin:0 auto;padding:32px 16px}
 .hidden{display:none!important}
 .topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:20px}
@@ -33,6 +44,14 @@ h1{font-size:22px;margin:0 0 4px}
 .dot.unknown{background:var(--unknown)}
 .dot.maint{background:var(--maint);box-shadow:0 0 6px var(--maint)}
 .svc-name{font-weight:600;flex:1}
+.svc-head[data-key]{cursor:pointer;border-radius:6px}
+.svc-head[data-key]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.chev{color:var(--muted);font-size:12px;transition:transform .15s}
+.svc.open .chev{transform:rotate(180deg)}
+.item-inc{margin-top:12px;padding-top:4px;border-top:1px solid var(--border)}
+.item-inc.muted{padding-top:10px}
+.item-inc .inc-item:first-of-type{border-top:none}
+.inc-day-sm{font-weight:600;flex:1;min-width:0}
 .uptime{font-size:13px;color:var(--muted)}
 .ticks{display:flex;gap:2px;align-items:flex-end;height:26px}
 .tick{flex:1;min-width:2px;border-radius:1px;background:var(--unknown);height:100%}
@@ -102,6 +121,7 @@ body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
   border-radius:6px;padding:3px 6px;font-size:11px;font-family:ui-monospace,monospace}
 .logo-preview{height:38px;max-width:170px;object-fit:contain;background:var(--bg);
   border:1px solid var(--border);border-radius:8px;padding:4px;vertical-align:middle}
+.fav-preview{height:32px;width:32px}
 .logo-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 
 /* admin panel */

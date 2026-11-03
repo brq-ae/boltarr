@@ -588,6 +588,14 @@ def uptime_windows(fn, key, now=None):
     return out
 
 
+ITEM_INCIDENTS = 10   # outages sent with each status-page item, for its own expand view
+
+
+def _incident(key, name, section, o) -> dict:
+    return {"key": key, "name": name, "section": section, "start": o["start"],
+            "end": o["end"], "seconds": o["seconds"], "ongoing": o["end"] is None}
+
+
 def build_status_payload() -> dict:
     with get_conn() as conn:
         rows = [dict(r) for r in conn.execute("""
@@ -603,16 +611,17 @@ def build_status_payload() -> dict:
     WINDOW = RETENTION_DAYS * 86400
     for r in rows:
         name = (r.get("public_name") or "").strip() or r["name"]
+        key = f"svc-{r['id']}"
+        own = [_incident(key, name, "services", o) for o in outages(r["id"], WINDOW, limit=25)]
         services.append({
-            "key": f"svc-{r['id']}",
+            "key": key,
             "name": name,
             "status": r.get("monitor_status") or "unknown",
             "uptime": uptime_windows(uptime, r["id"]),
             "ticks": tick_windows("monitor_events", "service_id", r["id"]),
+            "incidents": own[:ITEM_INCIDENTS],
         })
-        for o in outages(r["id"], WINDOW, limit=25):
-            incidents.append({"name": name, "section": "services", "start": o["start"],
-                              "end": o["end"], "seconds": o["seconds"], "ongoing": o["end"] is None})
+        incidents.extend(own)
     # Public hosts — SANITIZED: only a public name (never the IP), status,
     # uptime and ticks leave the LAN. Networking gear goes in its own section.
     NETWORKING = {"router", "gateway", "switch", "unmanaged-switch", "firewall", "ap"}
@@ -627,17 +636,18 @@ def build_status_payload() -> dict:
     for r in host_rows:
         name = (r.get("public_name") or "").strip() or (r.get("hostname") or "").strip() or "Host"
         sect = "networking" if (r.get("device_type") or "") in NETWORKING else "hosts"
+        key = f"host-{r['id']}"
+        own = [_incident(key, name, sect, o) for o in host_outages(r["id"], WINDOW, limit=25)]
         item = {
-            "key": f"host-{r['id']}",
+            "key": key,
             "name": name,
             "status": "up" if r["online"] == 1 else "down" if r["online"] == 0 else "unknown",
             "uptime": uptime_windows(host_uptime, r["id"]),
             "ticks": tick_windows("host_events", "host_id", r["id"]),
+            "incidents": own[:ITEM_INCIDENTS],
         }
         (networking if sect == "networking" else hosts).append(item)
-        for o in host_outages(r["id"], WINDOW, limit=25):
-            incidents.append({"name": name, "section": sect, "start": o["start"],
-                              "end": o["end"], "seconds": o["seconds"], "ongoing": o["end"] is None})
+        incidents.extend(own)
     incidents.sort(key=lambda x: x["start"], reverse=True)
     return {"updated_at": _iso(_now_dt()), "title": "Service Status",
             "services": services, "hosts": hosts, "networking": networking,

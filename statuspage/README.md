@@ -84,21 +84,36 @@ to disable login entirely (the page then serves public sections only — fail
 closed). Log in via the **Login** button; the session is a signed, HttpOnly,
 `Secure` cookie (~30 days).
 
+## Branding
+
+Logged in, open **Branding** in the admin panel to set the name, tagline,
+footer, colours, logo, a separate **favicon** (the browser-tab icon; blank uses
+the logo) and the **font**: the visitor's system font, or bundled **Inter** or
+**Cairo** (Latin + Arabic). The fonts ship inside the image (SIL Open Font
+License, see `static/fonts/LICENSE.md`), so nothing loads from outside.
+
+Click any card to open that item's own recent outages.
+
 ## Expose it publicly (reverse proxy)
 
 Point a subdomain (e.g. `status.example.com`) at this host's `IP:12102` through
 your reverse proxy, with HTTPS.
 
-> **⚠️ Block the push path.** A reverse proxy forwards *all* paths by default, so
-> `status.example.com/push` would let anyone on the internet post fake statuses.
-> Deny `/push` at the proxy. In Nginx / Nginx Proxy Manager (Advanced tab):
+> **The push path is LAN-only.** A reverse proxy forwards *all* paths by default,
+> so `status.example.com/push` would reach the app from the internet. The app
+> refuses any `/push` that arrives through a proxy (proxies add forwarding
+> headers such as `X-Forwarded-For`), even with a valid token. Boltarr's push goes
+> directly to `IP:12102` over the LAN, so it keeps working.
+>
+> For a second layer, you can also deny it at the proxy. In Nginx / Nginx Proxy
+> Manager (Advanced tab):
 >
 > ```nginx
 > location /push { deny all; }
 > ```
 >
-> Boltarr's push goes directly to `IP:12102` over the LAN and bypasses the proxy,
-> so it keeps working.
+> If your Boltarr really must push through a proxy, set
+> `STATUS_PUSH_VIA_PROXY=true`.
 
 ## Hardening for internet exposure
 
@@ -111,6 +126,7 @@ security-critical. What the app does for you, and what you must do:
   throttle, and passwords are compared in constant time.
 - Session cookie is signed (HMAC), `HttpOnly`, `Secure`, `SameSite=Lax`;
   state-changing admin calls require a CSRF token.
+- `/push` is refused when it arrives through a reverse proxy (LAN-only).
 - Strict security headers on every response: a locked-down `Content-Security-Policy`
   (no inline JS/CSS, no framing), `X-Content-Type-Options`, `X-Frame-Options: DENY`,
   `Referrer-Policy: no-referrer`, `Permissions-Policy`, and HSTS (over HTTPS).
@@ -121,7 +137,8 @@ security-critical. What the app does for you, and what you must do:
   `STATUS_COOKIE_SECURE=true` — otherwise the session cookie won't stick.
 - Set a **long, unique `STATUS_ADMIN_PASSWORD`** (and, optionally, a fixed
   `STATUS_SESSION_SECRET`).
-- **Block `/push`** at the proxy (above) so the internet can't post fake statuses.
+- Point Boltarr's **Status app URL** at the LAN address (`http://IP:12102`), not
+  the public proxy address — pushes through a proxy are refused.
 - If you run behind a proxy, either set `TRUST_PROXY=true` **only** when the proxy
   sets a trustworthy `X-Forwarded-For`, or add rate limiting at the proxy too.
 
@@ -131,7 +148,7 @@ See `.env.example` for every setting.
 
 | Method | Path              | Access            | Purpose                              |
 |--------|-------------------|-------------------|--------------------------------------|
-| POST   | `/push`           | token (LAN)       | Boltarr pushes the status payload    |
+| POST   | `/push`           | token, LAN only   | Boltarr pushes the status payload    |
 | GET    | `/data`           | public / admin    | Payload as JSON — public sections for anyone, all sections when logged in |
 | POST   | `/login`          | rate-limited      | Start an admin session (sets cookie) |
 | POST   | `/logout`         | —                 | Clear the admin session              |
@@ -153,6 +170,9 @@ Boltarr sends, and the page renders:
   "announcements": []
 }
 ```
+
+Newer Boltarr also sends `key`, `uptime`, `ticks` per window, an `incidents`
+list per item (its newest 10 outages), and a shared newest-25 `incidents` list.
 
 `status` is `"up" | "down" | "unknown"`; `ticks` is ~60 entries (last hour,
 oldest→newest). Boltarr sends all three section arrays; **which are shown to the

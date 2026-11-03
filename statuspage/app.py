@@ -38,6 +38,12 @@ COOKIE_SECURE  = os.environ.get("STATUS_COOKIE_SECURE", "true").lower() not in (
 # Only trust X-Forwarded-For if you run behind a proxy you control (else an
 # attacker can spoof it to dodge the login rate limit).
 TRUST_PROXY    = os.environ.get("TRUST_PROXY", "false").lower() in ("1", "true", "yes")
+# Boltarr pushes straight over the LAN, never through a reverse proxy. A /push
+# that arrives via a proxy (it carries forwarding headers) came from outside, so
+# it's refused even with a valid token. Set true only if your push really does
+# go through a proxy.
+PUSH_VIA_PROXY = os.environ.get("STATUS_PUSH_VIA_PROXY", "false").lower() in ("1", "true", "yes")
+_PROXY_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-host", "x-forwarded-proto")
 
 COOKIE_NAME = "boltarr_session"
 SECTIONS    = ("services", "hosts", "networking")
@@ -131,7 +137,7 @@ def set_visibility(vis: dict) -> None:
 # bundled Boltarr logo; a blank name falls back to "Service Status".
 BRANDING_KEYS = {
     "brand_name": "", "brand_tagline": "", "footer_text": "Powered by Boltarr",
-    "logo": "",
+    "logo": "", "favicon": "", "font": "system",
     "color_accent": "#eab308", "color_bg": "#0a0c11", "color_surface": "#14161f",
     "color_op": "#3fb950", "color_down": "#f85149",
     "color_maint": "#f59e0b", "color_unknown": "#7d8590",
@@ -143,9 +149,17 @@ def get_branding() -> dict:
     return {k: (get_setting(k) or default) for k, default in BRANDING_KEYS.items()}
 
 
+FONTS = ("system", "inter", "cairo")   # bundled in static/fonts (SIL OFL 1.1)
+
+
 def set_branding(data: dict) -> None:
     for k in BRANDING_KEYS:
         if k in data and data[k] is not None:
+            if k == "font" and data[k] not in FONTS:
+                continue
+            if k in ("logo", "favicon") and data[k] and (
+                    not str(data[k]).startswith("data:image/") or len(str(data[k])) > 750_000):
+                continue
             set_setting(k, str(data[k]))
 
 
@@ -547,7 +561,7 @@ def _record_fail(ip: str) -> None:
 
 
 # ── Security headers on every response ─────────────────────────────────────────
-_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+_CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; "
         "connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 
 
@@ -588,6 +602,8 @@ def _startup() -> None:
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 @app.post("/push")
 async def push(request: Request, authorization: str = Header(default="")):
+    if not PUSH_VIA_PROXY and any(h in request.headers for h in _PROXY_HEADERS):
+        raise HTTPException(status_code=403, detail="push is LAN-only")
     if not TOKEN or not hmac.compare_digest(authorization, f"Bearer {TOKEN}"):
         raise HTTPException(status_code=401, detail="unauthorized")
     body = await request.body()
@@ -650,7 +666,7 @@ def _annotate_maintenance(out: dict, tzinfo) -> None:
                 by_key.setdefault(k, []).append(ev)
     now = datetime.now(timezone.utc)
     anchor = _parse_ts(STATE.get("_pushed_at")) or now
-    key_of = {}   # (name, section) -> key, to match incidents (which carry no key)
+    key_of = {}   # (name, section) -> key, for incidents from older Boltarr (no key)
     for sect in SECTIONS:
         for it in out.get(sect, []):
             key_of[(it.get("name"), sect)] = it.get("key")
@@ -659,6 +675,10 @@ def _annotate_maintenance(out: dict, tzinfo) -> None:
                 continue
             if it.get("status") == "down" and _overlaps_window(evs, now, now, tzinfo):
                 it["maintenance"] = True
+            for inc in it.get("incidents") or []:
+                st = _parse_ts(inc.get("start"))
+                if st and _overlaps_window(evs, st, st, tzinfo):
+                    inc["maintenance"] = True
             for wk, arr in (it.get("ticks") or {}).items():
                 secs = _TICK_SECS.get(wk)
                 if not secs or not arr:
@@ -671,7 +691,7 @@ def _annotate_maintenance(out: dict, tzinfo) -> None:
                     if _overlaps_window(evs, s0, s0 + timedelta(seconds=slot), tzinfo):
                         d["maint"] = True
     for inc in out.get("incidents", []):
-        evs = by_key.get(key_of.get((inc.get("name"), inc.get("section", "services"))))
+        evs = by_key.get(inc.get("key") or key_of.get((inc.get("name"), inc.get("section", "services"))))
         st = _parse_ts(inc.get("start"))
         if evs and st and _overlaps_window(evs, st, st, tzinfo):
             inc["maintenance"] = True
@@ -712,8 +732,14 @@ def data(request: Request):
     # before it; ongoing ones and anything newer stay.
     since = _parse_ts(get_setting("incidents_since"))
     if since:
-        out["incidents"] = [i for i in out["incidents"]
-                            if i.get("ongoing") or (_parse_ts(i.get("end")) or datetime.now(timezone.utc)) > since]
+        keep = lambda incs: [i for i in incs
+                             if i.get("ongoing") or (_parse_ts(i.get("end")) or datetime.now(timezone.utc)) > since]
+        out["incidents"] = keep(out["incidents"])
+        # Each item's own list (newer Boltarr) follows the same cutoff. Copy the
+        # item so the stored payload keeps its full list.
+        for s in SECTIONS:
+            out[s] = [{**it, "incidents": keep(it["incidents"])} if isinstance(it.get("incidents"), list) else it
+                      for it in out[s]]
     # Amber-label anything inside an automated-maintenance window (truthful — the
     # downtime stays counted; only its cause is marked).
     _annotate_maintenance(out, tzinfo)
@@ -939,6 +965,21 @@ def static_js():
 @app.get("/static/style.css")
 def static_css():
     return _static(STATIC_DIR / "style.css", "text/css")
+
+
+_FONT_FILES = {f"{n}.woff2" for n in ("inter-latin", "inter-latin-ext",
+                                       "cairo-latin", "cairo-latin-ext", "cairo-arabic")}
+
+
+@app.get("/static/fonts/{name}")
+def static_font(name: str):
+    if name not in _FONT_FILES:
+        raise HTTPException(status_code=404)
+    path = STATIC_DIR / "fonts" / name
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return Response(path.read_bytes(), media_type="font/woff2",
+                    headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/static/boltarr-logo.svg")

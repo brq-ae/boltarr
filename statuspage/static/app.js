@@ -61,7 +61,44 @@ function dayClass(pct){
   return "down";
 }
 function pctLabel(u, w){ return (!u || u[w] == null) ? "—" : Number(u[w]).toFixed(2) + "%"; }
-function card(x){
+// R-14: a card opens to show its own outages. Open cards stay open across the
+// 30-second refresh.
+const OPEN = new Set();
+let ALL_INCIDENTS = [];
+function itemIncidents(x, section){
+  if(Array.isArray(x.incidents)) return x.incidents;
+  // Older Boltarr sends only the shared newest-25 list, without item keys.
+  return ALL_INCIDENTS.filter(i => i.key ? i.key === x.key : (i.name === x.name && (i.section || "services") === section));
+}
+function incMeta(inc){
+  const hm = dt => dt.toLocaleTimeString(undefined, { timeZone: TZONE, hour:"2-digit", minute:"2-digit" });
+  const dayOf = dt => dt.toLocaleDateString(undefined, { timeZone: TZONE, year:"numeric", month:"short", day:"numeric" });
+  const down = new Date(inc.start);
+  if(inc.ongoing) return `down ${esc(hm(down))} · ongoing (${fmtDur(inc.seconds)})`;
+  const back = new Date(inc.end);
+  // If it came back on a later day (e.g. crossed midnight), show that date.
+  let backLbl = hm(back);
+  if(dayOf(back) !== dayOf(down))
+    backLbl = back.toLocaleDateString(undefined, { timeZone: TZONE, month:"short", day:"numeric" }) + " " + backLbl;
+  return `down ${esc(hm(down))} → back ${esc(backLbl)} · ${fmtDur(inc.seconds)}`;
+}
+function itemHistory(x, section){
+  const incs = itemIncidents(x, section);
+  if(!incs.length)
+    return `<div class="item-inc muted">${Array.isArray(x.incidents) ? "No outages in the last 31 days." : "No recent outages."}</div>`;
+  return `<div class="item-inc">` + incs.map(inc => {
+    const day = new Date(inc.start).toLocaleDateString(undefined, { timeZone: TZONE, month:"short", day:"numeric" });
+    const tag = inc.maintenance ? `<span class="inc-tag">Scheduled maintenance</span>` : "";
+    return `<div class="inc-item${inc.ongoing ? " ongoing" : ""}${inc.maintenance ? " maint" : ""}"><span class="inc-dot"></span>` +
+      `<span class="inc-day-sm">${esc(day)}</span>${tag}<span class="inc-meta">${incMeta(inc)}</span></div>`;
+  }).join("") + `</div>`;
+}
+function toggleCard(el){
+  const k = el.getAttribute("data-key");
+  if(OPEN.has(k)) OPEN.delete(k); else OPEN.add(k);
+  renderList(LAST);
+}
+function card(x, section){
   const uw = DISP.uptime_window || "24h";
   const bw = DISP.bar_period || "24h";
   let pcts;
@@ -84,12 +121,17 @@ function card(x){
     return `<div class="day ${cl}" title="${t}"></div>`;
   }).join("")}</div>`;
   const dot = x.maintenance ? "maint" : cls(x.status);
-  return `<div class="svc"><div class="svc-head"><span class="dot ${dot}"></span>
+  const open = OPEN.has(x.key);
+  return `<div class="svc${open ? " open" : ""}"><div class="svc-head" role="button" tabindex="0" data-key="${esc(x.key)}"
+    aria-expanded="${open}" title="Show this item's outages"><span class="dot ${dot}"></span>
     <span class="svc-name">${esc(x.name)}</span>
-    <span class="uptime">${pcts}</span></div>
-    ${bars}</div>`;
+    <span class="uptime">${pcts}</span><span class="chev">▾</span></div>
+    ${bars}${open ? itemHistory(x, section) : ""}</div>`;
 }
+let LAST = {};
 function renderList(d){
+  LAST = d;
+  ALL_INCIDENTS = d.incidents || [];
   const privates = new Set(d.private_sections || []);
   const groups = [["Services","services"],["Hosts","hosts"],["Networking","networking"]]
     .map(([label,key]) => [label, key, d[key] || []]).filter(g => g[2].length);
@@ -99,7 +141,7 @@ function renderList(d){
   list.innerHTML = groups.map(([label,key,items]) => {
     const lock = privates.has(key) ? '<span class="lock">PRIVATE</span>' : "";
     const head = (multi || lock) ? `<div class="section-label">${esc(label)} ${lock}</div>` : "";
-    return head + items.map(card).join("");
+    return head + items.map(x => card(x, key)).join("");
   }).join("");
 }
 function renderAnnouncements(d){
@@ -124,7 +166,9 @@ function applyBranding(b){
     document.body.classList.remove("has-stripe");
   }
   $("brandLogo").src = b.logo || "/static/boltarr-logo.svg";
-  const fav = $("favicon"); if(fav) fav.href = b.logo || "/static/boltarr-logo.svg";
+  const fav = $("favicon"); if(fav) fav.href = b.favicon || b.logo || "/static/boltarr-logo.svg";
+  document.body.classList.remove("font-inter", "font-cairo");
+  if(b.font === "inter" || b.font === "cairo") document.body.classList.add("font-" + b.font);
   const name = b.brand_name || "Service Status";
   $("title").textContent = name;
   document.title = name;
@@ -309,6 +353,19 @@ function renderAdmin(d){
       <label class="btn small">Upload logo<input id="brandLogoFile" type="file" accept="image/*" class="hidden"></label>
       <button class="btn small" id="brandLogoDefault">Use default</button>
     </div>
+    <div class="logo-row">
+      <img id="brandFavPrev" class="logo-preview fav-preview" src="${BRAND.favicon || BRAND.logo || '/static/boltarr-logo.svg'}" alt="">
+      <label class="btn small">Upload favicon<input id="brandFavFile" type="file" accept="image/*" class="hidden"></label>
+      <button class="btn small" id="brandFavDefault">Same as logo</button>
+      <span class="muted">The small icon in the browser tab.</span>
+    </div>
+    <label class="fld">Font
+      <select id="brandFont">
+        <option value="system"${(BRAND.font || "system") === "system" ? " selected" : ""}>System (the visitor's own)</option>
+        <option value="inter"${BRAND.font === "inter" ? " selected" : ""}>Inter</option>
+        <option value="cairo"${BRAND.font === "cairo" ? " selected" : ""}>Cairo (Latin + Arabic)</option>
+      </select>
+    </label>
     <label class="fld">Brand name<input id="brandName" type="text" maxlength="60" value="${esc(BRAND.brand_name)}"></label>
     <label class="fld">Tagline<input id="brandTagline" type="text" maxlength="120" value="${esc(BRAND.brand_tagline)}"></label>
     <label class="fld">Footer text<input id="brandFooter" type="text" maxlength="120" value="${esc(BRAND.footer_text)}"></label>
@@ -369,6 +426,8 @@ function renderAdmin(d){
   $("dispSave").addEventListener("click", saveDisplay);
   $("brandLogoDefault").addEventListener("click", () => { BRAND.logo = ""; $("brandLogoPrev").src = "/static/boltarr-logo.svg"; });
   $("brandLogoFile").addEventListener("change", onLogoFile);
+  $("brandFavDefault").addEventListener("click", () => { BRAND.favicon = ""; $("brandFavPrev").src = BRAND.logo || "/static/boltarr-logo.svg"; });
+  $("brandFavFile").addEventListener("change", onFavFile);
   panel.querySelectorAll(".color-swatch").forEach(sw => {
     const hex = panel.querySelector(`.color-hex[data-hex="${sw.getAttribute("data-brand")}"]`);
     if(!hex) return;
@@ -411,8 +470,17 @@ function onLogoFile(e){
   reader.readAsDataURL(f);
 }
 
+function onFavFile(e){
+  const f = e.target.files[0];
+  if(!f) return;
+  if(f.size > 128 * 1024){ alert("Favicon too large (max 128 KB)."); return; }
+  const reader = new FileReader();
+  reader.onload = () => { BRAND.favicon = reader.result; $("brandFavPrev").src = reader.result; };
+  reader.readAsDataURL(f);
+}
+
 async function saveBranding(){
-  const payload = { logo: BRAND.logo || "" };
+  const payload = { logo: BRAND.logo || "", favicon: BRAND.favicon || "", font: $("brandFont").value };
   document.querySelectorAll("#adminPanel [data-brand]").forEach(inp => payload[inp.getAttribute("data-brand")] = inp.value);
   payload.brand_name = $("brandName").value;
   payload.brand_tagline = $("brandTagline").value;
@@ -592,20 +660,7 @@ function renderIncidents(d){
   wrap.innerHTML = `<div class="section-label">Past incidents</div>` + order.map(day =>
     `<div class="inc-day"><div class="inc-date">${esc(day)}</div>` +
     groups[day].map(inc => {
-      const hm = dt => dt.toLocaleTimeString(undefined, { timeZone: TZONE, hour:"2-digit", minute:"2-digit" });
-      const dayOf = dt => dt.toLocaleDateString(undefined, { timeZone: TZONE, year:"numeric", month:"short", day:"numeric" });
-      const down = new Date(inc.start);
-      let meta;
-      if(inc.ongoing){
-        meta = `down ${esc(hm(down))} · ongoing (${fmtDur(inc.seconds)})`;
-      } else {
-        const back = new Date(inc.end);
-        // If it came back on a later day (e.g. crossed midnight), show that date.
-        let backLbl = hm(back);
-        if(dayOf(back) !== dayOf(down))
-          backLbl = back.toLocaleDateString(undefined, { timeZone: TZONE, month:"short", day:"numeric" }) + " " + backLbl;
-        meta = `down ${esc(hm(down))} → back ${esc(backLbl)} · ${fmtDur(inc.seconds)}`;
-      }
+      const meta = incMeta(inc);
       const tag = inc.maintenance ? `<span class="inc-tag">Scheduled maintenance</span>` : "";
       const kind = inc.maintenance ? " maint" : "";
       return `<div class="inc-item${inc.ongoing ? " ongoing" : ""}${kind}"><span class="inc-dot"></span>` +
@@ -663,6 +718,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $("evCancel").addEventListener("click", closeEventModal);
   $("evSave").addEventListener("click", saveEvent);
   $("evRec").addEventListener("change", () => showRecFields($("evRec").value));
+  $("list").addEventListener("click", e => { const h = e.target.closest(".svc-head[data-key]"); if(h) toggleCard(h); });
+  $("list").addEventListener("keydown", e => {
+    const h = e.target.closest(".svc-head[data-key]");
+    if(h && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); toggleCard(h); $("list").querySelector(`.svc-head[data-key="${CSS.escape(h.getAttribute("data-key"))}"]`)?.focus(); }
+  });
   load();
   setInterval(() => load(true), 30000);
 });
