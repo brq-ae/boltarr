@@ -1,4 +1,6 @@
 import os
+import hashlib
+import re
 import uuid
 import io
 import json
@@ -95,13 +97,66 @@ async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     for k, v in security.headers_for(get_config()["security"].get("frame_origins", "")).items():
         resp.headers.setdefault(k, v)
-    # Boltarr's own pages, scripts and styles: the browser must check for a newer
-    # copy on every load (a cheap 304 when unchanged), so an update never leaves
-    # an old script running. Bundled third-party files in /vendor/ rarely change.
+    # Caching. The pages (index/login) are always re-checked. They link every
+    # script/style as file?v=<fingerprint of its contents>, so those URLs can be
+    # kept by the browser for good: a changed file gets a new URL. Anything else
+    # of ours (fetched without ?v=) is re-checked on each load (a cheap 304).
     path = request.url.path
-    if not path.startswith(("/api/", "/vendor/")) and "cache-control" not in resp.headers:
-        resp.headers["Cache-Control"] = "no-cache"
+    if not path.startswith("/api/") and "cache-control" not in resp.headers:
+        if request.query_params.get("v") and resp.status_code == 200:
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif not path.startswith("/vendor/"):
+            resp.headers["Cache-Control"] = "no-cache"
     return resp
+
+
+# ── Pages with fingerprinted asset links ─────────────────────────────────────
+
+_ASSET_RE = re.compile(r'((?:src|href)=")(/(?:js|css|vendor)/[^"?#]+)(")')
+_fingerprints: dict = {}
+
+
+def _fingerprint(rel: str) -> str:
+    """Short hash of a frontend file's contents, cached until the file changes."""
+    f = (FRONTEND_DIR / rel.lstrip("/")).resolve()
+    try:
+        st = f.stat()
+    except OSError:
+        return ""
+    key = (str(f), st.st_mtime_ns, st.st_size)
+    if key not in _fingerprints:
+        _fingerprints[key] = hashlib.sha1(f.read_bytes()).hexdigest()[:10]
+    return _fingerprints[key]
+
+
+_pages: dict = {}
+
+
+def _page(name: str, request: Request) -> Response:
+    src = FRONTEND_DIR / name
+    raw = src.read_text(encoding="utf-8")
+    key = (name, src.stat().st_mtime_ns,
+           tuple(_fingerprint(m[2]) for m in _ASSET_RE.finditer(raw)))   # rebuilt only when a file changed
+    if key not in _pages:
+        for k in [k for k in _pages if k[0] == name]:      # drop this page's old copy
+            del _pages[k]
+        html = _ASSET_RE.sub(lambda m: f"{m[1]}{m[2]}?v={_fingerprint(m[2])}{m[3]}" if _fingerprint(m[2]) else m[0], raw)
+        _pages[key] = (html, '"' + hashlib.sha1(html.encode()).hexdigest()[:16] + '"')
+    html, etag = _pages[key]
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    return Response(html, media_type="text/html; charset=utf-8", headers={"ETag": etag})
+
+
+@app.get("/", include_in_schema=False)
+@app.get("/index.html", include_in_schema=False)
+def index_page(request: Request):
+    return _page("index.html", request)
+
+
+@app.get("/login.html", include_in_schema=False)
+def login_page(request: Request):
+    return _page("login.html", request)
 
 
 @app.post("/api/csp-report", status_code=204)
@@ -799,7 +854,7 @@ def list_hosts():
             h["aliases"]    = [a["ip"] for a in h["alias_info"]]
             h["classification"] = classify_host(h["ip"], subnets, h.get("static_override"))
             h["dhcp_warnings"]  = dhcp.get(h["ip"], [])
-        return hosts
+    return JSONResponse(hosts)      # plain rows: skip FastAPI's slower generic encoder
 
 
 @app.get("/api/dhcp-warnings")
@@ -2407,7 +2462,7 @@ def get_graph():
             if c["src_ip"] in host_ips and c["dst_ip"] in host_ips
         ]
 
-    return {"nodes": nodes, "edges": edges}
+    return JSONResponse({"nodes": nodes, "edges": edges})   # plain data: fast path
 
 
 # ── SSH Key Management ────────────────────────────────────────────────────────

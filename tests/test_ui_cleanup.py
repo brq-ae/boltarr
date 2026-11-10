@@ -42,7 +42,7 @@ def test_password_eye_loads_before_login(client):
     try:
         anon = TestClient(app)
         assert anon.get("/js/peek.js").status_code == 200        # the login page needs it
-        assert 'src="/js/peek.js"' in anon.get("/login.html").text
+        assert 'src="/js/peek.js?v=' in anon.get("/login.html").text
     finally:
         auth.clear_password()
 
@@ -64,12 +64,45 @@ def test_export_loads_before_chat_and_has_buttons(client):
 def test_global_search_box_and_script(client):
     page = client.get("/").text
     assert 'id="gsInput"' in page and 'id="gsResults"' in page
-    assert page.index("/js/app.js") < page.index("/js/search.js")   # uses hostMatches/svcMatches
+    assert page.index("/js/app/boot.js") < page.index("/js/search.js")   # uses hostMatches/svcMatches
     assert client.get("/js/search.js").status_code == 200
 
 
 def test_column_fit_script_loaded(client):
     page = client.get("/").text
-    assert page.index("/js/app.js") < page.index("/js/fitcols.js")
+    assert page.index("/js/app/boot.js") < page.index("/js/fitcols.js")
     assert client.get("/js/fitcols.js").status_code == 200
     assert 'class="col-svc-name"' in page          # Services' flexible column
+
+
+APP_FILES = ["core", "hosts", "host-detail", "scans", "services", "services-detail",
+             "topology", "settings", "ssh", "boot"]
+
+
+def test_app_split_files_load_in_order(client):
+    """app.js was split into js/app/*.js (F-08). The files share globals, so the
+    order matters: core first, boot last (its DOMContentLoaded starts the app)."""
+    page = client.get("/").text
+    assert "/js/app.js" not in page
+    pos = [page.index(f'<script src="/js/app/{f}.js?v=') for f in APP_FILES]
+    assert pos == sorted(pos)
+    assert page.index("/js/peek.js") < pos[0] and pos[-1] < page.index("/js/fitcols.js")
+    for f in APP_FILES:
+        assert client.get(f"/js/app/{f}.js").status_code == 200, f
+
+
+def test_assets_fingerprinted_and_cached(client):
+    """Pages link scripts/styles as file?v=<content hash>; those URLs may be kept
+    by the browser for good, the pages themselves are always re-checked."""
+    import re
+    r = client.get("/")
+    assert r.headers["cache-control"] == "no-cache"
+    links = re.findall(r'(?:src|href)="(/(?:js|css|vendor)/[^"]+)"', r.text)
+    assert links and all(re.search(r"\?v=[0-9a-f]{10}$", u) for u in links), links
+    core = next(u for u in links if "/js/app/core.js" in u)
+    a = client.get(core)
+    assert a.status_code == 200 and "immutable" in a.headers["cache-control"]
+    assert client.get("/js/app/core.js").headers["cache-control"] == "no-cache"   # without ?v=
+    assert client.get("/index.html").text == r.text
+    assert client.get("/", headers={"If-None-Match": r.headers["etag"]}).status_code == 304   # unchanged page: tiny reply
+    assert client.get("/api/version").headers.get("cache-control") != "public, max-age=31536000, immutable"

@@ -43,7 +43,7 @@ def test_gate_when_on(login_on):
     assert r.status_code == 303 and r.headers["location"] == "/login.html"
     for open_path in ("/login.html", "/js/login.js", "/css/style.css", "/api/version", "/api/auth/status"):
         assert anon.get(open_path).status_code == 200, open_path
-    assert anon.get("/js/app.js", follow_redirects=False).status_code == 303
+    assert anon.get("/js/app/core.js", follow_redirects=False).status_code == 303
     assert login_on.get("/api/hosts").status_code == 200          # the browser that set it up stays in
 
 

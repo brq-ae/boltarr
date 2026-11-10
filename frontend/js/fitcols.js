@@ -95,7 +95,7 @@
       });
       l.appendChild(b);
     });
-    // Checkbox changes (handled in app.js) → refit after they've been saved
+    // Checkbox changes (handled in app/hosts.js, app/services.js) → refit after they've been saved
     menu?.addEventListener("change", () => setTimeout(() => fit(id), 0));
     if (window.ResizeObserver) new ResizeObserver(() => fit(id)).observe(table.parentElement);
     else window.addEventListener("resize", () => fit(id));

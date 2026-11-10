@@ -25,17 +25,25 @@ def _pools(subnets: list[dict]) -> list[dict]:
             start, end = ipaddress.ip_address(s["dhcp_start"]), ipaddress.ip_address(s["dhcp_end"])
         except (TypeError, ValueError, KeyError):
             continue
-        if end >= start:
-            out.append({**s, "_start": start, "_end": end})
+        if end >= start and start.version == 4:
+            out.append({**s, "_lo": int(start), "_hi": int(end)})
     return out
 
 
-def _pool_of(ip_str: str, pools: list[dict]):
+def _ip_int(ip_str: str):
+    """IPv4 as an int, or None (fast path; aliases like node-7 and IPv6 → None)."""
     try:
-        ip = ipaddress.ip_address(ip_str)
-    except ValueError:
+        a, b, c, d = (int(x) for x in ip_str.split("."))
+    except (ValueError, AttributeError):
         return None
-    return next((p for p in pools if p["_start"] <= ip <= p["_end"]), None)
+    return (a << 24) | (b << 16) | (c << 8) | d if max(a, b, c, d) < 256 and min(a, b, c, d) >= 0 else None
+
+
+def _pool_of(ip_str: str, pools: list[dict]):
+    n = _ip_int(ip_str)
+    if n is None:
+        return None
+    return next((p for p in pools if p["_lo"] <= n <= p["_hi"]), None)
 
 
 def find_issues(conn) -> dict:
@@ -81,9 +89,10 @@ def find_issues(conn) -> dict:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=POOL_RECENT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     seen = [r["ip"] for r in conn.execute("SELECT ip FROM hosts WHERE last_seen >= ? OR online=1", (cutoff,))]
     seen += [r["ip"] for r in conn.execute("SELECT ip FROM host_aliases WHERE last_seen >= ? OR online=1", (cutoff,))]
+    seen_n = {n for n in map(_ip_int, seen) if n is not None}
     for p in pools:
-        size = int(p["_end"]) - int(p["_start"]) + 1
-        used = len({ip for ip in seen if _pool_of(ip, [p])})
+        size = p["_hi"] - p["_lo"] + 1
+        used = sum(1 for n in seen_n if p["_lo"] <= n <= p["_hi"])
         pct = round(used * 100 / size) if size else 0
         if size and pct >= POOL_FULL_PCT:
             label = p.get("name") or p["cidr"]
