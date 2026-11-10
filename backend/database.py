@@ -234,6 +234,9 @@ def init_db():
             # (local 'HH:MM'; both NULL = always). Gates automatic firing, not Run now.
             "ALTER TABLE scan_schedules ADD COLUMN window_start TEXT",
             "ALTER TABLE scan_schedules ADD COLUMN window_end TEXT",
+            # Silent schedule: records changes as usual but sends no per-scan alert
+            # (its changes still appear in the daily digest).
+            "ALTER TABLE scan_schedules ADD COLUMN silent INTEGER NOT NULL DEFAULT 0",
             # Host up/down history (liveness), for host uptime %/outages — mirrors
             # monitor_events for services. status: 'up' | 'down'.
             """CREATE TABLE IF NOT EXISTS host_events (

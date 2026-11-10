@@ -101,3 +101,11 @@ def test_report_endpoint_works_with_login_on(client):
     finally:
         auth.clear_password()
         client.delete("/api/security/reports")
+
+
+def test_own_files_always_revalidated(client):
+    for path in ("/", "/js/chat.js", "/js/markdown.js", "/css/style.css", "/login.html"):
+        r = client.get(path)
+        assert r.headers["cache-control"] == "no-cache", path
+        assert r.headers.get("etag") or r.headers.get("last-modified") or path in ("/", "/login.html")
+    assert "cache-control" not in client.get("/vendor/cytoscape.min.js").headers

@@ -94,6 +94,12 @@ async def security_headers(request: Request, call_next):
     resp = await call_next(request)
     for k, v in security.headers_for(get_config()["security"].get("frame_origins", "")).items():
         resp.headers.setdefault(k, v)
+    # Boltarr's own pages, scripts and styles: the browser must check for a newer
+    # copy on every load (a cheap 304 when unchanged), so an update never leaves
+    # an old script running. Bundled third-party files in /vendor/ rarely change.
+    path = request.url.path
+    if not path.startswith(("/api/", "/vendor/")) and "cache-control" not in resp.headers:
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 
@@ -473,6 +479,7 @@ class ScanScheduleIn(BaseModel):
     at_time:        Optional[str] = None       # 'HH:MM'
     window_start:   Optional[str] = None       # active window 'HH:MM' (both set or both empty)
     window_end:     Optional[str] = None
+    silent:         bool = False                # record changes, send no per-scan alert
 
 
 def _sched_row(r) -> dict:
@@ -531,11 +538,11 @@ def create_scan_schedule(data: ScanScheduleIn):
         cur = conn.execute("""
             INSERT INTO scan_schedules
                 (name, enabled, subnet_id, host_filter, profile_id, timing_type, interval_hours,
-                 days_of_week, at_time, window_start, window_end)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                 days_of_week, at_time, window_start, window_end, silent)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (data.name.strip(), 1 if data.enabled else 0, data.subnet_id, data.host_filter,
               data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time,
-              (data.window_start or None), (data.window_end or None)))
+              (data.window_start or None), (data.window_end or None), 1 if data.silent else 0))
         conn.commit()
         return {"id": cur.lastrowid}
 
@@ -550,11 +557,11 @@ def update_scan_schedule(sid: int, data: ScanScheduleIn):
             UPDATE scan_schedules SET
                 name=?, enabled=?, subnet_id=?, host_filter=?, profile_id=?,
                 timing_type=?, interval_hours=?, days_of_week=?, at_time=?,
-                window_start=?, window_end=?
+                window_start=?, window_end=?, silent=?
             WHERE id=?
         """, (data.name.strip(), 1 if data.enabled else 0, data.subnet_id, data.host_filter,
               data.profile_id, data.timing_type, data.interval_hours, data.days_of_week, data.at_time,
-              (data.window_start or None), (data.window_end or None), sid))
+              (data.window_start or None), (data.window_end or None), 1 if data.silent else 0, sid))
         conn.commit()
     return {"ok": True}
 

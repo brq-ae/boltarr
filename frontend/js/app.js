@@ -489,31 +489,36 @@ function initColumnMenu() {
 }
 document.addEventListener("DOMContentLoaded", initColumnMenu);
 
-function renderHostsTable() {
-  const tbody = document.querySelector("#hostsTable tbody");
-  tbody.innerHTML = "";
+// Search text against a host / a service. Shared by the table filters and the
+// top-bar search, so "+N more" there opens the same matches here. A MAC can be
+// typed with any separators (aabbcc, aa-bb-cc, aa:bb:cc).
+const _hexOnly = v => String(v || "").toLowerCase().replace(/[^0-9a-f]/g, "");
+function hostMatches(h, q) {
+  q = q.toLowerCase();
+  const qHex = _hexOnly(q);
+  return (h.ip || "").includes(q) ||
+    (h.aliases || []).some(a => a.includes(q)) ||
+    ["hostname", "vendor", "device_type", "os_guess", "notes", "mac"].some(k => (h[k] || "").toLowerCase().includes(q)) ||
+    (qHex.length >= 4 && /^[0-9a-f:.\-\s]+$/.test(q) && _hexOnly(h.mac).includes(qHex)) ||
+    (h.ports || []).some(p => p.state === "open" && (p.service || "").toLowerCase().includes(q));
+}
+function svcMatches(s, q) {
+  q = q.toLowerCase();
+  return ["name", "description", "hostname", "url", "public_name"].some(k => (s[k] || "").toLowerCase().includes(q)) ||
+    (s.ip || "").includes(q) || String(s.port || "") === q || String(s.port || "").startsWith(q);
+}
 
+// The hosts the table shows (search + IP filter, in the current sort order).
+// Export uses the same list, so a download matches the screen.
+function hostsVisibleRows() {
   let visible = allHosts;
-  if (filterText) {
-    const q = filterText.toLowerCase();
-    visible = visible.filter(h =>
-      (h.ip||"").includes(q) ||
-      (h.hostname||"").toLowerCase().includes(q) ||
-      (h.vendor||"").toLowerCase().includes(q) ||
-      (h.device_type||"").toLowerCase().includes(q) ||
-      (h.ports||[]).some(p => (p.service||"").toLowerCase().includes(q))
-    );
-  }
+  if (filterText) visible = visible.filter(h => hostMatches(h, filterText));
   if (classFilterVal) {
     visible = classFilterVal === "unknown"
       ? visible.filter(h => (h.classification || "unknown") === "unknown")
       : visible.filter(h => h.classification === classFilterVal);
   }
-
-  const count = document.getElementById("hostCount");
-  if (count) count.textContent = `${visible.length} of ${allHosts.length}`;
-
-  const sorted = [...visible].sort((a, b) => {
+  return [...visible].sort((a, b) => {
     let va = a[sortCol] ?? "", vb = b[sortCol] ?? "";
     if (sortCol === "ip") { va = ipToNum(va); vb = ipToNum(vb); }
     if (sortCol === "open_ports") {
@@ -522,6 +527,15 @@ function renderHostsTable() {
     }
     return va < vb ? -sortDir : va > vb ? sortDir : 0;
   });
+}
+
+function renderHostsTable() {
+  const tbody = document.querySelector("#hostsTable tbody");
+  tbody.innerHTML = "";
+  const sorted = hostsVisibleRows();
+
+  const count = document.getElementById("hostCount");
+  if (count) count.textContent = `${sorted.length} of ${allHosts.length}`;
 
   if (!sorted.length) {
     tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${filterText ? "No matches." : "No hosts yet — add a subnet and scan."}</td></tr>`;
@@ -775,7 +789,7 @@ async function showHostDetail(ip) {
       <div class="sheet-handle-row">
         <span class="sheet-handle-label mono">${escHtml(sheetLabel)}</span>
         <span class="sheet-handle-hint" id="sheetHint">tap to expand</span>
-        <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:17px;padding:1px 6px;line-height:1;flex-shrink:0">×</button>
+        <button class="btn-ghost sheet-close" onclick="hideHostDetail()" aria-label="Close" style="font-size:17px;padding:1px 6px;line-height:1;flex-shrink:0">×</button>
       </div>
     </div>
     <div class="detail-header">
@@ -904,7 +918,7 @@ async function showHostDetail(ip) {
         <div id="analysisResult">
           ${host.analyses?.length
             ? `<div class="analysis-meta">${escHtml(host.analyses[0].model)} · ${escHtml((host.analyses[0].created_at||"").substring(0,16))}</div>
-               <div class="analysis-box">${escHtml(host.analyses[0].analysis)}</div>`
+               <div class="analysis-box md">${renderMarkdown(host.analyses[0].analysis)}</div>`
             : `<div style="padding:16px 0;font-size:12px;color:var(--text-3)">No analysis yet. Click Analyze to run the LLM.</div>`
           }
         </div>
@@ -1065,12 +1079,13 @@ function initSheetDrag() {
   }
 
   // Touch
-  handle.addEventListener("touchstart", e => onDragStart(e.touches[0].clientY), { passive: true });
+  // A tap on a button in the handle (the ×) is that button's, not "tap to expand".
+  handle.addEventListener("touchstart", e => { if (!e.target.closest("button")) onDragStart(e.touches[0].clientY); }, { passive: true });
   handle.addEventListener("touchmove",  e => onDragMove(e.touches[0].clientY),  { passive: true });
   handle.addEventListener("touchend",   onDragEnd);
 
   // Mouse
-  handle.addEventListener("mousedown", e => { e.preventDefault(); onDragStart(e.clientY); });
+  handle.addEventListener("mousedown", e => { if (e.target.closest("button")) return; e.preventDefault(); onDragStart(e.clientY); });
   document.addEventListener("mousemove", e => onDragMove(e.clientY));
   document.addEventListener("mouseup",   onDragEnd);
 }
@@ -1286,7 +1301,7 @@ async function analyzeHost(ip) {
     const data = await api("POST", `/api/hosts/${ip}/analyze`, { model });
     resultDiv.innerHTML = `
       <div class="analysis-meta">${escHtml(data.model)} · just now</div>
-      <div class="analysis-box">${escHtml(data.analysis)}</div>`;
+      <div class="analysis-box md">${renderMarkdown(data.analysis)}</div>`;
     await loadHosts(); renderHostsTable(); await loadGraph();
   } catch (e) {
     resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
@@ -1311,14 +1326,9 @@ async function runNetworkAnalysis() {
   resultDiv.innerHTML = '<div class="analysis-box" style="color:var(--text-3)">Analyzing full network… this may take a moment.</div>';
   try {
     const data = await api("POST", "/api/analyze/network", { model });
-    const html = data.analysis
-      .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-      .replace(/^(#{1,3} .+)$/gm, '<strong style="font-size:12px;color:var(--text-1)">$1</strong>')
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\n/g, "<br>");
     resultDiv.innerHTML = `
       <div class="analysis-meta" style="margin-bottom:10px">${escHtml(data.model)} · just now</div>
-      <div class="analysis-box" style="white-space:normal;line-height:1.6">${html}</div>`;
+      <div class="analysis-box md">${renderMarkdown(data.analysis)}</div>`;
   } catch (e) {
     resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
   }
@@ -1421,6 +1431,31 @@ function _iphDaysText(d) {
   return d === 1 ? "1 day ago" : `${d} days ago`;
 }
 
+// The IP History rows on screen (status chip + filter box, in the current sort).
+function iphVisibleRows() {
+  const data = _iphData;
+  if (!data) return [];
+  const q = (document.getElementById("iphFilter").value || "").trim().toLowerCase();
+  let rows = data.ips.filter(r => _iphStatus === "all" ? r.status !== "never" : r.status === _iphStatus);
+  if (q) rows = rows.filter(r =>
+    [r.ip, r.hostname, r.mac, r.vendor, r.alias_of].some(v => v && String(v).toLowerCase().includes(q)));
+
+  const ipNum = ip => ip.split(".").reduce((a, o) => a * 256 + (+o), 0);
+  const { key, dir } = _iphSort;
+  rows.sort((a, b) => {
+    if (key === "days") {
+      const da = a.status === "never" ? -1 : (a.days ?? 0);
+      const db = b.status === "never" ? -1 : (b.days ?? 0);
+      if (da !== db) return (da - db) * dir;
+    } else {
+      return (ipNum(a.ip) - ipNum(b.ip)) * dir;
+    }
+    return ipNum(a.ip) - ipNum(b.ip);
+  });
+
+  return rows;
+}
+
 function renderIpHistory() {
   const data = _iphData;
   if (!data) return;
@@ -1442,24 +1477,7 @@ function renderIpHistory() {
   if (_iphStatus === "all" && c.never) notes.push(`${c.never} never-seen IPs hidden — pick "Never seen" to list them.`);
   document.getElementById("iphNote").innerHTML = notes.join(" ");
 
-  const q = (document.getElementById("iphFilter").value || "").trim().toLowerCase();
-  let rows = data.ips.filter(r => _iphStatus === "all" ? r.status !== "never" : r.status === _iphStatus);
-  if (q) rows = rows.filter(r =>
-    [r.ip, r.hostname, r.mac, r.vendor, r.alias_of].some(v => v && String(v).toLowerCase().includes(q)));
-
-  const ipNum = ip => ip.split(".").reduce((a, o) => a * 256 + (+o), 0);
-  const { key, dir } = _iphSort;
-  rows.sort((a, b) => {
-    if (key === "days") {
-      const da = a.status === "never" ? -1 : (a.days ?? 0);
-      const db = b.status === "never" ? -1 : (b.days ?? 0);
-      if (da !== db) return (da - db) * dir;
-    } else {
-      return (ipNum(a.ip) - ipNum(b.ip)) * dir;
-    }
-    return ipNum(a.ip) - ipNum(b.ip);
-  });
-
+  const rows = iphVisibleRows();
   document.getElementById("iphCount").textContent = `${rows.length} IP${rows.length === 1 ? "" : "s"}`;
   const tbody = document.querySelector("#iphTable tbody");
   if (!rows.length) {
@@ -1872,7 +1890,7 @@ async function loadSchedules() {
           <span class="switch-slider"></span>
         </label>
         <div style="flex:1;min-width:0">
-          <div style="font-weight:500;font-size:12px">${escHtml(s.name)}${s.enabled ? "" : ` <span style="color:var(--text-3);font-weight:400">(paused)</span>`}</div>
+          <div style="font-weight:500;font-size:12px">${escHtml(s.name)}${s.silent ? ` <span title="Silent: records changes, sends no alert (still in the daily digest)">🔕</span>` : ""}${s.enabled ? "" : ` <span style="color:var(--text-3);font-weight:400">(paused)</span>`}</div>
           <div class="mono" style="font-size:10px;color:var(--text-3);margin-top:2px">
             ${_schedTargetText(s)} · ${escHtml(s.profile_name || "no profile")} · ${_schedTimingText(s)}
           </div>
@@ -1906,6 +1924,7 @@ function openScheduleEditor(sched) {
   document.getElementById("schedFilter").value  = s.host_filter || "all";
   if (s.profile_id) document.getElementById("schedProfile").value = String(s.profile_id);
   document.getElementById("schedEnabled").checked = sched ? !!s.enabled : true;
+  document.getElementById("schedSilent").checked  = !!s.silent;
 
   const timing = s.timing_type || "interval";
   document.querySelector(`input[name="schedTiming"][value="${timing}"]`).checked = true;
@@ -1959,6 +1978,7 @@ async function saveSchedule() {
                                         : (document.getElementById("schedAnchor").value || null),
     window_start:   document.getElementById("schedWinStart").value || null,
     window_end:     document.getElementById("schedWinEnd").value || null,
+    silent:         document.getElementById("schedSilent").checked,
   };
   if (!payload.name) return showToast("Give the schedule a name");
   if (timing === "interval" && !(payload.interval_hours > 0)) return showToast("Interval must be greater than 0");
@@ -2510,26 +2530,22 @@ async function loadServicesTab() {
   renderServicesTable();
 }
 
-function renderServicesTable() {
-  const tbody = document.querySelector("#servicesTable tbody");
-  if (!tbody) return;
-
+// The services the table shows (host filter + search, in the current sort).
+function servicesVisibleRows() {
   let rows = svcHostFilterVal ? allServices.filter(s => s.ip === svcHostFilterVal) : allServices;
-  if (svcFilterText) {
-    const q = svcFilterText.toLowerCase();
-    rows = rows.filter(s =>
-      (s.name||"").toLowerCase().includes(q) ||
-      (s.ip||"").includes(q) ||
-      (s.hostname||"").toLowerCase().includes(q) ||
-      (s.description||"").toLowerCase().includes(q) ||
-      String(s.port||"").includes(q)
-    );
-  }
+  if (svcFilterText) rows = rows.filter(s => svcMatches(s, svcFilterText));
   rows = [...rows].sort((a, b) => {
     const va = (a[svcSortCol] ?? "").toString().toLowerCase();
     const vb = (b[svcSortCol] ?? "").toString().toLowerCase();
     return va < vb ? -svcSortDir : va > vb ? svcSortDir : 0;
   });
+  return rows;
+}
+
+function renderServicesTable() {
+  const tbody = document.querySelector("#servicesTable tbody");
+  if (!tbody) return;
+  const rows = servicesVisibleRows();
 
   const count = document.getElementById("serviceCount");
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;

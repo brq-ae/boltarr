@@ -167,6 +167,15 @@
     <button class="btn-menu" id="menuBtn" onclick="toggleSidebar()">☰</button>
     <span class="topbar-title" id="topbarTitle">Topology</span>
     <div class="topbar-spacer"></div>
+    <div class="gsearch">
+      <button class="btn gs-open" id="gsOpenBtn" type="button" title="Search (/ or Ctrl+K)" aria-label="Search">🔍</button>
+      <div class="gs-box">
+        <input type="search" id="gsInput" class="search-input" placeholder="Search IP, host, MAC, service…" autocomplete="off" spellcheck="false"
+               role="combobox" aria-expanded="false" aria-controls="gsResults" aria-label="Search hosts and services">
+        <kbd class="gs-kbd">/</kbd>
+        <div class="gs-results" id="gsResults" role="listbox" hidden></div>
+      </div>
+    </div>
     <button class="btn" onclick="toggleChat()" title="Network assistant">💬 Chat</button>
     <button class="btn" id="logoutBtn" onclick="logout()" title="Log out" hidden>⎋ Log out</button>
   </header>
@@ -251,6 +260,13 @@
               <label><input type="checkbox" data-col="notes" checked> Notes</label>
             </div>
           </div>
+          <div class="export-wrap">
+            <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
+            <div class="col-menu">
+              <button type="button" data-export="hosts" data-fmt="csv">CSV <span>spreadsheet</span></button>
+              <button type="button" data-export="hosts" data-fmt="json">JSON <span>for scripts</span></button>
+            </div>
+          </div>
           <button class="btn btn-danger" id="hostsDeleteBtn" style="font-size:11px;padding:5px 11px;margin-left:auto;display:none" onclick="hostsDeleteSelected()">Delete selected</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px" onclick="openAddHost()">+ Add Host</button>
         </div>
@@ -281,6 +297,13 @@
             <select id="iphSubnet" class="search-input" style="max-width:220px;flex-shrink:0" onchange="loadIpHistory()"></select>
             <input type="text" class="search-input" id="iphFilter" placeholder="Filter by IP, hostname, MAC…" oninput="renderIpHistory()">
             <span class="host-count" id="iphCount"></span>
+            <div class="export-wrap">
+              <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
+              <div class="col-menu">
+                <button type="button" data-export="iphistory" data-fmt="csv">CSV <span>spreadsheet</span></button>
+                <button type="button" data-export="iphistory" data-fmt="json">JSON <span>for scripts</span></button>
+              </div>
+            </div>
           </div>
           <div class="iph-chips" id="iphChips"></div>
           <div class="iph-note" id="iphNote"></div>
@@ -431,6 +454,13 @@
               <label><input type="checkbox" data-col="url" checked> URL</label>
             </div>
           </div>
+          <div class="export-wrap">
+            <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
+            <div class="col-menu">
+              <button type="button" data-export="services" data-fmt="csv">CSV <span>spreadsheet</span></button>
+              <button type="button" data-export="services" data-fmt="json">JSON <span>for scripts</span></button>
+            </div>
+          </div>
           <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" onclick="svcDeleteSelected()">Delete selected</button>
           <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openBulkAddContainers()">⊕ Bulk</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openAddService()">+ Service</button>
@@ -440,8 +470,8 @@
             <thead>
               <tr>
                 <th class="td-check"><input type="checkbox" id="svcSelectAll" onchange="svcToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
-                <th class="col-svc-icon" style="width:44px"></th>
-                <th onclick="sortServices('name')">Service</th>
+                <th class="col-svc-icon"></th>
+                <th class="col-svc-name" onclick="sortServices('name')">Service</th>
                 <th class="col-svc-host" onclick="sortServices('ip')">Host</th>
                 <th class="col-svc-ps" onclick="sortServices('port')">Port / Status</th>
                 <th class="col-svc-mon">Monitor</th>
@@ -517,9 +547,12 @@
     <!-- Chat panel (inside content-area so it sits beside content) -->
     <div class="chat-panel" id="chatPanel">
       <div class="chat-header">
-        <span>Network Assistant</span>
-        <div style="display:flex;gap:6px;align-items:center">
-          <select id="chatModel" style="font-size:11px;padding:4px 7px;max-width:120px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
+        <span class="chat-title">Network Assistant</span>
+        <div style="display:flex;gap:4px;align-items:center;min-width:0">
+          <select id="chatModel" style="font-size:11px;padding:4px 7px;max-width:120px;min-width:0;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
+          <button class="btn-ghost chat-hbtn" id="chatCopyAll" title="Copy the whole conversation">⧉</button>
+          <button class="btn-ghost chat-hbtn" id="chatDownload" title="Download the conversation (.md)">⤓</button>
+          <button class="btn-ghost chat-hbtn chat-wide-btn" id="chatWide" title="Wider chat">⤢</button>
           <button class="btn-ghost" onclick="toggleChat()" style="font-size:16px;padding:2px 6px">×</button>
         </div>
       </div>
@@ -528,7 +561,7 @@
       </div>
       <div class="chat-input-row">
         <input type="text" id="chatInput" placeholder="Ask about your network…">
-        <button class="btn btn-primary" onclick="sendChat()" style="padding:6px 12px;font-size:12px">Send</button>
+        <button class="btn btn-primary" id="chatSendBtn" style="padding:6px 12px;font-size:12px">Send</button>
       </div>
     </div>
 
@@ -651,6 +684,15 @@
         <span style="color:var(--text-2)">Enabled</span>
       </label>
     </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="schedSilent" style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">🔕 Silent: record changes, send no alert</span>
+      </label>
+    </div>
+    <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
+      Changes still show in the Changes tab and in the daily digest. Applies to Run now too.
+    </p>
 
     <div class="modal-actions">
       <button class="btn" onclick="closeScheduleEditor()">Cancel</button>
@@ -1674,8 +1716,12 @@
 </div>
 
 <script src="/js/graph.js"></script>
+<script src="/js/markdown.js"></script>
+<script src="/js/export.js"></script>
 <script src="/js/chat.js"></script>
 <script src="/js/peek.js"></script>
 <script src="/js/app.js"></script>
+<script src="/js/fitcols.js"></script>
+<script src="/js/search.js"></script>
 </body>
 </html>

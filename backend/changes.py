@@ -321,11 +321,15 @@ def _worthy_events(conn, where_sql: str, params: tuple) -> list[dict]:
 
 
 def send_scan_summary(run_id: int, target_label: str = "") -> None:
-    """One ntfy summary of a scan's alert-worthy changes (respects quiet hours)."""
+    """One ntfy summary of a scan's alert-worthy changes (respects quiet hours).
+    Skipped for runs of a silent schedule; the daily digest still includes them."""
     a = get_change_alerts_config()
     if not a.get("enabled") or not a.get("on_scan") or run_id is None:
         return
     with get_conn() as conn:
+        if conn.execute("SELECT 1 FROM scan_runs r JOIN scan_schedules sc ON sc.id = r.schedule_id "
+                        "WHERE r.id=? AND sc.silent=1", (run_id,)).fetchone():
+            return
         worthy = _worthy_events(conn, "run_id=?", (run_id,))
         mac_map = _mac_map(conn, worthy) if a.get("include_mac") else None
     if not worthy:

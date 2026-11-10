@@ -45,3 +45,31 @@ def test_password_eye_loads_before_login(client):
         assert 'src="/js/peek.js"' in anon.get("/login.html").text
     finally:
         auth.clear_password()
+
+
+def test_reply_formatter_loads_before_chat(client):
+    page = client.get("/").text
+    assert page.index("/js/markdown.js") < page.index("/js/chat.js")
+    assert client.get("/js/markdown.js").status_code == 200
+
+
+def test_export_loads_before_chat_and_has_buttons(client):
+    page = client.get("/").text
+    assert page.index("/js/export.js") < page.index("/js/chat.js")   # chat's Download uses downloadFile
+    assert client.get("/js/export.js").status_code == 200
+    for kind in ("hosts", "services", "iphistory"):
+        assert f'data-export="{kind}" data-fmt="csv"' in page and f'data-export="{kind}" data-fmt="json"' in page
+
+
+def test_global_search_box_and_script(client):
+    page = client.get("/").text
+    assert 'id="gsInput"' in page and 'id="gsResults"' in page
+    assert page.index("/js/app.js") < page.index("/js/search.js")   # uses hostMatches/svcMatches
+    assert client.get("/js/search.js").status_code == 200
+
+
+def test_column_fit_script_loaded(client):
+    page = client.get("/").text
+    assert page.index("/js/app.js") < page.index("/js/fitcols.js")
+    assert client.get("/js/fitcols.js").status_code == 200
+    assert 'class="col-svc-name"' in page          # Services' flexible column
