@@ -245,8 +245,10 @@
             <option value="static">Static only</option>
             <option value="dynamic">Dynamic only</option>
             <option value="unknown">Unclassified</option>
+            <option value="dhcpwarn">⚠ DHCP warnings</option>
           </select>
           <span class="host-count" id="hostCount"></span>
+          <span class="dhcp-pool-warn" id="dhcpPoolWarn" hidden></span>
           <div class="col-menu-wrap">
             <button class="btn" id="colMenuBtn" style="font-size:11px;padding:5px 11px">Columns ▾</button>
             <div id="colMenu" class="col-menu">
@@ -521,6 +523,15 @@
             <button class="btn btn-primary" style="align-self:flex-end" onclick="addSshKey()">Add Key</button>
           </div>
         </div>
+      </div>
+
+      <!-- Search page (from the top-bar search: "See all results") -->
+      <div class="tab-panel" id="panel-search">
+        <div class="table-toolbar">
+          <input type="search" class="search-input" id="spInput" placeholder="Search hosts and services…" aria-label="Search hosts and services">
+          <span class="host-count" id="spCount"></span>
+        </div>
+        <div class="table-wrap sp-results" id="spResults"></div>
       </div>
 
       <!-- Hierarchy tab -->
@@ -889,6 +900,12 @@
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editNoOfflineAlert" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">Don't alert when this host goes offline/online <span style="color:var(--text-3)">(still monitored)</span></span>
+      </label>
+    </div>
+    <div class="form-row">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
+        <input type="checkbox" id="editNoDhcpWarn" style="accent-color:var(--accent);width:14px;height:14px">
+        <span style="color:var(--text-2)">Don't show DHCP warnings for this host <span style="color:var(--text-3)">(e.g. it has a DHCP reservation)</span></span>
       </label>
     </div>
     <div class="form-row">

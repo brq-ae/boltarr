@@ -2,6 +2,7 @@
 // MAC, vendor, type, OS, notes, open-port services) and services (name,
 // description, port, URL, host) in the data already loaded, and opens the match.
 // "+N more" opens that tab filtered by the same text (same matching rules).
+// "See all results" (or Shift+Enter) opens the Search page: every match, no limit.
 // Shortcuts: "/" (not while typing in a field) and Ctrl/⌘+K.
 
 (function () {
@@ -55,6 +56,21 @@
     return { hosts, svcs };
   }
 
+  // One result row, shared by the drop-down and the Search page.
+  function hostRow(h, q, i, page) {
+    const synthetic = String(h.ip).startsWith("node-");
+    const title = synthetic ? `${mark(h.hostname || "(no IP)", q)} <span class="gs-dim">no IP</span>`
+      : `<span class="mono">${mark(h.ip, q)}</span>${h.hostname ? ` · ${mark(h.hostname, q)}` : ""}`;
+    const meta = page && h.device_type ? `<span class="tag tag-${escHtml(h.device_type)}">${escHtml(h.device_type)}</span>` : "";
+    return `<div class="gs-item" role="option" data-i="${i}">${synthetic ? "" : livenessDot(h.online)}
+      <div class="gs-text"><div class="gs-title">${title}</div><div class="gs-why">${hostWhy(h, q)}</div></div>${meta}</div>`;
+  }
+  function svcRow(s, q, i) {
+    const where = `${mark(s.ip, q)}${s.port ? ":" + mark(String(s.port), q) : ""}${s.hostname ? " · " + mark(s.hostname, q) : ""}`;
+    return `<div class="gs-item" role="option" data-i="${i}">${svcIconHTML(s.name, 18)}
+      <div class="gs-text"><div class="gs-title">${mark(s.name, q)}</div><div class="gs-why mono">${where}</div></div></div>`;
+  }
+
   function render() {
     const box = $("gsResults"), raw = $("gsInput").value.trim(), q = raw.toLowerCase();
     lastQ = raw;
@@ -65,12 +81,8 @@
     if (hosts.length) {
       html += `<div class="gs-group">Hosts <span>${hosts.length}</span></div>`;
       hosts.slice(0, PER_GROUP).forEach(h => {
-        const synthetic = String(h.ip).startsWith("node-");
-        const title = synthetic ? `${mark(h.hostname || "(no IP)", q)} <span class="gs-dim">no IP</span>`
-          : `<span class="mono">${mark(h.ip, q)}</span>${h.hostname ? ` · ${mark(h.hostname, q)}` : ""}`;
         items.push({ kind: "host", ip: h.ip });
-        html += `<div class="gs-item" role="option" data-i="${items.length - 1}">${synthetic ? "" : livenessDot(h.online)}
-          <div class="gs-text"><div class="gs-title">${title}</div><div class="gs-why">${hostWhy(h, q)}</div></div></div>`;
+        html += hostRow(h, q, items.length - 1);
       });
       if (hosts.length > PER_GROUP) {
         items.push({ kind: "more-hosts" });
@@ -81,14 +93,16 @@
       html += `<div class="gs-group">Services <span>${svcs.length}</span></div>`;
       svcs.slice(0, PER_GROUP).forEach(s => {
         items.push({ kind: "svc", id: s.id });
-        const where = `${mark(s.ip, q)}${s.port ? ":" + mark(String(s.port), q) : ""}${s.hostname ? " · " + mark(s.hostname, q) : ""}`;
-        html += `<div class="gs-item" role="option" data-i="${items.length - 1}">${svcIconHTML(s.name, 18)}
-          <div class="gs-text"><div class="gs-title">${mark(s.name, q)}</div><div class="gs-why mono">${where}</div></div></div>`;
+        html += svcRow(s, q, items.length - 1);
       });
       if (svcs.length > PER_GROUP) {
         items.push({ kind: "more-svcs" });
         html += `<div class="gs-item gs-more" role="option" data-i="${items.length - 1}">+${svcs.length - PER_GROUP} more services — show all in Services</div>`;
       }
+    }
+    if (html) {
+      items.push({ kind: "page" });
+      html += `<div class="gs-item gs-more gs-all" role="option" data-i="${items.length - 1}">See all ${hosts.length + svcs.length} results on the Search page <span class="gs-dim">Shift+Enter</span></div>`;
     }
     box.innerHTML = html || `<div class="gs-empty">No host or service matches “${escHtml(raw)}”.</div>`;
     box.hidden = false;
@@ -129,8 +143,48 @@
       $("svcHostFilter").value = ""; svcHostFilterVal = "";
       $("serviceFilter").value = q; svcFilterText = q;
       renderServicesTable();
-    }
+    } else if (it.kind === "page") openPage(q);
   }
+
+  // ── Search page: every match, no limit ──
+  let pageItems = [];
+  function openPage(q) {
+    close(true);
+    $("spInput").value = q || "";
+    setTab("search");
+    $("spInput").focus();
+  }
+  function renderPage() {
+    const box = $("spResults"), raw = $("spInput").value.trim(), q = raw.toLowerCase();
+    pageItems = [];
+    if (!q) {
+      $("spCount").textContent = "";
+      box.innerHTML = `<div class="gs-empty">Type to search hosts and services: IP, alias, hostname, MAC, vendor, OS, notes, open ports, service name, port or URL.</div>`;
+      return;
+    }
+    const { hosts, svcs } = results(q);
+    $("spCount").textContent = `${hosts.length} host${hosts.length === 1 ? "" : "s"} · ${svcs.length} service${svcs.length === 1 ? "" : "s"}`;
+    let html = "";
+    if (hosts.length) {
+      html += `<section class="sp-group"><div class="gs-group">Hosts <span>${hosts.length}</span></div>`;
+      hosts.forEach(h => { pageItems.push({ kind: "host", ip: h.ip }); html += hostRow(h, q, pageItems.length - 1, true); });
+      html += `</section>`;
+    }
+    if (svcs.length) {
+      html += `<section class="sp-group"><div class="gs-group">Services <span>${svcs.length}</span></div>`;
+      svcs.forEach(s => { pageItems.push({ kind: "svc", id: s.id }); html += svcRow(s, q, pageItems.length - 1); });
+      html += `</section>`;
+    }
+    box.innerHTML = html || `<div class="gs-empty">No host or service matches “${escHtml(raw)}”.</div>`;
+    box.querySelectorAll(".gs-item").forEach(el => { el.tabIndex = 0; el.setAttribute("role", "button"); });
+  }
+  function pickPage(i) {
+    const it = pageItems[i];
+    if (!it) return;
+    if (it.kind === "host") showHostDetail(it.ip);
+    else showSvcDetail(it.id);
+  }
+  window.renderSearchPage = renderPage;
 
   function openBox() {
     document.querySelector(".gsearch").classList.add("open");
@@ -147,6 +201,7 @@
     inp.addEventListener("keydown", e => {
       if (e.key === "ArrowDown" && items.length) { e.preventDefault(); setActive((active + 1) % items.length); }
       else if (e.key === "ArrowUp" && items.length) { e.preventDefault(); setActive((active - 1 + items.length) % items.length); }
+      else if (e.key === "Enter" && e.shiftKey) { e.preventDefault(); if (inp.value.trim()) openPage(inp.value.trim()); }
       else if (e.key === "Enter") { e.preventDefault(); if (active >= 0) pick(active); }
       else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(!box.hidden ? false : true); }
     });
@@ -156,6 +211,13 @@
       if (el) pick(+el.dataset.i);
     });
     $("gsOpenBtn").addEventListener("click", openBox);
+    const sp = $("spInput"), spBox = $("spResults");
+    sp.addEventListener("input", renderPage);
+    spBox.addEventListener("click", e => { const el = e.target.closest(".gs-item"); if (el) pickPage(+el.dataset.i); });
+    spBox.addEventListener("keydown", e => {
+      const el = e.target.closest(".gs-item");
+      if (el && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); pickPage(+el.dataset.i); }
+    });
     document.addEventListener("click", e => {
       if (!e.target.closest(".gsearch")) { box.hidden = true; if (isPhone()) document.querySelector(".gsearch").classList.remove("open"); }
     });

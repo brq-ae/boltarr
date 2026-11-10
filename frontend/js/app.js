@@ -303,6 +303,18 @@ function startPolling(subnetId) {
 
 async function loadHosts() {
   allHosts = await api("GET", "/api/hosts");
+  loadDhcpPoolWarnings();
+}
+
+// DHCP pools that are almost full: a warning chip on the Hosts toolbar.
+async function loadDhcpPoolWarnings() {
+  const el = document.getElementById("dhcpPoolWarn");
+  if (!el) return;
+  let pools = [];
+  try { pools = (await api("GET", "/api/dhcp-warnings")).pools || []; } catch (e) {}
+  el.hidden = !pools.length;
+  el.textContent = pools.length === 1 ? `⚠ DHCP pool ${pools[0].pct}% full` : `⚠ ${pools.length} DHCP pools almost full`;
+  el.title = pools.map(p => p.text).join("\n");
 }
 
 function escHtml(s) {
@@ -516,6 +528,8 @@ function hostsVisibleRows() {
   if (classFilterVal) {
     visible = classFilterVal === "unknown"
       ? visible.filter(h => (h.classification || "unknown") === "unknown")
+      : classFilterVal === "dhcpwarn"
+      ? visible.filter(h => (h.dhcp_warnings || []).length)
       : visible.filter(h => h.classification === classFilterVal);
   }
   return [...visible].sort((a, b) => {
@@ -563,6 +577,8 @@ function renderHostsTable() {
       : h.classification === "dynamic"
       ? `<span class="cls-badge cls-dynamic" title="Dynamic — in DHCP range${ov}">dynamic</span>`
       : "";
+    const dhcpWarn = (h.dhcp_warnings || []).length
+      ? `<span class="dhcp-warn" title="${escHtml(h.dhcp_warnings.map(w => w.text).join("\n"))}">⚠</span>` : "";
     const displayIp   = isSynthetic ? `<span style="color:var(--text-3)">—</span>` : escHtml(h.ip);
     const dot = isSynthetic ? "" : livenessDot(h.online);
     const tr = document.createElement("tr");
@@ -572,7 +588,7 @@ function renderHostsTable() {
       <td class="td-host col-host">${textCell(h, 'hostname', h.hostname)}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac ? escHtml(h.mac) : '<span style="color:var(--text-3)">—</span>'}${macPencil(h.ip)}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${textCell(h, 'vendor', h.vendor)}</td>
-      <td class="td-type col-type"><span class="tag tag-${escHtml(dt)}">${escHtml(dt)}</span>${manualBadge}${clsBadge}${typePencil(h.ip)}</td>
+      <td class="td-type col-type"><span class="tag tag-${escHtml(dt)}">${escHtml(dt)}</span>${manualBadge}${clsBadge}${dhcpWarn}${typePencil(h.ip)}</td>
       <td class="col-os" style="font-size:11px;color:var(--text-3)">${textCell(h, 'os_guess', (h.os_guess||"").substring(0,34))}</td>
       <td class="col-ports"><div class="port-list">${portHtml}${more}</div></td>
       <td class="td-seen col-seen mono" style="color:var(--text-3)">${escHtml((h.last_seen||"—").substring(0,16))}</td>
@@ -773,6 +789,23 @@ async function addLinkFromDetail(ip) {
 
 // ── Host detail ───────────────────────────────────────────────────────────────
 
+// DHCP warnings for one host, at the top of its Info tab.
+function dhcpWarnBox(ip) {
+  const w = (allHosts.find(h => h.ip === ip) || {}).dhcp_warnings || [];
+  if (!w.length) return "";
+  return `<div class="dhcp-warn-box">${w.map(x => `<div>⚠ ${escHtml(x.text)}</div>`).join("")}
+    <button class="btn" data-dhcp-ignore="${escHtml(ip)}" style="font-size:11px;padding:4px 9px">Don't warn about this host</button></div>`;
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest && e.target.closest("[data-dhcp-ignore]");
+  if (!b) return;
+  const ip = b.dataset.dhcpIgnore;
+  await api("PUT", `/api/hosts/${ip}`, { no_dhcp_warn: true });
+  b.closest(".dhcp-warn-box")?.remove();
+  await loadHosts(); renderHostsTable();
+  showToast("DHCP warnings off for this host (turn back on in Edit)");
+});
+
 async function showHostDetail(ip) {
   hideSvcDetail();
   const host = await api("GET", `/api/hosts/${ip}`);
@@ -823,6 +856,7 @@ async function showHostDetail(ip) {
     <div class="detail-body">
       <!-- Info tab -->
       <div class="detail-tab-panel active" id="dtab-info">
+        ${dhcpWarnBox(ip)}
         <div class="info-grid">
           <div class="info-field"><label>IP Address</label><span class="mono">${escHtml(host.ip)}</span></div>
           <div class="info-field"><label>MAC Address</label><span class="mono">${escHtml(host.mac||"—")}</span></div>
@@ -1152,6 +1186,7 @@ async function openEditHost(ip) {
   document.getElementById("editStaticOverride").value = host.static_override || "";
   document.getElementById("editNoMacAlert").checked   = !!host.no_mac_alert;
   document.getElementById("editNoOfflineAlert").checked = !!host.no_offline_alert;
+  document.getElementById("editNoDhcpWarn").checked = !!host.no_dhcp_warn;
   document.getElementById("editPublic").checked = !!host.public;
   document.getElementById("editPublicName").value = host.public_name || "";
   onEditPublicToggle();
@@ -1251,6 +1286,7 @@ async function saveHostEdit() {
     static_override:     document.getElementById("editStaticOverride").value || null,
     no_mac_alert:        document.getElementById("editNoMacAlert").checked,
     no_offline_alert:    document.getElementById("editNoOfflineAlert").checked,
+    no_dhcp_warn:        document.getElementById("editNoDhcpWarn").checked,
     set_public:          true,
     public:              document.getElementById("editPublic").checked,
     public_name:         document.getElementById("editPublicName").value.trim() || null,
@@ -2053,7 +2089,7 @@ async function loadModels() {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys" };
+const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys", search: "Search" };
 // Hierarchy is a sub-tab of Topology (Graph | Hierarchy): its own panel, but the
 // nav highlights Topology, and Topology reopens whichever view was used last.
 const NAV_TAB = { hierarchy: "topology" };
@@ -2083,6 +2119,7 @@ function setTab(name) {
   if (name === "hierarchy") loadHierarchy();
   if (name === "services")  loadServicesTab();
   if (name === "sshkeys")   loadSshKeys();
+  if (name === "search")    window.renderSearchPage?.();
 
   // Live monitor dots only need refreshing while the Services tab is open
   if (name === "services") startMonitorPolling();

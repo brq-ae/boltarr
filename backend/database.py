@@ -237,6 +237,11 @@ def init_db():
             # Silent schedule: records changes as usual but sends no per-scan alert
             # (its changes still appear in the daily digest).
             "ALTER TABLE scan_schedules ADD COLUMN silent INTEGER NOT NULL DEFAULT 0",
+            # DHCP warnings (dhcp_check.py): per-host opt-out, and what the daily
+            # digest already reported (so each warning is sent once)
+            "ALTER TABLE hosts ADD COLUMN no_dhcp_warn INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE hosts ADD COLUMN dhcp_reported TEXT",
+            "ALTER TABLE subnets ADD COLUMN pool_reported INTEGER NOT NULL DEFAULT 0",
             # Host up/down history (liveness), for host uptime %/outages — mirrors
             # monitor_events for services. status: 'up' | 'down'.
             """CREATE TABLE IF NOT EXISTS host_events (

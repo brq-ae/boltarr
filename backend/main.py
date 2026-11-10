@@ -25,6 +25,7 @@ from . import liveness
 from . import scheduler
 from . import auth
 from . import security
+from . import dhcp_check
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, chat_stream, is_configured, get_default_model,
@@ -791,12 +792,21 @@ def list_hosts():
         subnets = [dict(s) for s in conn.execute("SELECT cidr, dhcp_start, dhcp_end FROM subnets")]
         alias_by = _rows_by_host(conn, "SELECT host_id, ip, online, last_seen FROM host_aliases ORDER BY ip")
         ports_by = _rows_by_host(conn, "SELECT * FROM ports ORDER BY host_id, port")
+        dhcp = dhcp_check.find_issues(conn)["hosts"]
         for h in hosts:
             h["ports"]      = ports_by.get(h["id"], [])
             h["alias_info"] = [{k: a[k] for k in ("ip", "online", "last_seen")} for a in alias_by.get(h["id"], [])]
             h["aliases"]    = [a["ip"] for a in h["alias_info"]]
             h["classification"] = classify_host(h["ip"], subnets, h.get("static_override"))
+            h["dhcp_warnings"]  = dhcp.get(h["ip"], [])
         return hosts
+
+
+@app.get("/api/dhcp-warnings")
+def dhcp_warnings():
+    """Hosts and DHCP pools that look wrong (see dhcp_check.py)."""
+    with get_conn() as conn:
+        return dhcp_check.find_issues(conn)
 
 
 @app.post("/api/hosts/{ip}/probe", status_code=201)
@@ -975,6 +985,7 @@ class HostUpdate(BaseModel):
     set_static_override: bool = False
     no_mac_alert:        Optional[bool] = None
     no_offline_alert:    Optional[bool] = None
+    no_dhcp_warn:        Optional[bool] = None
     public:              Optional[bool] = None   # show on the public status page
     public_name:         Optional[str]  = None
     set_public:          bool = False
@@ -1011,6 +1022,8 @@ def update_host(ip: str, data: HostUpdate):
             conn.execute("UPDATE hosts SET no_mac_alert=? WHERE ip=?", (1 if data.no_mac_alert else 0, ip))
         if data.no_offline_alert is not None:
             conn.execute("UPDATE hosts SET no_offline_alert=? WHERE ip=?", (1 if data.no_offline_alert else 0, ip))
+        if data.no_dhcp_warn is not None:
+            conn.execute("UPDATE hosts SET no_dhcp_warn=? WHERE ip=?", (1 if data.no_dhcp_warn else 0, ip))
         if data.set_public:
             conn.execute("UPDATE hosts SET public=?, public_name=? WHERE ip=?",
                          (1 if data.public else 0, (data.public_name or "").strip() or None, ip))

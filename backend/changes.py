@@ -12,7 +12,7 @@ from typing import Optional
 
 from .config import get_change_tracking_config, get_change_alerts_config, get_config, save_config, local_now
 from .database import get_conn
-from . import notify
+from . import notify, dhcp_check
 
 
 def classify_host(ip_str: str, subnets: list[dict], override: Optional[str]) -> str:
@@ -380,10 +380,16 @@ def send_digest() -> None:
     with get_conn() as conn:
         worthy = _worthy_events(conn, "ts > ?", (since,))
         mac_map = _mac_map(conn, worthy) if get_change_alerts_config().get("include_mac") else None
-    if worthy:
+        dhcp = dhcp_check.digest_lines(conn)       # new DHCP warnings only
+    if worthy or dhcp:
         n = len(worthy)
-        notify.send(title=f"Daily digest: {n} network change{'s' if n != 1 else ''}",
-                    message=summarize(worthy, mac_map=mac_map), tags=["sunrise"])
+        parts = [f"{n} network change{'s' if n != 1 else ''}"] if worthy else []
+        if dhcp:
+            parts.append(f"{len(dhcp)} DHCP warning{'s' if len(dhcp) != 1 else ''}")
+        body = summarize(worthy, mac_map=mac_map) if worthy else ""
+        if dhcp:
+            body = (body + "\n\n" if body else "") + "DHCP warnings\n" + "\n".join(dhcp)
+        notify.send(title="Daily digest: " + ", ".join(parts), message=body, tags=["sunrise"])
 
 
 def maybe_send_digest() -> None:
