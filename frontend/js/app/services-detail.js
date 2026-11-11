@@ -655,3 +655,4 @@ async function deleteConnFromEdit() {
   closeEditConn();
 }
 
+registerActions({ resetAllUptime });

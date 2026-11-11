@@ -72,11 +72,11 @@
     </div>
     <div class="form-row">
       <label>Type <code>DELETE</code> to confirm</label>
-      <input type="text" id="resetConfirm" placeholder="DELETE" class="mono" oninput="onResetConfirmInput()" autocomplete="off">
+      <input type="text" id="resetConfirm" placeholder="DELETE" class="mono" data-input="onResetConfirmInput" autocomplete="off">
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeFactoryReset()">Cancel</button>
-      <button class="btn btn-danger" id="resetConfirmBtn" onclick="doFactoryReset()" disabled>Reset</button>
+      <button class="btn" data-click="closeFactoryReset">Cancel</button>
+      <button class="btn btn-danger" id="resetConfirmBtn" data-click="doFactoryReset" disabled>Reset</button>
     </div>
   </div>
 </div>
@@ -110,12 +110,12 @@
       <div class="restore-warn">
         <strong>Everything currently in Boltarr will be replaced</strong> by this backup. Background checks
         pause for a few seconds, and the page reloads by itself when it's done. This can't be undone —
-        <a href="#" onclick="event.preventDefault();openBackupModal()">download a backup of the current data</a> first if you might want it back.
+        <a href="#" data-click="openBackupModal">download a backup of the current data</a> first if you might want it back.
       </div>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="cancelRestore()">Cancel</button>
-      <button class="btn btn-danger" id="restoreGoBtn" onclick="applyRestore()" disabled>Restore now</button>
+      <button class="btn" data-click="cancelRestore">Cancel</button>
+      <button class="btn btn-danger" id="restoreGoBtn" data-click="applyRestore" disabled>Restore now</button>
     </div>
   </div>
 </div>
@@ -131,7 +131,7 @@
       <li data-step="reload">Reloading</li>
     </ol>
     <div class="restore-panel-msg" id="restoreOverlayMsg"></div>
-    <button class="btn" id="restoreOverlayClose" onclick="closeRestoreOverlay()" hidden>Close</button>
+    <button class="btn" id="restoreOverlayClose" data-click="closeRestoreOverlay" hidden>Close</button>
   </div>
 </div>
 
@@ -143,7 +143,7 @@
       A backup holds your whole Boltarr: hosts, services, history and settings — including your ntfy and status-page tokens, AI key and login.
     </p>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-bottom:10px">
-      <input type="checkbox" id="backupProtect" checked style="accent-color:var(--accent);width:14px;height:14px" onchange="onBackupProtectChange()">
+      <input type="checkbox" id="backupProtect" checked style="accent-color:var(--accent);width:14px;height:14px" data-change="onBackupProtectChange">
       <span>Protect with a password <span class="text-3">(recommended)</span></span>
     </label>
     <div id="backupPwRows">
@@ -156,7 +156,7 @@
     <div id="backupNoPwWarn" class="restore-warn" hidden>Without a password, anyone who gets this file can read your tokens and keys. Keep it private.</div>
     <div class="login-error" id="backupErr" role="alert"></div>
     <div class="modal-actions">
-      <button class="btn" type="button" onclick="closeBackupModal()">Cancel</button>
+      <button class="btn" type="button" data-click="closeBackupModal">Cancel</button>
       <button class="btn btn-primary" type="submit" id="backupGoBtn">Download</button>
     </div>
   </form>
@@ -520,7 +520,7 @@
               <label>Public Key</label>
               <textarea id="sshKeyValue" rows="3" placeholder="ssh-ed25519 AAAA..." style="font-family:monospace;font-size:11px;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);padding:6px 8px;width:100%;box-sizing:border-box"></textarea>
             </div>
-            <button class="btn btn-primary" style="align-self:flex-end" onclick="addSshKey()">Add Key</button>
+            <button class="btn btn-primary" style="align-self:flex-end" data-click="addSshKey">Add Key</button>
           </div>
         </div>
       </div>
@@ -1279,11 +1279,11 @@
 </div>
 
 <!-- ── AI Settings Modal ─────────────────────────────────────────────────────── -->
-<div class="modal-overlay" id="settingsModal" onclick="if(event.target===this)closeSettings()">
+<div class="modal-overlay" id="settingsModal" data-click="closeSettings" data-self>
   <div class="modal" style="width:500px;max-width:95%">
     <div class="modal-header">
       <span>⚙ Settings</span>
-      <button class="icon-btn" onclick="closeSettings()">✕</button>
+      <button class="icon-btn" data-click="closeSettings">✕</button>
     </div>
     <div class="modal-body">
       <details class="settings-section" open>
@@ -1292,7 +1292,7 @@
       <div class="form-row">
         <label>Timezone</label>
         <div style="display:flex;gap:8px;flex:1;align-items:center">
-          <select id="setTimezone" onchange="updateTzPreview()" style="flex:1"></select>
+          <select id="setTimezone" data-change="updateTzPreview" style="flex:1"></select>
         </div>
       </div>
       <p class="text-3" style="font-size:11px;line-height:1.5;margin:-6px 0 0">
@@ -1311,7 +1311,7 @@
             <div class="form-row"><label>Username</label><input id="loginNewUser" type="text" value="admin" autocomplete="username"></div>
             <div class="form-row"><label>Password (8+ characters)</label><input id="loginNewPw" type="password" data-peek autocomplete="new-password"></div>
             <div class="form-row"><label>Repeat password</label><input id="loginNewPw2" type="password" data-peek autocomplete="new-password"></div>
-            <button class="btn btn-primary" style="font-size:12px" onclick="enableLogin()">Turn on login</button>
+            <button class="btn btn-primary" style="font-size:12px" data-click="enableLogin">Turn on login</button>
           </div>
           <!-- login on -->
           <div id="loginOn" hidden>
@@ -1323,7 +1323,7 @@
             <div class="form-row"><label>Current password</label><input id="loginCurPw" type="password" data-peek autocomplete="current-password"></div>
             <div class="form-row"><label>New password</label><input id="loginChgPw" type="password" data-peek autocomplete="new-password"></div>
             <div class="form-row"><label>Repeat new password</label><input id="loginChgPw2" type="password" data-peek autocomplete="new-password"></div>
-            <button class="btn" style="font-size:12px" onclick="changeLoginPassword()">Change password</button>
+            <button class="btn" style="font-size:12px" data-click="changeLoginPassword">Change password</button>
             <p class="text-3" style="font-size:11px;margin:6px 0 0">Other browsers are logged out when you change it.</p>
 
             <div class="settings-sub">Login service in front (optional)</div>
@@ -1336,11 +1336,11 @@
             </label>
             <div class="form-row"><label>Its IP address(es)</label><input id="loginProxies" type="text" class="mono" placeholder="172.18.0.5, 10.0.0.0/24"></div>
             <div class="form-row"><label>User header</label><input id="loginProxyHeader" type="text" class="mono" placeholder="Remote-User"></div>
-            <button class="btn" style="font-size:12px" onclick="saveLoginProxy()">Save</button>
+            <button class="btn" style="font-size:12px" data-click="saveLoginProxy">Save</button>
 
             <div class="settings-sub">Turn login off</div>
             <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" data-peek autocomplete="current-password"></div>
-            <button class="btn btn-danger" style="font-size:12px" onclick="disableLogin()">Turn off login</button>
+            <button class="btn btn-danger" style="font-size:12px" data-click="disableLogin">Turn off login</button>
           </div>
         </div>
       </details>
@@ -1365,8 +1365,8 @@
           <div id="cspSummary" class="text-3" style="font-size:12px;margin-bottom:6px">—</div>
           <div id="cspList" class="csp-list" hidden></div>
           <div style="display:flex;gap:6px;margin-top:6px">
-            <button class="btn" style="font-size:12px" onclick="toggleCspList()" id="cspListBtn">Show details</button>
-            <button class="btn" style="font-size:12px" onclick="clearCspReports()">Clear</button>
+            <button class="btn" style="font-size:12px" data-click="toggleCspList" id="cspListBtn">Show details</button>
+            <button class="btn" style="font-size:12px" data-click="clearCspReports">Clear</button>
           </div>
         </div>
       </details>
@@ -1380,7 +1380,7 @@
       </p>
       <div class="form-row">
         <label>Provider</label>
-        <select id="setProvider" onchange="onSettingsProviderChange()">
+        <select id="setProvider" data-change="onSettingsProviderChange">
           <option value="none">None — AI features disabled</option>
           <option value="ollama">Ollama (local / self-hosted)</option>
           <option value="openai">OpenAI-compatible API (OpenAI, LM Studio, Groq, Together…)</option>
@@ -1406,7 +1406,7 @@
         <input id="setLongTimeout" type="number" style="width:80px" min="30" value="600">
       </div>
       <div id="setTestResult" class="settings-test-result" style="display:none"></div>
-      <button class="btn" style="font-size:12px;align-self:flex-start" onclick="testLLMConnection()">⚡ Test AI</button>
+      <button class="btn" style="font-size:12px;align-self:flex-start" data-click="testLLMConnection">⚡ Test AI</button>
       </div></details>
       <details class="settings-section">
         <summary>📱 Notifications (ntfy)</summary>
@@ -1450,7 +1450,7 @@
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="setQuietEnabled" onchange="onQuietToggle()"> Quiet hours (mute alerts)
+          <input type="checkbox" id="setQuietEnabled" data-change="onQuietToggle"> Quiet hours (mute alerts)
         </label>
         <span id="setQuietRange" style="display:none;align-items:center;gap:6px">
           <span style="font-size:11px;color:var(--text-3)">from</span>
@@ -1463,7 +1463,7 @@
         During quiet hours (your local time) alerts are held. Anything still down when the window ends alerts you then.
       </p>
       <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn" onclick="testNotification()">📲 Send test</button>
+        <button class="btn" data-click="testNotification">📲 Send test</button>
         <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
 
@@ -1484,13 +1484,13 @@
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Token</label>
         <input id="setSpToken" type="password" placeholder="shared secret" style="flex:1;min-width:160px">
-        <button class="btn" type="button" onclick="generateStatusToken()" title="Generate a random token, then copy it into the status app's .env">Generate</button>
+        <button class="btn" type="button" data-click="generateStatusToken" title="Generate a random token, then copy it into the status app's .env">Generate</button>
       </div>
       <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
         The same token must be set in the status app's <code>.env</code> (<code>STATUS_TOKEN</code>).
       </p>
       <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn" onclick="testStatusPush()">🌐 Push now</button>
+        <button class="btn" data-click="testStatusPush">🌐 Push now</button>
         <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
 
@@ -1597,18 +1597,18 @@
         <div class="acc-body">
           <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup downloads a zip of the database + settings, optionally protected with a password (it includes your tokens and keys). Restore replaces everything with a backup. Factory reset permanently wipes all network data — use with care.</p>
           <div style="display:flex;gap:6px">
-            <button class="btn" style="font-size:12px" onclick="downloadBackup()">⬇ Backup</button>
-            <button class="btn" style="font-size:12px" onclick="document.getElementById('restoreInput').click()">⬆ Restore</button>
-            <input type="file" id="restoreInput" accept=".zip" style="display:none" onchange="restoreBackup(this)">
+            <button class="btn" style="font-size:12px" data-click="downloadBackup">⬇ Backup</button>
+            <button class="btn" style="font-size:12px" data-click="pickRestoreFile">⬆ Restore</button>
+            <input type="file" id="restoreInput" accept=".zip" style="display:none" data-change="restoreBackupInput">
           </div>
-          <button class="btn" style="font-size:12px;align-self:flex-start" onclick="resetAllUptime()">↺ Reset all uptime</button>
-          <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" onclick="openFactoryReset()">↺ Factory reset</button>
+          <button class="btn" style="font-size:12px;align-self:flex-start" data-click="resetAllUptime">↺ Reset all uptime</button>
+          <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" data-click="openFactoryReset">↺ Factory reset</button>
         </div>
       </details>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeSettings()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+      <button class="btn" data-click="closeSettings">Cancel</button>
+      <button class="btn btn-primary" data-click="saveSettings">Save</button>
     </div>
   </div>
 </div>

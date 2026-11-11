@@ -609,7 +609,7 @@ function showRestoredBanner() {
   bar.className = "restored-banner";
   bar.setAttribute("role", "status");
   bar.innerHTML = `<span>✅ Restored from the backup made <strong>${escHtml(fmtLocal(ts) || ts)}</strong>.</span>
-    <button class="btn-ghost" aria-label="Dismiss" onclick="this.parentElement.remove()">×</button>`;
+    <button class="btn-ghost" aria-label="Dismiss" data-click="dismissParent">×</button>`;
   document.body.prepend(bar);
 }
 
@@ -637,3 +637,13 @@ async function doFactoryReset() {
   } catch (e) { alert("Reset failed: " + e.message); }
 }
 
+registerActions({
+  closeSettings, saveSettings, updateTzPreview, toggleCspList, clearCspReports,
+  onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification,
+  generateStatusToken, testStatusPush, downloadBackup, openFactoryReset,
+  onResetConfirmInput, closeFactoryReset, doFactoryReset, openBackupModal, closeBackupModal,
+  onBackupProtectChange, cancelRestore, applyRestore, closeRestoreOverlay,
+  pickRestoreFile:    () => document.getElementById("restoreInput").click(),
+  restoreBackupInput: function () { restoreBackup(this); },
+  dismissParent:      function () { this.parentElement.remove(); },
+});

@@ -27,6 +27,26 @@ let svcDetailId       = null;
 let svcDetailStatus   = "unknown";
 let expandedAliases   = new Set();
 
+// ── Actions ───────────────────────────────────────────────────────────────────
+// Replaces inline on…= handlers (F-08 part B) so the CSP can drop 'unsafe-inline'.
+// An element names an action with data-click / data-change / data-input, plus
+// optional data-args (a JSON array, see dargs()). The action runs with `this` = the
+// element. data-self: run only when the click lands on the element itself (modal
+// backdrops). Each app file registers its own actions with registerActions().
+const ACTIONS = Object.create(null);
+function registerActions(map) { Object.assign(ACTIONS, map); }
+function dargs(...a) { return escHtml(JSON.stringify(a)); }   // for data-args="…"
+for (const [type, attr] of [["click", "data-click"], ["change", "data-change"], ["input", "data-input"]]) {
+  document.addEventListener(type, e => {
+    const el = e.target.closest && e.target.closest(`[${attr}]`);
+    if (!el || (el.hasAttribute("data-self") && e.target !== el)) return;
+    const fn = ACTIONS[el.getAttribute(attr)];
+    if (!fn) return console.warn("Boltarr: unknown action", el.getAttribute(attr));
+    if (el.tagName === "A") e.preventDefault();
+    fn.apply(el, el.dataset.args ? JSON.parse(el.dataset.args) : []);
+  });
+}
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 // Every same-origin request carries X-Boltarr (the server refuses changes

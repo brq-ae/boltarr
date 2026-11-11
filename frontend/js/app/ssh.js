@@ -30,16 +30,16 @@ function renderSshKeys() {
         <div class="ssh-key-preview mono" id="sshkprev-${k.id}">${escHtml(preview)}</div>
       </div>
       <div class="ssh-key-inline-actions">
-        <button class="btn-icon" title="${eyeTitle}" onclick="toggleSshKeyView(${k.id})">${eyeIcon}</button>
-        <button class="btn-icon" title="Copy key" onclick="copySshKey(${k.id})">⎘</button>
-        <button class="btn-icon btn-danger" title="Remove" onclick="deleteSshKey(${k.id})">✕</button>
+        <button class="btn-icon" title="${eyeTitle}" data-click="toggleSshKeyView" data-args="[${k.id}]">${eyeIcon}</button>
+        <button class="btn-icon" title="Copy key" data-click="copySshKey" data-args="[${k.id}]">⎘</button>
+        <button class="btn-icon btn-danger" title="Remove" data-click="deleteSshKey" data-args="[${k.id}]">✕</button>
       </div>
       <div class="ssh-key-kebab-wrap">
-        <button class="svc-kebab" onclick="toggleSshKeyMenu(${k.id})" title="Actions">⋮</button>
+        <button class="svc-kebab" data-click="toggleSshKeyMenu" data-args="[${k.id}]" title="Actions">⋮</button>
         <div class="svc-menu" id="sshkmenu-${k.id}">
-          <button class="svc-menu-item" onclick="closeSshKeyMenus();toggleSshKeyView(${k.id})">${eyeIcon} ${eyeTitle}</button>
-          <button class="svc-menu-item" onclick="closeSshKeyMenus();copySshKey(${k.id})">⎘ Copy key</button>
-          <button class="svc-menu-item danger" onclick="closeSshKeyMenus();deleteSshKey(${k.id})">✕ Remove</button>
+          <button class="svc-menu-item" data-click="sshKeyMenuView" data-args="[${k.id}]">${eyeIcon} ${eyeTitle}</button>
+          <button class="svc-menu-item" data-click="sshKeyMenuCopy" data-args="[${k.id}]">⎘ Copy key</button>
+          <button class="svc-menu-item danger" data-click="sshKeyMenuDelete" data-args="[${k.id}]">✕ Remove</button>
         </div>
       </div>
     </div>`;
@@ -136,15 +136,15 @@ async function loadHostSshSection(ip) {
       <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
         <div style="flex:1;font-size:12px;color:var(--text)">${escHtml(a.name)}</div>
         <div style="font-size:10px;font-family:monospace;color:var(--text-3);flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.fingerprint || "")}</div>
-        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeHostSshAccess(${a.id},${jsq(ip)})">✕</button>
+        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" data-click="removeHostSshAccess" data-args="${dargs(a.id, ip)}">✕</button>
       </div>`).join("");
 
     return `
       <div style="margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span style="font-size:11px;font-weight:600;color:var(--accent);font-family:monospace">${escHtml(user)}</span>
-          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="copySshCurl(${jsq(ip)},${jsq(user)})" title="Copies a command that deploys these keys into ${escHtml(user)}'s ~/.ssh/authorized_keys">Copy deploy cmd</button>
-          <button class="btn" style="font-size:10px;padding:2px 8px" onclick="downloadAuthorizedKeys(${jsq(ip)},${jsq(user)})">Download</button>
+          <button class="btn" style="font-size:10px;padding:2px 8px" data-click="copySshCurl" data-args="${dargs(ip, user)}" title="Copies a command that deploys these keys into ${escHtml(user)}'s ~/.ssh/authorized_keys">Copy deploy cmd</button>
+          <button class="btn" style="font-size:10px;padding:2px 8px" data-click="downloadAuthorizedKeys" data-args="${dargs(ip, user)}">Download</button>
         </div>
         ${rows}
       </div>`;
@@ -165,7 +165,7 @@ async function loadHostSshSection(ip) {
         <label style="font-size:10px">Username</label>
         <input type="text" id="sshAccessUser" value="root" placeholder="root" style="width:100%">
       </div>
-      <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;white-space:nowrap" onclick="addHostSshAccess(${jsq(ip)})">+ Grant Access</button>
+      <button class="btn btn-primary" style="font-size:11px;padding:5px 10px;white-space:nowrap" data-click="addHostSshAccess" data-args="${dargs(ip)}">+ Grant Access</button>
     </div>
   `;
 }
@@ -214,3 +214,10 @@ async function downloadAuthorizedKeys(ip, user) {
   a.click();
 }
 
+registerActions({
+  addSshKey, toggleSshKeyView, copySshKey, deleteSshKey, toggleSshKeyMenu,
+  sshKeyMenuView:   id => { closeSshKeyMenus(); toggleSshKeyView(id); },
+  sshKeyMenuCopy:   id => { closeSshKeyMenus(); copySshKey(id); },
+  sshKeyMenuDelete: id => { closeSshKeyMenus(); deleteSshKey(id); },
+  removeHostSshAccess, copySshCurl, downloadAuthorizedKeys, addHostSshAccess,
+});

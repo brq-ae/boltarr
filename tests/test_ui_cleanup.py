@@ -106,3 +106,24 @@ def test_assets_fingerprinted_and_cached(client):
     assert client.get("/index.html").text == r.text
     assert client.get("/", headers={"If-None-Match": r.headers["etag"]}).status_code == 304   # unchanged page: tiny reply
     assert client.get("/api/version").headers.get("cache-control") != "public, max-age=31536000, immutable"
+
+
+def test_no_inline_handlers_in_converted_areas():
+    """F-08 part B: converted areas use data-click/-change/-input, not on…= (CSP step)."""
+    import pathlib
+    import re
+    fe = pathlib.Path(__file__).resolve().parent.parent / "frontend"
+    html = (fe / "index.html").read_text()
+    for start, end in [('id="factoryResetModal"', 'class="topbar"'),
+                       ('id="panel-sshkeys"', 'id="panel-search"'),
+                       ('id="settingsModal"', 'id="svcDetailPanel"')]:
+        a = html.index(start)
+        part = html[a:html.index(end, a)]
+        assert not re.findall(r"\son[a-z]+=", part), start
+    for f in ["settings", "ssh"]:
+        assert not re.findall(r"\son[a-z]+=", (fe / "js" / "app" / f"{f}.js").read_text()), f
+    # every action named in the page is registered by some app file
+    js = "".join((fe / "js" / "app" / f"{f}.js").read_text() for f in APP_FILES)
+    reg = "".join(re.findall(r"registerActions\(\{(.*?)\}\);", js, re.S))
+    for name in set(re.findall(r'data-(?:click|change|input)="([A-Za-z]+)"', html + js)):
+        assert re.search(rf"\b{name}\b", reg), name

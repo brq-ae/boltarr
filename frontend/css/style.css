@@ -1570,7 +1570,9 @@ tbody td {
 #schedulesWrap, #changesList { flex: 1; min-height: 0; overflow-y: auto; }
 
 /* ── Scan builder ─────────────────────────────────────────────────────────── */
-.scan-builder { padding: 14px 16px; max-width: 760px; overflow-y: auto; }
+.scan-builder { padding: 14px 16px; overflow-y: auto; }
+/* The panel scrolls at full width (scrollbar at the screen edge); the form stays 760px */
+.scan-builder > * { max-width: 728px; }
 .scan-build-grid { display: flex; flex-direction: column; gap: 12px; }
 .scan-build-grid .form-row { margin: 0; align-items: center; }
 .scan-preview-wrap {

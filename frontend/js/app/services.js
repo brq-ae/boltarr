@@ -684,7 +684,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (currentSvcTab === "topology") renderSvcTopology();
   });
   document.addEventListener("click", e => {
-    if (!e.target.closest(".svc-actions")) closeSvcMenus();
+    if (!e.target.closest(".svc-actions, .ssh-key-kebab-wrap")) closeSvcMenus();
     if (!e.target.closest(".ssh-key-kebab-wrap")) closeSshKeyMenus();
   });
 });

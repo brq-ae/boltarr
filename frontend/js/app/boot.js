@@ -112,3 +112,5 @@ async function logout() {
   try { await api("POST", "/api/auth/logout"); } catch (_) {}
   location.href = "/login.html";
 }
+
+registerActions({ enableLogin, changeLoginPassword, saveLoginProxy, disableLogin });
