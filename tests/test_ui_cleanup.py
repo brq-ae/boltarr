@@ -115,12 +115,14 @@ def test_no_inline_handlers_in_converted_areas():
     fe = pathlib.Path(__file__).resolve().parent.parent / "frontend"
     html = (fe / "index.html").read_text()
     for start, end in [('id="factoryResetModal"', 'class="topbar"'),
+                       ('id="panel-scans"', 'id="panel-services"'),
+                       ('id="scheduleModal"', 'id="subnetModal"'),
                        ('id="panel-sshkeys"', 'id="panel-search"'),
                        ('id="settingsModal"', 'id="svcDetailPanel"')]:
         a = html.index(start)
         part = html[a:html.index(end, a)]
         assert not re.findall(r"\son[a-z]+=", part), start
-    for f in ["settings", "ssh"]:
+    for f in ["settings", "ssh", "scans"]:
         assert not re.findall(r"\son[a-z]+=", (fe / "js" / "app" / f"{f}.js").read_text()), f
     # every action named in the page is registered by some app file
     js = "".join((fe / "js" / "app" / f"{f}.js").read_text() for f in APP_FILES)

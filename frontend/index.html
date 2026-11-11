@@ -333,10 +333,10 @@
       <div class="tab-panel" id="panel-scans">
         <div class="svc-toolbar">
           <div class="svc-subtabs">
-            <button class="svc-subtab active" id="scanTabBtn-run" onclick="setScanTab('run')">Run</button>
-            <button class="svc-subtab" id="scanTabBtn-schedules" onclick="setScanTab('schedules')">Schedules</button>
-            <button class="svc-subtab" id="scanTabBtn-history" onclick="setScanTab('history')">Scan Log</button>
-            <button class="svc-subtab" id="scanTabBtn-changes" onclick="setScanTab('changes')">Changes</button>
+            <button class="svc-subtab active" id="scanTabBtn-run" data-click="setScanTab" data-args='["run"]'>Run</button>
+            <button class="svc-subtab" id="scanTabBtn-schedules" data-click="setScanTab" data-args='["schedules"]'>Schedules</button>
+            <button class="svc-subtab" id="scanTabBtn-history" data-click="setScanTab" data-args='["history"]'>Scan Log</button>
+            <button class="svc-subtab" id="scanTabBtn-changes" data-click="setScanTab" data-args='["changes"]'>Changes</button>
           </div>
         </div>
 
@@ -350,36 +350,36 @@
             <div class="form-row">
               <label>Profile</label>
               <div style="display:flex;gap:6px;flex:1">
-                <select id="scanProfile" onchange="applyScanProfile()" style="flex:1"></select>
-                <button class="btn-icon" id="scanProfileDelete" onclick="deleteScanProfile()" title="Delete profile" style="display:none;color:var(--text-3)">✕</button>
+                <select id="scanProfile" data-change="applyScanProfile" style="flex:1"></select>
+                <button class="btn-icon" id="scanProfileDelete" data-click="deleteScanProfile" title="Delete profile" style="display:none;color:var(--text-3)">✕</button>
               </div>
             </div>
             <div class="form-row">
               <label>Ports</label>
               <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">
-                <select id="scanPorts" onchange="onScanFieldChange()">
+                <select id="scanPorts" data-change="onScanFieldChange">
                   <option value="none">None — discovery only</option>
                   <option value="top1000">Top 1000 (default)</option>
                   <option value="topN">Top N…</option>
                   <option value="all">All 65,535</option>
                   <option value="custom">Custom range…</option>
                 </select>
-                <input type="number" id="scanTopN" value="100" min="1" max="65535" style="width:80px;display:none" oninput="updateScanPreview()">
-                <input type="text" id="scanPortRange" placeholder="22,80,443,8000-8100" class="mono" style="flex:1;min-width:140px;display:none" oninput="updateScanPreview()">
+                <input type="number" id="scanTopN" value="100" min="1" max="65535" style="width:80px;display:none" data-input="updateScanPreview">
+                <input type="text" id="scanPortRange" placeholder="22,80,443,8000-8100" class="mono" style="flex:1;min-width:140px;display:none" data-input="updateScanPreview">
               </div>
             </div>
             <div class="form-row">
               <label>Options</label>
               <div class="scan-checks">
-                <label><input type="checkbox" id="scanSv" onchange="onScanFieldChange()"> Service+version (-sV)</label>
-                <label><input type="checkbox" id="scanOs" onchange="onScanFieldChange()"> OS detection (-O)</label>
-                <label><input type="checkbox" id="scanPn" onchange="updateScanPreview()"> Skip discovery (-Pn)</label>
-                <label><input type="checkbox" id="scanUdp" onchange="updateScanPreview()"> UDP (-sU)</label>
+                <label><input type="checkbox" id="scanSv" data-change="onScanFieldChange"> Service+version (-sV)</label>
+                <label><input type="checkbox" id="scanOs" data-change="onScanFieldChange"> OS detection (-O)</label>
+                <label><input type="checkbox" id="scanPn" data-change="updateScanPreview"> Skip discovery (-Pn)</label>
+                <label><input type="checkbox" id="scanUdp" data-change="updateScanPreview"> UDP (-sU)</label>
               </div>
             </div>
             <div class="form-row">
               <label>Timing</label>
-              <select id="scanTiming" onchange="updateScanPreview()" style="max-width:220px">
+              <select id="scanTiming" data-change="updateScanPreview" style="max-width:220px">
                 <option value="T0">T0 — paranoid (slowest/stealth)</option>
                 <option value="T1">T1 — sneaky</option>
                 <option value="T2">T2 — polite (gentle)</option>
@@ -390,7 +390,7 @@
             </div>
             <div class="form-row" id="scanScriptsRow">
               <label>NSE scripts <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
-              <input type="text" id="scanScripts" placeholder="e.g. snmp-info,http-title,ssl-cert" class="mono" oninput="updateScanPreview()">
+              <input type="text" id="scanScripts" placeholder="e.g. snmp-info,http-title,ssl-cert" class="mono" data-input="updateScanPreview">
             </div>
           </div>
 
@@ -400,9 +400,9 @@
           </div>
 
           <div class="scan-build-actions">
-            <button class="btn" onclick="saveScanProfile()">＋ Save as profile</button>
+            <button class="btn" data-click="saveScanProfile">＋ Save as profile</button>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" id="scanRunBtn" onclick="runScanFromBuilder()">▶ Run scan</button>
+            <button class="btn btn-primary" id="scanRunBtn" data-click="runScanFromBuilder">▶ Run scan</button>
           </div>
         </div>
 
@@ -411,7 +411,7 @@
           <div class="scans-toolbar" style="padding:10px 16px">
             <span style="font-size:11px;color:var(--text-3)">Automated scans — Boltarr runs these for you; findings flow into Changes &amp; alerts.</span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="openScheduleEditor()">＋ New schedule</button>
+            <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" data-click="openScheduleEditor">＋ New schedule</button>
           </div>
           <div id="schedulesWrap" style="padding:0 16px 16px"></div>
         </div>
@@ -426,7 +426,7 @@
           <div class="scans-toolbar" style="padding:10px 16px">
             <span style="font-size:11px;color:var(--text-3)" id="changesCount"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="clearChanges()">Clear all</button>
+            <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" data-click="clearChanges">Clear all</button>
           </div>
           <div id="changesList" style="padding:0 16px 16px"></div>
         </div>
@@ -622,7 +622,7 @@
     </div>
     <div class="form-row">
       <label>Hosts</label>
-      <select id="schedFilter" onchange="onSchedFilterChange()">
+      <select id="schedFilter" data-change="onSchedFilterChange">
         <option value="all">Whole range — all IPs (finds new devices)</option>
         <option value="static">Static only (known hosts)</option>
         <option value="dynamic">Dynamic only (known hosts)</option>
@@ -642,10 +642,10 @@
       <label>When</label>
       <div style="display:flex;gap:14px;flex:1">
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;text-transform:none;font-weight:400">
-          <input type="radio" name="schedTiming" value="interval" checked onchange="onSchedTimingChange()"> Every N hours
+          <input type="radio" name="schedTiming" value="interval" checked data-change="onSchedTimingChange"> Every N hours
         </label>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;text-transform:none;font-weight:400">
-          <input type="radio" name="schedTiming" value="weekly" onchange="onSchedTimingChange()"> On chosen days
+          <input type="radio" name="schedTiming" value="weekly" data-change="onSchedTimingChange"> On chosen days
         </label>
       </div>
     </div>
@@ -706,8 +706,8 @@
     </p>
 
     <div class="modal-actions">
-      <button class="btn" onclick="closeScheduleEditor()">Cancel</button>
-      <button class="btn btn-primary" id="schedSaveBtn" onclick="saveSchedule()">Create</button>
+      <button class="btn" data-click="closeScheduleEditor">Cancel</button>
+      <button class="btn btn-primary" id="schedSaveBtn" data-click="saveSchedule">Create</button>
     </div>
   </div>
 </div>

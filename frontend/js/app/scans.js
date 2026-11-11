@@ -36,11 +36,17 @@ const _CHANGE_META = {
   hostname_changed: { icon: "⇄", cls: "chg-id",     text: e => `Hostname: ${escHtml(e.old_value||"?")} → ${escHtml(e.new_value||"?")}` },
 };
 
+// A change row in the global feed: open that host, or say it's gone (deleted since)
+async function openChangeHost(ip) {
+  try { await showHostDetail(ip); }
+  catch { showToast(`${ip} is no longer in Boltarr`); }
+}
+
 function changeEventHTML(e, showIp = true) {
   const m = _CHANGE_META[e.type] || { icon: "•", cls: "", text: () => e.type };
   const when = fmtLocal(e.ts);
   // In the global feed the row is clickable → jump to that host's panel.
-  const click = showIp ? ` style="cursor:pointer" onclick="showHostDetail(${jsq(e.ip)})" title="Open ${escHtml(e.ip)}"` : "";
+  const click = showIp ? ` style="cursor:pointer" data-click="openChangeHost" data-args="${dargs(e.ip)}" title="Open ${escHtml(e.ip)}"` : "";
   const ipPart = showIp ? `<span style="color:var(--accent)">${escHtml(e.ip)}</span> · ` : "";
   return `<div class="chg-row"${click}>
     <span class="chg-icon ${m.cls}">${m.icon}</span>
@@ -205,10 +211,10 @@ async function loadScans() {
   wrap.innerHTML = `
     <div class="scans-toolbar">
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);cursor:pointer">
-        <input type="checkbox" id="scansSelectAll" onchange="scansToggleAll(this.checked)" style="accent-color:var(--accent)">
+        <input type="checkbox" id="scansSelectAll" data-change="scansToggleAllBox" style="accent-color:var(--accent)">
         Select all
       </label>
-      <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" onclick="scansDeleteSelected()">Delete selected</button>
+      <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" data-click="scansDeleteSelected">Delete selected</button>
     </div>
     ${scans.map(s => {
       const isProbe = s.type === "probe";
@@ -240,11 +246,11 @@ async function loadScans() {
         ? `<span class="tag tag-running" style="font-size:10px">${live === "scanning" ? "scanning" : "running"}</span>`
         : `<span class="tag tag-${escHtml(s.status)}" style="font-size:10px">${escHtml(s.status)}</span>`;
       const cancelBtn = running
-        ? `<button class="btn-ghost" style="font-size:11px;padding:2px 7px;flex-shrink:0;color:var(--yellow)" onclick="cancelScanRun(${s.id})" title="Stop">■</button>`
+        ? `<button class="btn-ghost" style="font-size:11px;padding:2px 7px;flex-shrink:0;color:var(--yellow)" data-click="cancelScanRun" data-args="[${s.id}]" title="Stop">■</button>`
         : "";
       return `
         <div class="scan-card" id="scan-card-${s.id}">
-          <input type="checkbox" class="scan-checkbox" data-id="${s.id}" style="accent-color:var(--accent);flex-shrink:0" onchange="scansUpdateBulkBtn()">
+          <input type="checkbox" class="scan-checkbox" data-id="${s.id}" style="accent-color:var(--accent);flex-shrink:0" data-change="scansUpdateBulkBtn">
           <div class="scan-indicator ${live}"></div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:500;font-size:12px">${target}</div>
@@ -254,7 +260,7 @@ async function loadScans() {
           ${typeBadge}
           ${statusTag}
           ${cancelBtn}
-          <button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" onclick="deleteScanRun(${s.id})" title="Delete">✕</button>
+          <button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="deleteScanRun" data-args="[${s.id}]" title="Delete">✕</button>
         </div>`;
     }).join("")}`;
 
@@ -405,7 +411,7 @@ async function loadSchedules() {
     return `
       <div class="scan-card" style="align-items:center">
         <label class="switch" title="${s.enabled ? "Enabled" : "Disabled"}" style="flex-shrink:0">
-          <input type="checkbox" ${s.enabled ? "checked" : ""} onchange="toggleSchedule(${s.id}, this.checked)">
+          <input type="checkbox" ${s.enabled ? "checked" : ""} data-change="toggleScheduleBox" data-args="[${s.id}]">
           <span class="switch-slider"></span>
         </label>
         <div style="flex:1;min-width:0">
@@ -415,9 +421,9 @@ async function loadSchedules() {
           </div>
           <div style="font-size:10px;color:var(--text-3);margin-top:1px">${last} · ${next}</div>
         </div>
-        <button class="btn" style="font-size:11px;padding:3px 9px;flex-shrink:0" onclick="runScheduleNow(${s.id})" title="Run now">▶ Run now</button>
-        <button class="btn-ghost" style="font-size:12px;padding:2px 7px;flex-shrink:0" onclick="editSchedule(${s.id})" title="Edit">✎</button>
-        <button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" onclick="deleteSchedule(${s.id})" title="Delete">✕</button>
+        <button class="btn" style="font-size:11px;padding:3px 9px;flex-shrink:0" data-click="runScheduleNow" data-args="[${s.id}]" title="Run now">▶ Run now</button>
+        <button class="btn-ghost" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="editSchedule" data-args="[${s.id}]" title="Edit">✎</button>
+        <button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="deleteSchedule" data-args="[${s.id}]" title="Delete">✕</button>
       </div>`;
   }).join("");
 }
@@ -541,3 +547,13 @@ async function runScheduleNow(id) {
   } catch (e) { showToast("Failed: " + e.message); }
 }
 
+
+registerActions({
+  setScanTab, applyScanProfile, deleteScanProfile, onScanFieldChange, updateScanPreview,
+  saveScanProfile, runScanFromBuilder, openScheduleEditor, clearChanges,
+  onSchedFilterChange, onSchedTimingChange, closeScheduleEditor, saveSchedule,
+  scansDeleteSelected, scansUpdateBulkBtn, cancelScanRun, deleteScanRun,
+  runScheduleNow, editSchedule, deleteSchedule, openChangeHost,
+  scansToggleAllBox: function () { scansToggleAll(this.checked); },
+  toggleScheduleBox: function (id) { toggleSchedule(id, this.checked); },
+});

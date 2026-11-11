@@ -592,3 +592,5 @@ async function loadGraph() {
   if (typeof renderGraph === "function") renderGraph(nodes, edges);
 }
 
+
+registerActions({ showHostDetail });
