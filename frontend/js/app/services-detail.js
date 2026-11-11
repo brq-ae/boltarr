@@ -240,7 +240,7 @@ function renderDepsModal(svcId) {
         <span style="flex:1;font-size:12px">${t ? escHtml(t.name) : `#${d.to_service_id}`}
           ${t ? `<span style="font-size:10px;color:var(--text-3)"> — ${escHtml(t.hostname || t.ip)}</span>` : ""}
         </span>
-        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" onclick="removeSvcDep(${d.id},${id})">✕</button>
+        <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" data-click="removeSvcDep" data-args="[${d.id},${id}]">✕</button>
       </div>`;
     }).join("");
   }
@@ -300,7 +300,9 @@ function showSvcDetail(id) {
   document.getElementById("svcDetailPort").value        = s.port || "";
   const proto = document.getElementById("svcDetailProto");
   if (proto) proto.value = s.protocol || "tcp";
-  document.getElementById("svcDetailUrl").value         = s.url || "";
+  const urlEl = document.getElementById("svcDetailUrl");
+  urlEl.value        = s.url || "";
+  urlEl.dataset.auto = svcAutoUrlIp(s.url, [s.container_ip, s.ip], s.port) ? s.url : "";
   document.getElementById("svcDetailContainerIp").value = s.container_ip || "";
   document.getElementById("svcDetailCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
   svcDetailCheckChanged();
@@ -361,7 +363,7 @@ async function loadSvcUptime(id, monitored) {
     } else {
       outages = `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
     }
-    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" onclick="resetSvcUptime(${id})">↺ Reset uptime</button></div>`;
+    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetSvcUptime" data-args="[${id}]">↺ Reset uptime</button></div>`;
   } catch (e) {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }
@@ -472,9 +474,9 @@ async function saveSvcDetail() {
     });
     await saveSvcPublic();   // public toggle + public name (dedicated, safe endpoint)
     allServices = allServices.map(s => s.id === svcDetailId ? { ...s, ...svc } : s);
-    const hostIp = allServices.find(s => s.id === svcDetailId)?.ip;
+    const rowIp = allServices.find(s => s.id === svcDetailId)?.ip;
     const row = document.getElementById(`svc-row-${svcDetailId}`);
-    if (row) row.outerHTML = svcRowHTML(svc, hostIp || svc.ip);
+    if (row) row.outerHTML = svcRowHTML(svc, rowIp || svc.ip);
     renderServicesTable();
     if (currentSvcTab === "topology") renderSvcTopology();
     _setSvcDetailIcon(name);
@@ -536,7 +538,7 @@ function openBulkAddContainers() {
   grid.innerHTML = containers.map(h => {
     const label = h.hostname || h.ip;
     const sub   = h.hostname ? h.ip : "";
-    return `<div class="container-chip" id="bulk-chip-${h.ip.replace(/\./g,'_')}" onclick="toggleBulkChip(${jsq(h.ip)},${jsq(label)})">
+    return `<div class="container-chip" id="bulk-chip-${h.ip.replace(/\./g,'_')}" data-click="toggleBulkChip" data-args="${dargs(h.ip, label)}">
       <span class="container-chip-name">${escHtml(label)}</span>
       ${sub ? `<span class="container-chip-ip">${escHtml(sub)}</span>` : ""}
     </div>`;
@@ -655,4 +657,11 @@ async function deleteConnFromEdit() {
   closeEditConn();
 }
 
-registerActions({ resetAllUptime });
+registerActions({
+  resetAllUptime, resetSvcUptime, showSvcDetail, hideSvcDetail, saveSvcDetail, deleteSvcDetail,
+  cycleSvcDetailStatus, toggleSvcMonitor, toggleSvcPublicName, updateSvcDetailUrlBtn,
+  openBulkAddContainers, bulkSelectAll, bulkAddContainers, toggleBulkChip,
+  addSvcDep, removeSvcDep, closeDepsModal, toggleLinkHostsForm, saveHostLink, deleteSelectedHostLink,
+  editSvcDetail: () => openEditService(svcDetailId),
+  closeBulkAdd:  () => document.getElementById("bulkAddModal").classList.remove("open"),
+});

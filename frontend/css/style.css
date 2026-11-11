@@ -499,6 +499,10 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 input::placeholder { color: var(--text-3); }
 textarea { resize: vertical; min-height: 72px; line-height: 1.5; }
 select { cursor: pointer; }
+/* The open list of a select with a see-through background (service panel, inline
+   cell editors) would fall back to the browser's white: give options the dark colours. */
+select option { background: var(--surface2); color: var(--text); }
+select:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ── Content area ──────────────────────────────────────────────────────────── */
 .content-area {

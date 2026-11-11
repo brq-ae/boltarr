@@ -436,8 +436,8 @@
       <div class="tab-panel" id="panel-services">
         <div class="svc-toolbar">
           <div class="svc-subtabs">
-            <button class="svc-subtab active" id="svcTabBtn-list" onclick="setSvcTab('list')">List</button>
-            <button class="svc-subtab" id="svcTabBtn-topology" onclick="setSvcTab('topology')">Topology</button>
+            <button class="svc-subtab active" id="svcTabBtn-list" data-click="setSvcTab" data-args='["list"]'>List</button>
+            <button class="svc-subtab" id="svcTabBtn-topology" data-click="setSvcTab" data-args='["topology"]'>Topology</button>
           </div>
           <select id="svcHostFilter" class="search-input" style="max-width:170px;flex-shrink:0">
             <option value="">All hosts</option>
@@ -463,22 +463,22 @@
               <button type="button" data-export="services" data-fmt="json">JSON <span>for scripts</span></button>
             </div>
           </div>
-          <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" onclick="svcDeleteSelected()">Delete selected</button>
-          <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openBulkAddContainers()">⊕ Bulk</button>
-          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="openAddService()">+ Service</button>
+          <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" data-click="svcDeleteSelected">Delete selected</button>
+          <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openBulkAddContainers">⊕ Bulk</button>
+          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openAddService">+ Service</button>
         </div>
         <div id="svc-panel-list" class="table-wrap">
           <table id="servicesTable">
             <thead>
               <tr>
-                <th class="td-check"><input type="checkbox" id="svcSelectAll" onchange="svcToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
+                <th class="td-check"><input type="checkbox" id="svcSelectAll" data-change="svcToggleAllBox" style="accent-color:var(--accent)"></th>
                 <th class="col-svc-icon"></th>
-                <th class="col-svc-name" onclick="sortServices('name')">Service</th>
-                <th class="col-svc-host" onclick="sortServices('ip')">Host</th>
-                <th class="col-svc-ps" onclick="sortServices('port')">Port / Status</th>
+                <th class="col-svc-name" data-click="sortServices" data-args='["name"]'>Service</th>
+                <th class="col-svc-host" data-click="sortServices" data-args='["ip"]'>Host</th>
+                <th class="col-svc-ps" data-click="sortServices" data-args='["port"]'>Port / Status</th>
                 <th class="col-svc-mon">Monitor</th>
                 <th class="col-svc-pub">Public</th>
-                <th class="col-svc-url" onclick="sortServices('url')">URL</th>
+                <th class="col-svc-url" data-click="sortServices" data-args='["url"]'>URL</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -486,17 +486,17 @@
         </div>
         <div id="svc-panel-topology" style="display:none;flex:1;position:relative;min-height:0;flex-direction:column">
           <div id="svcTopoToolbar" style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);flex-shrink:0">
-            <button class="btn" style="font-size:11px;padding:4px 10px" onclick="toggleLinkHostsForm()">↔ Link Hosts</button>
+            <button class="btn" style="font-size:11px;padding:4px 10px" data-click="toggleLinkHostsForm">↔ Link Hosts</button>
             <div id="linkHostsForm" style="display:none;align-items:center;gap:6px;flex-wrap:wrap">
               <select id="linkSrc" class="search-input" style="max-width:160px"></select>
               <span style="color:var(--text-3);font-size:12px">→ nested in</span>
               <select id="linkDst" class="search-input" style="max-width:160px"></select>
-              <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" onclick="saveHostLink()">Add</button>
-              <button class="btn-ghost" style="font-size:11px;padding:4px 8px" onclick="toggleLinkHostsForm()">Cancel</button>
+              <button class="btn btn-primary" style="font-size:11px;padding:4px 10px" data-click="saveHostLink">Add</button>
+              <button class="btn-ghost" style="font-size:11px;padding:4px 8px" data-click="toggleLinkHostsForm">Cancel</button>
             </div>
             <span id="svcTopoEdgeActions" style="display:none;align-items:center;gap:6px;margin-left:auto">
               <span id="svcTopoEdgeLabel" style="font-size:11px;color:var(--text-3)"></span>
-              <button class="btn btn-danger" style="font-size:11px;padding:3px 8px" onclick="deleteSelectedHostLink()">✕ Remove link</button>
+              <button class="btn btn-danger" style="font-size:11px;padding:3px 8px" data-click="deleteSelectedHostLink">✕ Remove link</button>
             </span>
           </div>
           <div id="svcTopoCanvas" style="flex:1;min-height:0"></div>
@@ -999,7 +999,7 @@
 
     <!-- Container quick-pick (shown only when adding, hidden when editing) -->
     <div id="containerPickRow" style="margin-bottom:14px">
-      <button class="container-pick-toggle" id="containerPickToggle" onclick="toggleContainerPick()">
+      <button class="container-pick-toggle" id="containerPickToggle" data-click="toggleContainerPick">
         <span id="containerPickChevron">▸</span> Import from container hosts
       </button>
       <div id="containerPickList" style="display:none;margin-top:8px;display:none"></div>
@@ -1007,7 +1007,7 @@
 
     <div class="form-row" id="svcHostRow">
       <label>Host (runs on)</label>
-      <select id="svcHostIp" onchange="autoFillSvcUrlModal()"></select>
+      <select id="svcHostIp" data-change="autoFillSvcUrlModal"></select>
     </div>
     <div class="form-2col">
       <div class="form-row">
@@ -1015,7 +1015,7 @@
         <input type="text" id="svcName" placeholder="e.g. Plex, OpenWebUI">
       </div>
       <div class="form-row">
-        <label>Status</label>
+        <label>Status <span id="svcStatusAuto" style="color:var(--text-3);font-weight:400;text-transform:none" hidden>(set automatically while monitored)</span></label>
         <select id="svcStatus">
           <option value="unknown">Unknown</option>
           <option value="running">Running</option>
@@ -1026,7 +1026,7 @@
     <div class="form-2col">
       <div class="form-row">
         <label>Port <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
-        <input type="number" id="svcPort" placeholder="8080" class="mono" oninput="autoFillSvcUrlModal()">
+        <input type="number" id="svcPort" placeholder="8080" class="mono" data-input="autoFillSvcUrlModal">
       </div>
       <div class="form-row">
         <label>Protocol</label>
@@ -1035,7 +1035,7 @@
     </div>
     <div class="form-row">
       <label>Monitor check <span style="color:var(--text-3);font-weight:400;text-transform:none">(how it's probed)</span></label>
-      <select id="svcCheckType" onchange="svcCheckTypeChanged()">
+      <select id="svcCheckType" data-change="svcCheckTypeChanged">
         <option value="http">HTTP(S) — request a URL</option>
         <option value="tcp">TCP — connect to a port</option>
         <option value="icmp">Ping (ICMP) — is the IP reachable</option>
@@ -1047,7 +1047,7 @@
     </div>
     <div class="form-row" id="svcUrlRow">
       <label>URL <span style="color:var(--text-3);font-weight:400;text-transform:none">(used by HTTP check)</span></label>
-      <input type="text" id="svcUrl" placeholder="http://192.168.1.10:8080" oninput="if(this.value!==this.dataset.auto)this.dataset.auto=''">
+      <input type="text" id="svcUrl" placeholder="http://192.168.1.10:8080" data-input="svcUrlTyped">
     </div>
     <div class="form-row">
       <label>Description <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
@@ -1057,13 +1057,13 @@
       <div class="form-row">
         <label>Monitor</label>
         <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:32px">
-          <input type="checkbox" id="svcModalMonitored"> <span style="font-size:12px">Watch this service</span>
+          <input type="checkbox" id="svcModalMonitored" data-change="svcModalMonitorToggled"> <span style="font-size:12px">Monitor this service</span>
         </label>
       </div>
       <div class="form-row">
         <label>Public status page</label>
         <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:32px">
-          <input type="checkbox" id="svcModalPublic" onchange="svcModalPublicToggled()"> <span style="font-size:12px">Show publicly</span>
+          <input type="checkbox" id="svcModalPublic" data-change="svcModalPublicToggled"> <span style="font-size:12px">Show publicly</span>
         </label>
       </div>
     </div>
@@ -1072,9 +1072,9 @@
       <input type="text" id="svcModalPublicName" placeholder="Defaults to the service name">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-danger" id="svcDeleteBtn" onclick="deleteServiceFromModal()" style="display:none">Delete</button>
-      <button class="btn" onclick="closeServiceModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveServiceModal()">Save</button>
+      <button class="btn btn-danger" id="svcDeleteBtn" data-click="deleteServiceFromModal" style="display:none">Delete</button>
+      <button class="btn" data-click="closeServiceModal">Cancel</button>
+      <button class="btn btn-primary" data-click="saveServiceModal">Save</button>
     </div>
   </div>
 </div>
@@ -1619,13 +1619,13 @@
   <div class="svc-detail-header">
     <div id="svcDetailIcon" class="svc-icon" style="width:34px;height:34px;font-size:15px;flex-shrink:0;border-radius:8px"></div>
     <input class="svc-detail-name-input" id="svcDetailName" type="text" placeholder="Service name">
-    <button class="svc-status" id="svcDetailStatusBtn" onclick="cycleSvcDetailStatus()">unknown</button>
+    <button class="svc-status" id="svcDetailStatusBtn" data-click="cycleSvcDetailStatus">unknown</button>
     <div class="svc-detail-actions">
       <a id="svcDetailUrlBtn" href="#" target="_blank" class="btn-ghost" style="font-size:11px;padding:3px 8px;display:none">↗ URL</a>
-      <button class="btn-ghost" style="font-size:11px;padding:3px 8px" onclick="openEditService(svcDetailId)" title="Open the full edit dialog">✎ Edit</button>
-      <button class="btn btn-primary" style="font-size:11px;padding:4px 11px" onclick="saveSvcDetail()">Save</button>
-      <button class="btn-ghost btn-danger" style="font-size:12px;padding:3px 8px" onclick="deleteSvcDetail()">Delete</button>
-      <button class="btn-ghost" onclick="hideSvcDetail()" style="font-size:17px;padding:1px 7px;line-height:1">×</button>
+      <button class="btn-ghost" style="font-size:11px;padding:3px 8px" data-click="editSvcDetail" title="Open the full edit dialog">✎ Edit</button>
+      <button class="btn btn-primary" style="font-size:11px;padding:4px 11px" data-click="saveSvcDetail">Save</button>
+      <button class="btn-ghost btn-danger" style="font-size:12px;padding:3px 8px" data-click="deleteSvcDetail">Delete</button>
+      <button class="btn-ghost" data-click="hideSvcDetail" style="font-size:17px;padding:1px 7px;line-height:1">×</button>
     </div>
   </div>
   <div class="svc-detail-body">
@@ -1635,7 +1635,7 @@
     </div>
     <div class="svc-detail-field">
       <label>Port</label>
-      <input type="number" id="svcDetailPort" class="mono" placeholder="—" style="width:72px">
+      <input type="number" id="svcDetailPort" class="mono" placeholder="—" style="width:72px" data-input="svcDetailPortTyped">
     </div>
     <div class="svc-detail-field">
       <label>Protocol</label>
@@ -1643,7 +1643,7 @@
     </div>
     <div class="svc-detail-field">
       <label>Monitor check</label>
-      <select id="svcDetailCheckType" onchange="svcDetailCheckChanged()">
+      <select id="svcDetailCheckType" data-change="svcDetailCheckChanged">
         <option value="http">HTTP(S)</option>
         <option value="tcp">TCP</option>
         <option value="icmp">Ping (ICMP)</option>
@@ -1656,7 +1656,7 @@
     <div class="svc-detail-field">
       <label>Monitor</label>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:26px">
-        <input type="checkbox" id="svcDetailMonitored" onchange="toggleSvcMonitor()">
+        <input type="checkbox" id="svcDetailMonitored" data-change="toggleSvcMonitor">
         <span id="svcDetailMonitorDot" class="mon-dot mon-unknown"></span>
         <span id="svcDetailMonitorText" style="font-size:11px;color:var(--text-3)">off</span>
       </label>
@@ -1664,7 +1664,7 @@
     <div class="svc-detail-field">
       <label>Public status page</label>
       <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:26px" title="Show this service on the public status page (requires Monitor on)">
-        <input type="checkbox" id="svcDetailPublic" onchange="toggleSvcPublicName()">
+        <input type="checkbox" id="svcDetailPublic" data-change="toggleSvcPublicName">
         <span style="font-size:11px;color:var(--text-3)">show publicly</span>
       </label>
     </div>
@@ -1674,7 +1674,7 @@
     </div>
     <div class="svc-detail-field svc-detail-field-wide">
       <label>URL</label>
-      <input type="text" id="svcDetailUrl" placeholder="http://…" oninput="updateSvcDetailUrlBtn()">
+      <input type="text" id="svcDetailUrl" placeholder="http://…" data-input="svcDetailUrlTyped">
     </div>
     <div class="svc-detail-field svc-detail-field-wide">
       <label>Description</label>
@@ -1702,12 +1702,12 @@
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
       <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-3)">Container hosts</div>
-      <button class="btn-ghost" style="font-size:11px;padding:2px 8px" onclick="bulkSelectAll()">Select all</button>
+      <button class="btn-ghost" style="font-size:11px;padding:2px 8px" data-click="bulkSelectAll">Select all</button>
     </div>
     <div id="bulkContainerGrid" class="container-pick-grid" style="margin-bottom:16px;max-height:220px;overflow-y:auto"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="document.getElementById('bulkAddModal').classList.remove('open')">Cancel</button>
-      <button class="btn btn-primary" id="bulkAddBtn" onclick="bulkAddContainers()" disabled>Add selected</button>
+      <button class="btn" data-click="closeBulkAdd">Cancel</button>
+      <button class="btn btn-primary" id="bulkAddBtn" data-click="bulkAddContainers" disabled>Add selected</button>
     </div>
   </div>
 </div>
@@ -1724,10 +1724,10 @@
     <div id="depsList" style="margin-bottom:12px"></div>
     <div style="display:flex;gap:8px;margin-bottom:4px">
       <select id="depsAddSelect" class="search-input" style="flex:1"></select>
-      <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" onclick="addSvcDep()">Add</button>
+      <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="addSvcDep">Add</button>
     </div>
     <div class="modal-actions" style="margin-top:16px">
-      <button class="btn" onclick="closeDepsModal()">Done</button>
+      <button class="btn" data-click="closeDepsModal">Done</button>
     </div>
   </div>
 </div>

@@ -117,12 +117,15 @@ def test_no_inline_handlers_in_converted_areas():
     for start, end in [('id="factoryResetModal"', 'class="topbar"'),
                        ('id="panel-scans"', 'id="panel-services"'),
                        ('id="scheduleModal"', 'id="subnetModal"'),
+                       ('id="panel-services"', 'id="panel-sshkeys"'),
+                       ('id="serviceModal"', 'id="editConnModal"'),
+                       ('id="svcDetailPanel"', '<script src='),
                        ('id="panel-sshkeys"', 'id="panel-search"'),
                        ('id="settingsModal"', 'id="svcDetailPanel"')]:
         a = html.index(start)
         part = html[a:html.index(end, a)]
         assert not re.findall(r"\son[a-z]+=", part), start
-    for f in ["settings", "ssh", "scans"]:
+    for f in ["settings", "ssh", "scans", "services", "services-detail"]:
         assert not re.findall(r"\son[a-z]+=", (fe / "js" / "app" / f"{f}.js").read_text()), f
     # every action named in the page is registered by some app file
     js = "".join((fe / "js" / "app" / f"{f}.js").read_text() for f in APP_FILES)

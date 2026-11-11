@@ -10,7 +10,7 @@ import tempfile
 import sqlite3 as _sqlite3
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
@@ -1288,12 +1288,15 @@ def delete_port(port_id: int):
 
 # ── Services ──────────────────────────────────────────────────────────────────
 
+SvcStatus = Literal["running", "stopped", "unknown"]   # what the monitor writes too
+
+
 class ServiceIn(BaseModel):
     name:         str
     description:  Optional[str] = None
     port:         Optional[int] = None
     protocol:     Optional[str] = "tcp"
-    status:       Optional[str] = "unknown"
+    status:       Optional[SvcStatus] = "unknown"
     url:          Optional[str] = None
     icon:         Optional[str] = None
     container_ip: Optional[str] = None
@@ -1305,7 +1308,7 @@ class ServiceUpdate(BaseModel):
     description:  Optional[str] = None
     port:         Optional[int] = None
     protocol:     Optional[str] = None
-    status:       Optional[str] = None
+    status:       Optional[SvcStatus] = None
     url:          Optional[str] = None
     icon:         Optional[str] = None
     monitored:    Optional[bool] = None

@@ -3,6 +3,18 @@
 
 // ── Services ──────────────────────────────────────────────────────────────────
 
+// The URL Boltarr builds for a port: https for 443/8443, http otherwise.
+function svcAutoUrl(ip, port) {
+  const scheme = (port === 443 || port === 8443) ? "https" : "http";
+  return `${scheme}://${ip}:${port}`;
+}
+// The IP in `url` if it is exactly the URL Boltarr builds for that port, else null.
+// Such a URL follows port changes; one the user wrote never does.
+function svcAutoUrlIp(url, ips, port) {
+  port = parseInt(port);
+  return (url && port && ips.find(ip => ip && url === svcAutoUrl(ip, port))) || null;
+}
+
 function autoFillSvcUrl(ip, portVal, urlFieldId) {
   const urlEl = document.getElementById(urlFieldId);
   if (!urlEl) return;
@@ -10,16 +22,24 @@ function autoFillSvcUrl(ip, portVal, urlFieldId) {
   if (urlEl.value && urlEl.value !== urlEl.dataset.auto) return;
   const port = parseInt(portVal);
   if (!port) { if (urlEl.value === urlEl.dataset.auto) { urlEl.value = ""; urlEl.dataset.auto = ""; } return; }
-  const scheme = (port === 443 || port === 8443) ? "https" : "http";
-  const generated = `${scheme}://${ip}:${port}`;
+  const generated = svcAutoUrl(ip, port);
   urlEl.value = generated;
   urlEl.dataset.auto = generated;
 }
 
 function autoFillSvcUrlModal() {
-  const ip   = document.getElementById("svcHostIp")?.value;
+  if (document.getElementById("svcCheckType").value !== "http") return;   // only web checks use the URL
+  const ip   = document.getElementById("svcContainerIp").value.trim() || document.getElementById("svcHostIp")?.value;
   const port = document.getElementById("svcPort")?.value;
   if (ip) autoFillSvcUrl(ip, port, "svcUrl");
+}
+
+// Panel: same auto-fill when the port is typed.
+function svcDetailPortTyped() {
+  if (document.getElementById("svcDetailCheckType").value !== "http") return;
+  const ip = document.getElementById("svcDetailContainerIp").value.trim() || document.getElementById("svcDetailHost").value;
+  if (ip) autoFillSvcUrl(ip, document.getElementById("svcDetailPort").value, "svcDetailUrl");
+  updateSvcDetailUrlBtn();
 }
 
 function svcIconHTML(name, size = 26) {
@@ -37,15 +57,15 @@ function svcRowHTML(s, hostIp) {
     <span class="svc-name">${escHtml(s.name)}${s.description ? `<br><span class="svc-desc">${escHtml(s.description)}</span>` : ""}</span>
     <div class="svc-port-status" style="align-items:flex-end">
       ${portBadge}
-      <button class="svc-status ${escHtml(s.status)}" onclick="cycleServiceStatus(${s.id},${jsq(s.status)},${jsq(hostIp)})">${escHtml(s.status)}</button>
+      <button class="svc-status ${escHtml(s.status)}" data-click="cycleServiceStatus" data-args="${dargs(s.id, s.status, hostIp)}">${escHtml(s.status)}</button>
     </div>
     <div class="svc-actions">
-      <button class="svc-kebab" onclick="toggleSvcMenu('r${s.id}')" title="Actions">⋮</button>
+      <button class="svc-kebab" data-click="toggleSvcMenu" data-args="${dargs("r" + s.id)}" title="Actions">⋮</button>
       <div class="svc-menu" id="svcmenu-r${s.id}">
         ${s.url ? `<a href="${safeUrl(s.url)}" target="_blank" rel="noopener" class="svc-menu-item">↗ Open URL</a>` : ""}
-        <button class="svc-menu-item" onclick="closeSvcMenus();openManageDeps(${s.id})">⊕ Dependencies</button>
-        <button class="svc-menu-item" onclick="closeSvcMenus();openEditService(${s.id})">✎ Edit</button>
-        <button class="svc-menu-item danger" onclick="closeSvcMenus();deleteSvc(${s.id},${jsq(hostIp)})">✕ Delete</button>
+        <button class="svc-menu-item" data-click="svcMenuDeps" data-args="[${s.id}]">⊕ Dependencies</button>
+        <button class="svc-menu-item" data-click="svcMenuEdit" data-args="[${s.id}]">✎ Edit</button>
+        <button class="svc-menu-item danger" data-click="svcMenuDelete" data-args="${dargs(s.id, hostIp)}">✕ Delete</button>
       </div>
     </div>
   </div>`;
@@ -60,7 +80,7 @@ async function cycleServiceStatus(id, current, hostIp) {
 
 function svcMonToggle(s) {
   const on = !!s.monitored;
-  return `<button class="svc-toggle ${on ? 'on' : ''}" onclick="event.stopPropagation();svcRowToggleMonitor(${s.id})" title="${on ? 'Monitoring on — status is set automatically' : 'Monitoring off — status is manual'}">${on ? 'On' : 'Off'}</button>`;
+  return `<button class="svc-toggle ${on ? 'on' : ''}" data-click="svcRowToggleMonitor" data-args="[${s.id}]" title="${on ? 'Monitoring on — status is set automatically' : 'Monitoring off — status is manual'}">${on ? 'On' : 'Off'}</button>`;
 }
 async function svcRowToggleMonitor(id) {
   const s = allServices.find(x => x.id === id);
@@ -77,7 +97,7 @@ async function svcRowToggleMonitor(id) {
 
 function svcPubToggle(s) {
   const on = !!s.public;
-  return `<button class="svc-toggle ${on ? 'on' : ''}" onclick="event.stopPropagation();svcRowTogglePublic(${s.id})" title="${on ? 'Shown on the public status page' : 'Not public'}">${on ? 'On' : 'Off'}</button>`;
+  return `<button class="svc-toggle ${on ? 'on' : ''}" data-click="svcRowTogglePublic" data-args="[${s.id}]" title="${on ? 'Shown on the public status page' : 'Not public'}">${on ? 'On' : 'Off'}</button>`;
 }
 async function svcRowTogglePublic(id) {
   const s = allServices.find(x => x.id === id);
@@ -93,7 +113,7 @@ async function svcRowTogglePublic(id) {
 }
 
 function svcPortProtoPencil(id) {
-  return `<button class="cell-edit" title="Edit port / protocol" onclick="event.stopPropagation();editSvcPortProto(${id},this)">✎</button>`;
+  return `<button class="cell-edit" title="Edit port / protocol" data-click="editSvcPortProtoBtn" data-args="[${id}]">✎</button>`;
 }
 function editSvcPortProto(id, btn) {
   const s = allServices.find(x => x.id === id);
@@ -137,13 +157,20 @@ function editSvcPortProto(id, btn) {
 async function saveSvcPortProto(id, port, proto) {
   const s = allServices.find(x => x.id === id);
   const prevPort = s ? s.port : null, prevProto = s ? s.protocol : null;
-  if (s) { s.port = port; s.protocol = proto; }
-  renderServicesTable();
+  const prevUrl = s ? s.url : null;
   const payload = { port, protocol: proto };
+  if (s && port) {   // a URL built from the old port (or none, on a web check) follows the new port
+    const ip = svcAutoUrlIp(s.url, [s.container_ip, s.ip], prevPort);
+    const ct = s.check_type || (s.url ? "http" : "tcp");
+    if (ip) payload.url = svcAutoUrl(ip, port);
+    else if (!s.url && ct === "http") payload.url = svcAutoUrl(s.container_ip || s.ip, port);
+  }
+  if (s) { s.port = port; s.protocol = proto; if ("url" in payload) s.url = payload.url; }
+  renderServicesTable();
   try {
     await api("PUT", `/api/services/${id}`, payload);
   } catch (e) {
-    if (s) { s.port = prevPort; s.protocol = prevProto; }
+    if (s) { s.port = prevPort; s.protocol = prevProto; s.url = prevUrl; }
     await loadServicesData(); renderServicesTable();
   }
 }
@@ -195,7 +222,7 @@ function populateSvcHostSelect(selectedIp) { _fillHostSelect(document.getElement
 // fields visible. HTTP → uses URL; TCP → target IP + port; ICMP → target IP only.
 function _applyCheckGrey(ct, ids) {
   const use = {
-    http: { url: true,  target: false, port: false },
+    http: { url: true,  target: false, port: true  },   // port stays usable: it fills in the URL
     tcp:  { url: false, target: true,  port: true  },
     icmp: { url: false, target: true,  port: false },
   }[ct] || { url: true, target: true, port: true };
@@ -212,6 +239,14 @@ function _applyCheckGrey(ct, ids) {
 }
 
 // Modal: grey the unused fields when the check type changes.
+// While monitored, the monitor sets the status: the dropdown is shown but locked.
+function svcModalMonitorToggled() {
+  const on = document.getElementById("svcModalMonitored").checked;
+  const sel = document.getElementById("svcStatus");
+  sel.disabled = on;
+  document.getElementById("svcStatusAuto").hidden = !on;
+}
+
 function svcCheckTypeChanged() {
   const ct = document.getElementById("svcCheckType").value;
   _applyCheckGrey(ct, { url: "svcUrl", target: "svcContainerIp", port: "svcPort" });
@@ -240,11 +275,12 @@ function openEditService(id) {
   document.getElementById("svcStatus").value    = s.status || "unknown";
   const urlEl = document.getElementById("svcUrl");
   urlEl.value = s.url || "";
-  urlEl.dataset.auto = "";
+  urlEl.dataset.auto = svcAutoUrlIp(s.url, [s.container_ip, s.ip], s.port) ? s.url : "";
   document.getElementById("svcContainerIp").value = s.container_ip || "";
   document.getElementById("svcCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
   svcCheckTypeChanged();
   document.getElementById("svcModalMonitored").checked = !!s.monitored;
+  svcModalMonitorToggled();
   document.getElementById("svcModalPublic").checked    = !!s.public;
   document.getElementById("svcModalPublicName").value  = s.public_name || "";
   svcModalPublicToggled();
@@ -270,6 +306,7 @@ function openAddService(presetIp) {
   document.getElementById("svcCheckType").value   = "http";
   svcCheckTypeChanged();
   document.getElementById("svcModalMonitored").checked = false;
+  svcModalMonitorToggled();
   document.getElementById("svcModalPublic").checked    = false;
   document.getElementById("svcModalPublicName").value  = "";
   svcModalPublicToggled();
@@ -303,7 +340,7 @@ function renderContainerPick() {
     containers.map(h => {
       const label = h.hostname || h.ip;
       const sub   = h.hostname ? h.ip : "";
-      return `<div class="container-chip" onclick="pickContainer(${jsq(h.ip)},${jsq(label)})">
+      return `<div class="container-chip" data-click="pickContainer" data-args="${dargs(h.ip, label)}">
         <span class="container-chip-name">${escHtml(label)}</span>
         ${sub ? `<span class="container-chip-ip">${escHtml(sub)}</span>` : ""}
       </div>`;
@@ -453,8 +490,8 @@ function renderServicesTable() {
   }
 
   tbody.innerHTML = rows.map(s => `
-    <tr id="svc-tr-${s.id}" style="cursor:pointer" onclick="showSvcDetail(${s.id})">
-      <td class="td-check"><input type="checkbox" class="svc-checkbox" data-id="${s.id}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="svcUpdateBulkBtn()"></td>
+    <tr id="svc-tr-${s.id}" style="cursor:pointer" data-click="showSvcDetail" data-args="[${s.id}]">
+      <td class="td-check"><input type="checkbox" class="svc-checkbox" data-id="${s.id}" style="accent-color:var(--accent)" data-stop data-change="svcUpdateBulkBtn"></td>
       <td class="col-svc-icon" style="padding:6px 8px 6px 16px">${svcIconHTML(s.name, 28)}</td>
       <td>
         <div style="font-size:12px;font-weight:500" class="svc-mon-cell">${monDotHTML(s)}<span class="svc-name-txt">${escHtml(s.name)}</span>${svcHostDownTag(s)}${svcEditPencil(s.id,'name')}</div>
@@ -469,7 +506,7 @@ function renderServicesTable() {
           <span class="svc-portproto">${s.port ? `<span class="port-badge mono">${escHtml(s.port)}/${escHtml(s.protocol||"tcp")}</span>` : `<span style="color:var(--text-3);font-size:11px">—</span>`}</span>
           ${s.monitored
             ? `<span class="svc-status ${escHtml(s.status)} locked" title="Set automatically by the monitor">${escHtml(s.status)}</span>`
-            : `<button class="svc-status ${escHtml(s.status)}" onclick="event.stopPropagation();cycleServiceStatus(${s.id},${jsq(s.status)},${jsq(s.ip)})">${escHtml(s.status)}</button>`}
+            : `<button class="svc-status ${escHtml(s.status)}" data-click="cycleServiceStatus" data-args="${dargs(s.id, s.status, s.ip)}">${escHtml(s.status)}</button>`}
           ${svcPortProtoPencil(s.id)}
         </div>
       </td>
@@ -488,7 +525,7 @@ function svcToggleAll(checked) {
 
 // ── Services inline editing (mirrors the Hosts table) ────────────────────────
 function svcEditPencil(id, field) {
-  return `<button class="cell-edit" title="Edit ${field}" onclick="event.stopPropagation();editSvcField(${id},${jsq(field)},this)">✎</button>`;
+  return `<button class="cell-edit" title="Edit ${field}" data-click="editSvcFieldBtn" data-args="${dargs(id, field)}">✎</button>`;
 }
 
 function svcUrlCell(s) {
@@ -496,7 +533,7 @@ function svcUrlCell(s) {
   if (!raw) return `<span class="note-add">＋ url</span>${svcEditPencil(s.id, 'url')}`;
   const full = escHtml(raw);
   const trunc = escHtml(raw.length > 40 ? raw.slice(0, 40) + "…" : raw);
-  return `<a class="note-link svc-url-txt" href="${safeUrl(raw)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${full}">${trunc}</a>${svcEditPencil(s.id, 'url')}`;
+  return `<a class="note-link svc-url-txt" href="${safeUrl(raw)}" target="_blank" rel="noopener" data-stop title="${full}">${trunc}</a>${svcEditPencil(s.id, 'url')}`;
 }
 
 function editSvcField(id, field, btn) {
@@ -702,3 +739,18 @@ function setSvcTab(tab) {
   if (tab === "topology") renderSvcTopology();
 }
 
+registerActions({
+  setSvcTab, sortServices, svcDeleteSelected, openAddService, svcUpdateBulkBtn,
+  autoFillSvcUrlModal, svcCheckTypeChanged, svcModalMonitorToggled, svcModalPublicToggled, toggleContainerPick, pickContainer,
+  deleteServiceFromModal, closeServiceModal, saveServiceModal, svcDetailCheckChanged,
+  cycleServiceStatus, toggleSvcMenu, svcRowToggleMonitor, svcRowTogglePublic,
+  svcToggleAllBox:     function () { svcToggleAll(this.checked); },
+  svcUrlTyped:         function () { if (this.value !== this.dataset.auto) this.dataset.auto = ""; },
+  svcDetailUrlTyped:   function () { ACTIONS.svcUrlTyped.call(this); updateSvcDetailUrlBtn(); },
+  svcDetailPortTyped,
+  svcMenuDeps:         id => { closeSvcMenus(); openManageDeps(id); },
+  svcMenuEdit:         id => { closeSvcMenus(); openEditService(id); },
+  svcMenuDelete:       (id, ip) => { closeSvcMenus(); deleteSvc(id, ip); },
+  editSvcPortProtoBtn: function (id) { editSvcPortProto(id, this); },
+  editSvcFieldBtn:     function (id, field) { editSvcField(id, field, this); },
+});
