@@ -112,7 +112,7 @@ async def generate(prompt: str, model: str = "", system: str = "",
     except LLMError:
         raise
     except Exception as e:
-        raise LLMError(f"AI request failed ({provider}): {e}") from e
+        raise LLMError(f"AI request failed ({provider}): {str(e) or type(e).__name__}") from e
 
     raise LLMError(f"Unknown provider: {provider}")
 
@@ -166,7 +166,7 @@ async def chat(messages: list[dict], model: str = "", system: str = "") -> str:
     except LLMError:
         raise
     except Exception as e:
-        raise LLMError(f"AI request failed ({provider}): {e}") from e
+        raise LLMError(f"AI request failed ({provider}): {str(e) or type(e).__name__}") from e
 
     raise LLMError(f"Unknown provider: {provider}")
 

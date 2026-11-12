@@ -45,7 +45,7 @@ async function loadAppTz() {
 async function openSettings() {
   renderLoginSettings();
   try {
-    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history, security } = await api("GET", "/api/settings");
+    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history, ai_history, security } = await api("GET", "/api/settings");
     document.getElementById("setFrameOrigins").value = (security && security.frame_origins) || "";
     loadCspReports();
     populateTimezones();
@@ -56,6 +56,14 @@ async function openSettings() {
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
     document.getElementById("setModel").value        = llm.model    || "";
+    fillModelSuggestions(AI_MODELS);
+    const ah = ai_history || {};
+    document.getElementById("setAiHistEnabled").checked = ah.enabled !== false;
+    document.getElementById("setAiHistKeep").value      = ah.keep_per_item ?? 10;
+    document.getElementById("setAiHistDays").value      = ah.keep_days ?? 90;
+    aiHistoryChanged();
+    cancelCleanAiHistory();
+    loadAiHistory();
     document.getElementById("setTimeout").value      = llm.timeout      || 120;
     document.getElementById("setLongTimeout").value  = llm.long_timeout || 600;
     onSettingsProviderChange();
@@ -116,8 +124,56 @@ async function openSettings() {
     document.getElementById("setCaOnScan").checked           = ca.on_scan          !== false;
     document.getElementById("setCaDigest").checked           = ca.digest_enabled   !== false;
     document.getElementById("setCaDigestTime").value         = ca.digest_time || "08:00";
+    document.getElementById("setCaDigestServices").checked   = ca.digest_services !== false;
+    document.getElementById("setCaDigestAi").checked         = !!ca.digest_ai;
+    fillDigestModelSelect(ca.digest_ai_model || "");
+    document.getElementById("digestPreview").hidden = true;
   } catch (e) { console.warn("Settings load:", e.message); }
   document.getElementById("settingsModal").classList.add("open");
+}
+
+let _appliedTimer = null;
+function _flashApplied() {
+  const el = document.getElementById("settingsApplied");
+  el.hidden = false;
+  clearTimeout(_appliedTimer);
+  _appliedTimer = setTimeout(() => { el.hidden = true; }, 2500);
+}
+
+// Digest AI model: "" = the default model from Settings → AI, or a model of its own
+function fillDigestModelSelect(current) {
+  const el = document.getElementById("setCaDigestAiModel");
+  const def = AI_DEFAULT_MODEL ? ` (${AI_DEFAULT_MODEL.replace(":latest", "")})` : "";
+  const models = [...AI_MODELS];
+  if (current && !models.includes(current)) models.unshift(current);
+  el.innerHTML = `<option value="">Default model${escHtml(def)}</option>` +
+    models.map(m => `<option value="${escHtml(m)}">${escHtml(m.replace(":latest", ""))}</option>`).join("");
+  el.value = current;
+}
+
+// Shows the digest as it would be sent right now (with the settings on screen,
+// saved or not). Nothing is sent.
+async function previewDigest() {
+  const box = document.getElementById("digestPreview");
+  const ai = document.getElementById("setCaDigestAi").checked;
+  const model = document.getElementById("setCaDigestAiModel").value;
+  const services = document.getElementById("setCaDigestServices").checked;
+  box.hidden = false;
+  box.innerHTML = `<div class="text-3">${ai ? "Asking the AI for a summary… (up to 60 seconds)" : "Building the preview…"}</div>`;
+  try {
+    const d = await api("GET", `/api/digest/preview?ai=${ai ? 1 : 0}&services=${services ? 1 : 0}&model=${encodeURIComponent(model)}`);
+    if (!d.title) {
+      box.innerHTML = `<div class="text-3">Nothing to report from the last 24 hours, so no digest would be sent right now.</div>`;
+      return;
+    }
+    const note = d.ai_error
+      ? `<div class="digest-preview-note">AI summary left out: ${escHtml(d.ai_error)}</div>` : "";
+    box.innerHTML = `${note}<div class="digest-preview-title">${escHtml(d.title)}</div>
+      <pre class="digest-preview-body">${escHtml(d.body)}</pre>
+      <div class="text-3" style="font-size:11px">Preview only — nothing was sent.</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="digest-preview-note">Preview failed: ${escHtml(e.message)}</div>`;
+  }
 }
 
 function closeSettings() {
@@ -195,7 +251,8 @@ async function clearCspReports() {
   loadCspReports();
 }
 
-async function saveSettings() {
+// Save = save and close; Apply = save and keep the window open
+async function saveSettings(keepOpen = false) {
   const payload = {
     provider:     document.getElementById("setProvider").value,
     base_url:     document.getElementById("setBaseUrl").value.trim(),
@@ -252,6 +309,9 @@ async function saveSettings() {
     on_scan:          document.getElementById("setCaOnScan").checked,
     digest_enabled:   document.getElementById("setCaDigest").checked,
     digest_time:      document.getElementById("setCaDigestTime").value,
+    digest_services:  document.getElementById("setCaDigestServices").checked,
+    digest_ai:        document.getElementById("setCaDigestAi").checked,
+    digest_ai_model:  document.getElementById("setCaDigestAiModel").value,
   };
   const generalPayload = { timezone: document.getElementById("setTimezone").value };
   try {
@@ -268,10 +328,11 @@ async function saveSettings() {
         gone_days:  parseInt(document.getElementById("setIphGone").value, 10)  || 60,
       },
       change_alerts:   caPayload,
+      ai_history:      _aiHistoryPayload(),
       security:        { frame_origins: document.getElementById("setFrameOrigins").value.trim() },
     });
     APP_TZ = generalPayload.timezone;
-    closeSettings();
+    if (keepOpen) { _flashApplied(); loadAiHistory(); } else closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
     // times may now render in a different zone — refresh the visible time views
@@ -279,7 +340,7 @@ async function saveSettings() {
     if (document.getElementById("scan-panel-changes")?.style.display !== "none") loadChanges();
     if (document.getElementById("scan-panel-schedules")?.style.display !== "none") loadSchedules();
     if (currentHostsTab === "iphistory" && document.getElementById("panel-hosts").classList.contains("active")) loadIpHistory();
-    showToast("Settings saved");
+    if (!keepOpen) showToast("Settings saved");
   } catch (e) {
     alert("Settings not saved — nothing was changed.\n\n" + e.message);
   }
@@ -346,6 +407,78 @@ async function testNotification() {
   }
 }
 
+// ── AI history (Settings → AI) ───────────────────────────────────────────────
+
+function _aiHistoryPayload() {
+  const keep = parseInt(document.getElementById("setAiHistKeep").value, 10);
+  const days = parseInt(document.getElementById("setAiHistDays").value, 10);
+  return {
+    enabled:       document.getElementById("setAiHistEnabled").checked,
+    keep_per_item: Math.max(1, isNaN(keep) ? 10 : keep),
+    keep_days:     Math.max(0, isNaN(days) ? 90 : days),
+  };
+}
+
+// The warning under the tick follows what's on screen (before Save)
+function aiHistoryChanged() {
+  const { enabled, keep_days } = _aiHistoryPayload();
+  const note = document.getElementById("aiHistOffNote");
+  note.hidden = enabled;
+  note.textContent = keep_days
+    ? `⚠ Saving is off: nothing new is saved, and your saved results are hidden. They'll still be deleted after ${keep_days} days (set above). Turn saving back on to see them again, or click Clean history to delete them now.`
+    : "⚠ Saving is off: nothing new is saved, and your saved results are hidden. They're kept until you click Clean history. Turn saving back on to see them again.";
+}
+
+// The saved count next to Clean history, and the past digests under Preview
+async function loadAiHistory() {
+  try {
+    const { count } = await api("GET", "/api/ai-history");
+    document.getElementById("aiHistCount").textContent =
+      count ? `${count} saved result${count === 1 ? "" : "s"}` : "Nothing saved";
+    document.getElementById("aiHistConfirmText").textContent =
+      `Delete all ${count} saved AI result${count === 1 ? "" : "s"}? This can't be undone.`;
+  } catch (e) { document.getElementById("aiHistCount").textContent = ""; }
+  try {
+    const { digests } = await api("GET", "/api/digest/history");
+    document.getElementById("pastDigests").innerHTML = digests.length
+      ? `<details class="ai-earlier"><summary>Past digests (${digests.length})</summary>${digests.map(d => `
+          <div class="ai-earlier-item">
+            <div class="analysis-meta">${escHtml(aiMeta(d))}</div>
+            <div class="digest-preview-title">${escHtml(d.title)}</div>
+            <div class="explain-text">${escHtml(d.summary || "")}</div>
+            <details class="ai-earlier-full"><summary>Full digest</summary>
+              <pre class="digest-preview-body">${escHtml(d.body)}</pre></details>
+          </div>`).join("")}</details>`
+      : "";
+  } catch (e) { document.getElementById("pastDigests").innerHTML = ""; }
+}
+
+function askCleanAiHistory()    { document.getElementById("aiHistConfirm").hidden = false; }
+function cancelCleanAiHistory() { document.getElementById("aiHistConfirm").hidden = true; }
+
+async function cleanAiHistory() {
+  try {
+    const { deleted } = await api("POST", "/api/ai-history/clean");
+    cancelCleanAiHistory();
+    // the Analyze Network window may still show a deleted result
+    const net = document.getElementById("networkAnalysisResult");
+    if (net && net.dataset.state === "shown") {
+      delete net.dataset.state;
+      net.innerHTML = `<div style="padding:20px 0;font-size:12px;color:var(--text-3);text-align:center">Click "Run Analysis" to analyze the full network with AI.</div>`;
+    }
+    showToast(`Deleted ${deleted} saved AI result${deleted === 1 ? "" : "s"}`);
+    loadAiHistory();
+  } catch (e) { showToast("Clean history failed: " + e.message); }
+}
+
+// Suggestions under the Default Model box: the AI server's models. The box still
+// takes any typed name, for models the server doesn't list.
+function fillModelSuggestions(models) {
+  const list = document.getElementById("setModelList");
+  if (!list) return;
+  list.innerHTML = (models || []).map(m => `<option value="${escHtml(m)}"></option>`).join("");
+}
+
 async function testLLMConnection() {
   const resultEl = document.getElementById("setTestResult");
   resultEl.style.display = "";
@@ -368,6 +501,7 @@ async function testLLMConnection() {
       const mList = result.models?.length ? result.models.slice(0,5).join(", ") : "no models listed";
       resultEl.textContent = `✓ Connected. Models: ${mList}`;
       await loadModels();
+      fillModelSuggestions(result.models || []);
       updateAiStatusDot(true);
     } else {
       resultEl.classList.add("test-fail");
@@ -643,8 +777,10 @@ async function doFactoryReset() {
 }
 
 registerActions({
-  openSettings,
+  openSettings, previewDigest,
+  applySettings: () => saveSettings(true),
   closeSettings, saveSettings, updateTzPreview, toggleCspList, clearCspReports,
+  aiHistoryChanged, askCleanAiHistory, cancelCleanAiHistory, cleanAiHistory,
   onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification,
   generateStatusToken, testStatusPush, downloadBackup, openFactoryReset,
   onResetConfirmInput, closeFactoryReset, doFactoryReset, openBackupModal, closeBackupModal,

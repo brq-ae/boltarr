@@ -1420,7 +1420,8 @@
       </div>
       <div class="form-row">
         <label>Default Model</label>
-        <input id="setModel" type="text" placeholder="llama3.2 · gpt-4o · claude-haiku-4-5-20251001">
+        <input id="setModel" type="text" list="setModelList" autocomplete="off" title="Pick a model from your AI server, or type any name" placeholder="Pick from the list or type a name">
+        <datalist id="setModelList"></datalist>
       </div>
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Timeout&nbsp;(s)</label>
@@ -1430,6 +1431,33 @@
       </div>
       <div id="setTestResult" class="settings-test-result" style="display:none"></div>
       <button class="btn" style="font-size:12px;align-self:flex-start" data-click="testLLMConnection">⚡ Test AI</button>
+
+      <div class="settings-sub">AI history</div>
+      <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">
+        Keeps earlier AI results — host Analyze, Analyze Network, Explain on outages and digest summaries —
+        so you can open them again under "Earlier".
+      </p>
+      <div class="scan-checks" style="padding-left:2px">
+        <label><input type="checkbox" id="setAiHistEnabled" data-change="aiHistoryChanged"> Save AI results</label>
+      </div>
+      <div class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Keep up to</label>
+        <input id="setAiHistKeep" type="number" style="width:70px" min="1" max="1000" value="10" data-input="aiHistoryChanged">
+        <span class="text-3" style="font-size:11px">per item</span>
+        <label style="margin-left:12px">Delete after</label>
+        <input id="setAiHistDays" type="number" style="width:70px" min="0" max="3650" value="90" data-input="aiHistoryChanged">
+        <span class="text-3" style="font-size:11px">days (0 = no time limit)</span>
+      </div>
+      <div id="aiHistOffNote" class="ai-hist-note" hidden></div>
+      <div class="ai-hist-clean">
+        <button class="btn" style="font-size:12px" data-click="askCleanAiHistory">🗑 Clean history</button>
+        <span id="aiHistCount" class="text-3" style="font-size:11px"></span>
+      </div>
+      <div id="aiHistConfirm" class="ai-hist-confirm" hidden>
+        <span id="aiHistConfirmText">Delete all saved AI results? This can't be undone.</span>
+        <button class="btn btn-danger" style="font-size:12px" data-click="cleanAiHistory">Delete</button>
+        <button class="btn" style="font-size:12px" data-click="cancelCleanAiHistory">Cancel</button>
+      </div>
       </div></details>
       <details class="settings-section">
         <summary>📱 Notifications (ntfy)</summary>
@@ -1612,7 +1640,15 @@
         <label><input type="checkbox" id="setCaOnScan"> Summary after each scan</label>
         <label><input type="checkbox" id="setCaDigest"> Daily digest at</label>
         <input id="setCaDigestTime" type="time" value="08:00" style="width:110px">
+        <label title="Monitored services that were down in the last 24 hours, or are down now. Instant down/recovered alerts are set in 📱 Notifications."><input type="checkbox" id="setCaDigestServices"> Include service outages</label>
       </div>
+      <div class="scan-checks" style="padding-left:2px">
+        <label title="Uses your AI server (Settings → AI). If it doesn't answer within 60 seconds, the digest is sent without the summary."><input type="checkbox" id="setCaDigestAi"> Add a short AI summary to the digest</label>
+        <select id="setCaDigestAiModel" title="Which AI model writes the summary" style="font-size:12px;max-width:200px"></select>
+        <button class="btn" style="font-size:12px" data-click="previewDigest" title="Shows what the digest would say right now. Nothing is sent.">Preview digest</button>
+      </div>
+      <div id="digestPreview" class="digest-preview" hidden></div>
+      <div id="pastDigests"></div>
       </div></details>
 
       <details class="settings-section">
@@ -1630,8 +1666,10 @@
       </details>
     </div>
     <div class="modal-actions">
+      <span id="settingsApplied" class="settings-applied" hidden>Saved ✓</span>
       <button class="btn" data-click="closeSettings">Cancel</button>
-      <button class="btn btn-primary" data-click="saveSettings">Save</button>
+      <button class="btn" data-click="applySettings" title="Save and keep this window open">Apply</button>
+      <button class="btn btn-primary" data-click="saveSettings" title="Save and close">Save</button>
     </div>
   </div>
 </div>
@@ -1766,6 +1804,7 @@
 <script src="/js/app/scans.js"></script>
 <script src="/js/app/services.js"></script>
 <script src="/js/app/services-detail.js"></script>
+<script src="/js/app/explain.js"></script>
 <script src="/js/app/topology.js"></script>
 <script src="/js/app/subnets.js"></script>
 <script src="/js/app/settings.js"></script>

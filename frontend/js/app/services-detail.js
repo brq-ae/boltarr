@@ -352,17 +352,7 @@ async function loadSvcUptime(id, monitored) {
       return `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${escHtml(label)}</span></div>`;
     };
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
-    let outages = "";
-    if (d.outages && d.outages.length) {
-      outages = `<div class="outage-list">${d.outages.map(o => {
-        const start = new Date(o.start).toLocaleString();
-        return o.end
-          ? `<span class="outage-item">▾ ${start} — down ${_fmtDur(o.seconds)}</span>`
-          : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
-      }).join("")}</div>`;
-    } else {
-      outages = `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
-    }
+    const outages = outageListHtml("service", id, d.outages);
     el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetSvcUptime" data-args="[${id}]">↺ Reset uptime</button></div>`;
   } catch (e) {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;

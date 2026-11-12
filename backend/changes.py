@@ -6,11 +6,13 @@ toggleable (config), and "port closed" is only recorded for ports the scan
 actually covered so a shallow scan never false-flags a deeper scan's port.
 """
 import os
+import re
+import asyncio
 import ipaddress
 from datetime import datetime, timezone, timedelta, time as _time
 from typing import Optional
 
-from .config import get_change_tracking_config, get_change_alerts_config, get_config, save_config, local_now
+from .config import get_change_tracking_config, get_change_alerts_config, get_config, save_config, local_now, get_timezone
 from .database import get_conn
 from . import notify, dhcp_check
 
@@ -374,22 +376,142 @@ def alert_transition(conn, ip: str, event_type: str) -> None:
                 tags=["red_circle"] if event_type == "host_offline" else ["green_circle"])
 
 
-def send_digest() -> None:
-    """Daily digest: alert-worthy changes from the last 24h."""
+def service_lines() -> list[str]:
+    """Monitored services that were down in the last 24h, or are down now — one line
+    each, newest outage first (a service down several times shows each outage)."""
+    from . import monitor          # monitor imports changes; import here, not at the top
+    tz = get_timezone()
+    today = local_now().date()
+
+    def at(iso):
+        t = datetime.fromisoformat(iso).astimezone(tz)
+        return t.strftime("%H:%M") + ("" if t.date() == today else " yesterday")
+
+    lines = []
+    with get_conn() as conn:
+        svcs = [dict(r) for r in conn.execute(
+            "SELECT s.id, s.name, s.monitor_status, h.ip, h.hostname FROM services s "
+            "JOIN hosts h ON h.id = s.host_id WHERE s.monitored = 1 ORDER BY s.name")]
+    for s in svcs:
+        where = f"{s['name']} on {s['hostname'] or s['ip']}"
+        outs = monitor.outages(s["id"], 86400, limit=5)
+        for o in outs:
+            if o.get("end"):
+                lines.append(f"🟢 {where}: down at {at(o['start'])} for {monitor._fmt_duration(o['seconds'])}, back up")
+            else:
+                lines.append(f"🔴 {where}: down since {at(o['start'])}, still down")
+        if s.get("monitor_status") == "down" and not any(not o.get("end") for o in outs):
+            lines.append(f"🔴 {where}: down right now")
+    return lines
+
+
+def build_digest(mark: bool = True, services: bool | None = None) -> tuple[str, str] | None:
+    """(title, body) of the daily digest: alert-worthy changes from the last 24h, new
+    DHCP warnings and monitored-service outages. None when there is nothing to report.
+    mark=False (preview) leaves the DHCP warnings unreported so the real digest still
+    sends them."""
     since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
     with get_conn() as conn:
         worthy = _worthy_events(conn, "ts > ?", (since,))
         mac_map = _mac_map(conn, worthy) if get_change_alerts_config().get("include_mac") else None
-        dhcp = dhcp_check.digest_lines(conn)       # new DHCP warnings only
-    if worthy or dhcp:
-        n = len(worthy)
-        parts = [f"{n} network change{'s' if n != 1 else ''}"] if worthy else []
-        if dhcp:
-            parts.append(f"{len(dhcp)} DHCP warning{'s' if len(dhcp) != 1 else ''}")
-        body = summarize(worthy, mac_map=mac_map) if worthy else ""
-        if dhcp:
-            body = (body + "\n\n" if body else "") + "DHCP warnings\n" + "\n".join(dhcp)
-        notify.send(title="Daily digest: " + ", ".join(parts), message=body, tags=["sunrise"])
+        dhcp = dhcp_check.digest_lines(conn, mark=mark)   # new DHCP warnings only
+    if services is None:
+        services = get_change_alerts_config().get("digest_services", True)
+    svc = service_lines() if services else []
+    if not worthy and not dhcp and not svc:
+        return None
+    n = len(worthy)
+    parts = [f"{n} network change{'s' if n != 1 else ''}"] if worthy else []
+    if svc:
+        k = len(svc)
+        parts.append(f"{k} service outage{'s' if k != 1 else ''}")
+    if dhcp:
+        parts.append(f"{len(dhcp)} DHCP warning{'s' if len(dhcp) != 1 else ''}")
+    sections = [summarize(worthy, mac_map=mac_map)] if worthy else []
+    if svc:
+        sections.append("Services\n" + "\n".join(svc))
+    if dhcp:
+        sections.append("DHCP warnings\n" + "\n".join(dhcp))
+    return "Daily digest: " + ", ".join(parts), "\n\n".join(sections)
+
+
+# ── AI summary for the digest (AI Tier 3) ─────────────────────────────────────
+
+DIGEST_AI_TIMEOUT = 60      # the digest never waits longer than this for the AI
+_DIGEST_AI_SYSTEM = (
+    "You write the opening lines of a daily report about a home network. "
+    "Use ONLY the facts given; never guess causes or invent devices. "
+    "Write 2 or 3 short, plain sentences for a non-technical reader: no lists, "
+    "no markdown, no greeting, no sign-off. Mention what matters most first. "
+    "If nothing needs action, end with: Nothing needs attention."
+)
+
+
+def _clean_ai_text(text: str) -> str:
+    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S)   # reasoning models
+    text = " ".join(text.replace("*", "").split())
+    return text[:600].strip()
+
+
+def digest_ai_summary(title: str, body: str, model: str = "") -> str:
+    """2-3 plain sentences about the digest, written by the AI. Raises LLMError
+    (or TimeoutError) when the AI is off, unreachable or too slow."""
+    from .llm import generate, is_configured, get_default_model, LLMError
+    if not is_configured():
+        raise LLMError("No AI provider is set up in Settings → AI.")
+    model = model or get_default_model()
+    if not model:
+        raise LLMError("No AI model chosen: set a default model in Settings → AI, or pick one here.")
+    facts = f"{title}\n\n{body}"     # exactly what the digest lists, nothing more
+    prompt = (f"Report time: {local_now().strftime('%A %d %B, %H:%M')}\n\n"
+              f"Facts:\n{facts}\n\nWrite the 2-3 sentence summary now.")
+    text = asyncio.run(asyncio.wait_for(
+        generate(prompt, model=model, system=_DIGEST_AI_SYSTEM, timeout=DIGEST_AI_TIMEOUT),
+        DIGEST_AI_TIMEOUT + 5))
+    text = _clean_ai_text(text)
+    if not text:
+        raise LLMError("The AI sent back an empty answer.")
+    return text
+
+
+def compose_digest(mark: bool = True, ai: bool | None = None, model: str | None = None,
+                   services: bool | None = None) -> dict | None:
+    """The digest as it would be sent: {title, body, ai_error}. With the AI summary
+    on, it goes at the top; any AI failure just leaves it out (ai_error says why).
+    ai/model/services default to the saved settings (the preview passes what is on screen)."""
+    d = build_digest(mark=mark, services=services)
+    if not d:
+        return None
+    title, body = d
+    a = get_change_alerts_config()
+    ai = a.get("digest_ai", False) if ai is None else ai
+    model = (a.get("digest_ai_model") or "") if model is None else model
+    ai_error = summary = None
+    if ai:
+        try:
+            summary = digest_ai_summary(title, body, model)
+            body = f"🤖 AI summary\n{summary}\n\n{body}"
+            from .llm import get_default_model
+            model = model or get_default_model()
+        except Exception as e:
+            ai_error = (str(e) or type(e).__name__).splitlines()[0]
+            if isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "Timeout" in ai_error:
+                ai_error = f"The AI took longer than {DIGEST_AI_TIMEOUT} seconds."
+            print(f"[digest] AI summary skipped: {ai_error}")
+    return {"title": title, "body": body, "ai_error": ai_error, "summary": summary, "model": model}
+
+
+def send_digest() -> None:
+    """Daily digest: alert-worthy changes from the last 24h (+ AI summary if on)."""
+    d = compose_digest()
+    if d:
+        notify.send(title=d["title"], message=d["body"], tags=["sunrise"])
+        if d["summary"]:          # keep it for "Past digests" (AI history)
+            try:
+                from . import ai_history
+                ai_history.save_digest(d["title"], d["body"], d["summary"], d["model"])
+            except Exception as e:
+                print(f"[digest] could not save to AI history: {e}")
 
 
 def maybe_send_digest() -> None:

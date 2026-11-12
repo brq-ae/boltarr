@@ -165,8 +165,7 @@ async function showHostDetail(ip) {
       <div class="detail-tab-panel" id="dtab-analysis">
         <div id="analysisResult">
           ${host.analyses?.length
-            ? `<div class="analysis-meta">${escHtml(host.analyses[0].model)} · ${escHtml((host.analyses[0].created_at||"").substring(0,16))}</div>
-               <div class="analysis-box md">${renderMarkdown(host.analyses[0].analysis)}</div>`
+            ? _analysisHtml(host.analyses[0], host.analyses.slice(1))
             : `<div style="padding:16px 0;font-size:12px;color:var(--text-3)">No analysis yet. Click Analyze to run the LLM.</div>`
           }
         </div>
@@ -180,6 +179,13 @@ async function showHostDetail(ip) {
   initSheetDrag();
   makeDesktopResizable(panel, "host");
   if (!host.ip.startsWith("node-")) loadHostUptime(ip);
+  // Open on the tab last picked (until the page reloads), so switching hosts
+  // keeps you on e.g. Analysis. SSH and Changes load their content on demand.
+  if (activeDetailTab !== "info" && document.getElementById(`dtab-${activeDetailTab}`)) {
+    if (activeDetailTab === "ssh") loadHostSshSection(ip);
+    if (activeDetailTab === "changes") loadHostChanges(ip);
+    switchDetailTab(activeDetailTab);
+  }
 }
 
 async function loadHostUptime(ip) {
@@ -191,14 +197,7 @@ async function loadHostUptime(ip) {
       !u ? `<div class="uptime-stat"><span class="val" style="color:var(--text-3)">—</span><span class="lbl">${escHtml(label)}</span></div>`
          : `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${escHtml(label)}</span></div>`;
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
-    const outages = (d.outages && d.outages.length)
-      ? `<div class="outage-list">${d.outages.map(o => {
-          const start = new Date(o.start).toLocaleString();
-          return o.end
-            ? `<span class="outage-item">▾ ${start} — down ${_fmtDur(o.seconds)}</span>`
-            : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
-        }).join("")}</div>`
-      : `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
+    const outages = outageListHtml("host", d.host_id, d.outages);
     el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetHostUptime" data-args="${dargs(ip)}">↺ Reset uptime</button></div>`;
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
@@ -541,6 +540,13 @@ async function deletePort(portId, ip) {
 
 // ── LLM analysis ─────────────────────────────────────────────────────────────
 
+// One analysis (host or network) plus its earlier saved runs
+function _analysisHtml(a, earlier) {
+  return `<div class="analysis-meta">${escHtml(aiMeta(a))}</div>
+    <div class="analysis-box md">${renderMarkdown(a.analysis)}</div>
+    ${aiEarlierHtml(earlier, x => `<div class="analysis-box md">${renderMarkdown(x.analysis)}</div>`)}`;
+}
+
 async function analyzeHost(ip) {
   const model = document.getElementById("analyzeModel")?.value
              || AI_DEFAULT_MODEL;
@@ -549,20 +555,28 @@ async function analyzeHost(ip) {
   switchDetailTab("analysis");
   try {
     const data = await api("POST", `/api/hosts/${ip}/analyze`, { model });
-    resultDiv.innerHTML = `
-      <div class="analysis-meta">${escHtml(data.model)} · just now</div>
-      <div class="analysis-box md">${renderMarkdown(data.analysis)}</div>`;
+    resultDiv.innerHTML = _analysisHtml({ ...data, created_at: new Date().toISOString() }, data.earlier);
     await loadHosts(); renderHostsTable(); await loadGraph();
   } catch (e) {
     resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
   }
 }
 
-function openNetworkAnalysis() {
+async function openNetworkAnalysis() {
   const modal = document.getElementById("networkAnalysisModal");
   const modelSel = document.getElementById("netAnalyzeModel");
   if (modelSel && !modelSel.options.length) fillModelSelect(modelSel);
   modal.classList.add("open");
+  // Show the last saved analysis (AI history), unless one is running or showing
+  const resultDiv = document.getElementById("networkAnalysisResult");
+  if (resultDiv.dataset.state) return;
+  try {
+    const { analyses } = await api("GET", "/api/analyze/network");
+    if (analyses.length && !resultDiv.dataset.state) {
+      resultDiv.dataset.state = "shown";
+      resultDiv.innerHTML = _analysisHtml(analyses[0], analyses.slice(1));
+    }
+  } catch (e) { /* keep the "Click Run Analysis" hint */ }
 }
 
 function closeNetworkAnalysis() {
@@ -573,13 +587,14 @@ async function runNetworkAnalysis() {
   const model = document.getElementById("netAnalyzeModel")?.value
              || AI_DEFAULT_MODEL;
   const resultDiv = document.getElementById("networkAnalysisResult");
+  resultDiv.dataset.state = "running";
   resultDiv.innerHTML = '<div class="analysis-box" style="color:var(--text-3)">Analyzing full network… this may take a moment.</div>';
   try {
     const data = await api("POST", "/api/analyze/network", { model });
-    resultDiv.innerHTML = `
-      <div class="analysis-meta" style="margin-bottom:10px">${escHtml(data.model)} · just now</div>
-      <div class="analysis-box md">${renderMarkdown(data.analysis)}</div>`;
+    resultDiv.dataset.state = "shown";
+    resultDiv.innerHTML = _analysisHtml({ ...data, created_at: new Date().toISOString() }, data.earlier);
   } catch (e) {
+    delete resultDiv.dataset.state;
     resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
   }
 }

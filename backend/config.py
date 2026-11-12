@@ -95,7 +95,18 @@ _DEFAULTS: dict = {
         "on_scan": True,           # send a summary when a scan finishes
         "digest_enabled": True,    # daily morning digest
         "digest_time": "08:00",
+        "digest_services": True,   # list monitored-service outages in the digest
+        "digest_ai": False,        # add a short AI summary at the top of the digest
+        "digest_ai_model": "",     # "" = the default model from Settings → AI
         "last_digest": "",         # runtime: last digest sent (ISO)
+    },
+    # AI history (v0.25.0): whether AI results (host Analyze, Analyze Network,
+    # outage Explain, digest summaries) are saved, and how long. Off = nothing saved
+    # and saved results hidden; the clean-up rules still apply.
+    "ai_history": {
+        "enabled": True,
+        "keep_per_item": 10,       # newest N per host / outage / network / digest
+        "keep_days": 90,           # 0 = no time limit
     },
     # IP History: how long a static-range IP must go unseen before it reads as
     # stale (probably free) and gone (safe to reuse).
@@ -166,6 +177,7 @@ def _load_config() -> dict:
         "change_tracking": dict(_DEFAULTS["change_tracking"]),
         "change_alerts": dict(_DEFAULTS["change_alerts"]),
         "ip_history": dict(_DEFAULTS["ip_history"]),
+        "ai_history": dict(_DEFAULTS["ai_history"]),
         "auth": dict(_DEFAULTS["auth"]),
         "security": dict(_DEFAULTS["security"]),
     }
@@ -190,6 +202,8 @@ def _load_config() -> dict:
             cfg["change_alerts"].update({k: v for k, v in raw["change_alerts"].items() if v is not None})
         if "ip_history" in raw:
             cfg["ip_history"].update({k: v for k, v in raw["ip_history"].items() if v is not None})
+        if "ai_history" in raw:
+            cfg["ai_history"].update({k: v for k, v in raw["ai_history"].items() if v is not None})
         if "auth" in raw:
             cfg["auth"].update({k: v for k, v in raw["auth"].items() if v is not None})
         if "security" in raw:
@@ -280,6 +294,10 @@ def get_change_alerts_config() -> dict:
 
 def get_ip_history_config() -> dict:
     return get_config()["ip_history"]
+
+
+def get_ai_history_config() -> dict:
+    return get_config()["ai_history"]
 
 
 def get_liveness_config() -> dict:

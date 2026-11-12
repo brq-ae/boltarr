@@ -28,6 +28,9 @@ from . import scheduler
 from . import auth
 from . import security
 from . import dhcp_check
+from . import changes
+from . import explain
+from . import ai_history
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, chat_stream, is_configured, get_default_model,
@@ -993,6 +996,7 @@ def host_uptime_endpoint(ip: str):
     return {
         "uptime": {k: monitor.host_uptime(hid, secs) for k, secs in windows.items()},
         "outages": monitor.host_outages(hid, 30 * 86400, limit=10),
+        "host_id": hid,
     }
 
 
@@ -1009,12 +1013,7 @@ def get_host(ip: str):
                 "SELECT * FROM ports WHERE host_id=? ORDER BY port", (host["id"],)
             )
         ]
-        host["analyses"] = [
-            dict(a) for a in conn.execute(
-                "SELECT * FROM llm_analyses WHERE host_id=? ORDER BY created_at DESC LIMIT 5",
-                (host["id"],),
-            )
-        ]
+        host["analyses"] = ai_history.analyses(host["id"])
         host["services"] = [
             dict(s) for s in conn.execute(
                 "SELECT * FROM services WHERE host_id=? ORDER BY name", (host["id"],)
@@ -1811,19 +1810,18 @@ async def analyze_host(ip: str, req: AnalyzeReq):
     except LLMError as e:
         raise HTTPException(503, str(e))
     device_type = infer_device_type(analysis)
+    model = req.model or get_default_model()
+    saved = ai_history.save_analysis(host["id"], model, analysis)
 
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO llm_analyses (host_id, model, analysis) VALUES (?,?,?)",
-            (host["id"], req.model, analysis),
-        )
         conn.execute(
             "UPDATE hosts SET device_type=? WHERE id=?",
             (device_type, host["id"]),
         )
         conn.commit()
 
-    return {"analysis": analysis, "model": req.model or get_default_model(), "device_type": device_type}
+    earlier = [a for a in ai_history.analyses(host["id"]) if a["id"] != saved]
+    return {"analysis": analysis, "model": model, "device_type": device_type, "earlier": earlier}
 
 
 @app.post("/api/analyze/network")
@@ -1854,10 +1852,19 @@ async def analyze_network(req: AnalyzeReq):
 
     prompt = build_network_prompt(hosts, connections, vlans, subnets)
     try:
-        analysis = await generate(prompt, model=req.model or get_default_model(), timeout=LONG_TIMEOUT)
+        model = req.model or get_default_model()
+        analysis = await generate(prompt, model=model, timeout=LONG_TIMEOUT)
     except LLMError as e:
         raise HTTPException(503, str(e))
-    return {"analysis": analysis, "model": req.model or get_default_model()}
+    saved = ai_history.save_analysis(None, model, analysis)
+    earlier = [a for a in ai_history.analyses(None) if a["id"] != saved]
+    return {"analysis": analysis, "model": model, "earlier": earlier}
+
+
+@app.get("/api/analyze/network")
+def network_analyses():
+    """Saved network analyses, newest first (empty while AI history is off)."""
+    return {"analyses": ai_history.analyses(None)}
 
 
 class ChatMsg(BaseModel):
@@ -2129,6 +2136,7 @@ def get_settings():
             "change_alerts": ca,
             "liveness": dict(cfg["liveness"]),
             "ip_history": dict(cfg["ip_history"]),
+            "ai_history": dict(cfg["ai_history"]),
             "security": dict(cfg["security"])}
 
 
@@ -2147,6 +2155,12 @@ class ChangeTrackingIn(BaseModel):
 class IpHistoryIn(BaseModel):
     stale_days: Optional[int] = None
     gone_days:  Optional[int] = None
+
+
+class AiHistoryIn(BaseModel):
+    enabled:       Optional[bool] = None
+    keep_per_item: Optional[int]  = None
+    keep_days:     Optional[int]  = None   # 0 = no time limit
 
 
 class LivenessIn(BaseModel):
@@ -2174,6 +2188,9 @@ class ChangeAlertsIn(BaseModel):
     on_scan:          Optional[bool] = None
     digest_enabled:   Optional[bool] = None
     digest_time:      Optional[str]  = None
+    digest_services:  Optional[bool] = None
+    digest_ai:        Optional[bool] = None
+    digest_ai_model:  Optional[str]  = None   # "" = default model
 
 
 # Each _apply_* validates one Settings section and writes it into `cfg` (a copy
@@ -2261,16 +2278,25 @@ def _apply_ip_history(cfg: dict, data: IpHistoryIn):
         raise HTTPException(422, "'Gone after' must be at least 'Stale after'")
 
 
+def _apply_ai_history(cfg: dict, data: AiHistoryIn):
+    ah = cfg.setdefault("ai_history", {})
+    if data.enabled is not None:       ah["enabled"] = data.enabled
+    if data.keep_per_item is not None: ah["keep_per_item"] = max(1, min(1000, int(data.keep_per_item)))
+    if data.keep_days is not None:     ah["keep_days"] = max(0, min(3650, int(data.keep_days)))
+
+
 def _apply_change_alerts(cfg: dict, data: ChangeAlertsIn):
     ca = cfg.setdefault("change_alerts", {})
     for f in ("enabled", "host_new", "port_opened", "port_closed", "mac_changed",
               "hostname_changed", "host_offline", "host_online", "include_mac", "include_aliases",
-              "on_scan", "digest_enabled"):
+              "on_scan", "digest_enabled", "digest_services", "digest_ai"):
         v = getattr(data, f)
         if v is not None:
             ca[f] = v
     if data.digest_time is not None:
         ca["digest_time"] = data.digest_time.strip()
+    if data.digest_ai_model is not None:
+        ca["digest_ai_model"] = data.digest_ai_model.strip()
     if data.scope is not None and data.scope in ("static", "dynamic", "all"):
         ca["scope"] = data.scope
 
@@ -2296,6 +2322,7 @@ class AllSettingsIn(BaseModel):
     change_tracking: Optional[ChangeTrackingIn]       = None
     liveness:        Optional[LivenessIn]             = None
     ip_history:      Optional[IpHistoryIn]            = None
+    ai_history:      Optional[AiHistoryIn]            = None
     change_alerts:   Optional[ChangeAlertsIn]         = None
     security:        Optional[SecurityIn]             = None
 
@@ -2303,7 +2330,7 @@ class AllSettingsIn(BaseModel):
 _SECTION_APPLY = {
     "general": _apply_general, "llm": _apply_llm, "notifications": _apply_notifications,
     "statuspage": _apply_statuspage, "change_tracking": _apply_change_tracking,
-    "liveness": _apply_liveness, "ip_history": _apply_ip_history,
+    "liveness": _apply_liveness, "ip_history": _apply_ip_history, "ai_history": _apply_ai_history,
     "change_alerts": _apply_change_alerts, "security": _apply_security,
 }
 
@@ -2318,7 +2345,27 @@ def update_all_settings(data: AllSettingsIn):
         if part is not None:
             apply(cfg, part)
     save_config(cfg)
+    if data.ai_history is not None:
+        ai_history.prune()        # new limits take effect straight away
     return {"ok": True, **get_settings()}
+
+
+@app.get("/api/ai-history")
+def ai_history_status():
+    """How many AI results are saved (shown next to Clean history)."""
+    return {"count": ai_history.count()}
+
+
+@app.post("/api/ai-history/clean")
+def ai_history_clean():
+    """Clean history: delete every saved AI result."""
+    return {"ok": True, "deleted": ai_history.clean()}
+
+
+@app.get("/api/digest/history")
+def digest_history():
+    """Past digests that carried an AI summary, newest first (empty while AI history is off)."""
+    return {"digests": ai_history.digests()}
 
 
 @app.put("/api/settings/change-tracking")
@@ -2421,6 +2468,41 @@ async def test_llm_connection():
         return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+class ExplainReq(BaseModel):
+    kind:  str            # service | host
+    id:    int
+    start: str            # the outage's start, as the uptime endpoints return it
+    model: Optional[str] = ""
+
+
+@app.get("/api/explain")
+def get_explanation(kind: str, id: int, start: str):
+    """The newest saved explanation for one outage (or null) and the earlier ones."""
+    h = explain.history(kind, id, start)
+    return {"explanation": h[0] if h else None, "earlier": h[1:]}
+
+
+@app.post("/api/explain")
+def explain_outage(req: ExplainReq):
+    """Gather the facts about one outage, let the AI word them (when one is set up),
+    save and return it. A plain def: runs in a worker thread, so the AI call can block."""
+    try:
+        x = explain.explain(req.kind, req.id, req.start, req.model or "")
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    earlier = [h for h in explain.history(req.kind, req.id, req.start) if h["id"] != x["id"]]
+    return {"explanation": x, "earlier": earlier}
+
+
+@app.get("/api/digest/preview")
+def digest_preview(ai: bool = False, model: str = "", services: bool = True):
+    """The daily digest as it would be sent now, without sending it or marking its
+    DHCP warnings reported. ai/model/services come from the screen (unsaved settings).
+    A plain def: FastAPI runs it in a worker thread, so the AI call can block."""
+    d = changes.compose_digest(mark=False, ai=ai, model=model, services=services)
+    return d or {"title": None, "body": None, "ai_error": None}
 
 
 @app.get("/api/models")

@@ -334,6 +334,23 @@ async function loadModels() {
   } catch (e) { console.warn("Models:", e.message); }
 }
 
+// ── AI history ────────────────────────────────────────────────────────────────
+
+// "Earlier (N) ▾" under an AI result: older saved runs (Settings → AI → AI history).
+// renderItem(x) gives one entry's HTML; each entry gets a "when · model" line.
+function aiEarlierHtml(items, renderItem) {
+  if (!items || !items.length) return "";
+  return `<details class="ai-earlier"><summary>Earlier (${items.length})</summary>${items.map(x =>
+    `<div class="ai-earlier-item"><div class="analysis-meta">${escHtml(aiMeta(x))}</div>${renderItem(x)}</div>`
+  ).join("")}</details>`;
+}
+
+// "12 Nov, 08:00 · qwen3:14b" for a saved AI result (created_at is UTC)
+function aiMeta(x) {
+  return [x.created_at ? fmtLocal(x.created_at) : "", (x.model || "").replace(":latest", "")]
+    .filter(Boolean).join(" · ");
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
 const TAB_TITLES = { topology: "Topology", hosts: "Hosts", subnets: "Subnets", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys", search: "Search" };

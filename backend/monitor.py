@@ -710,6 +710,11 @@ def _loop() -> None:
                         changes.prune()
                     except Exception:
                         pass
+                    try:
+                        from . import ai_history
+                        ai_history.prune()
+                    except Exception:
+                        pass
                     last_prune = _now_dt().timestamp()
         except Exception:
             pass

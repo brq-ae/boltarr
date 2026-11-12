@@ -270,6 +270,30 @@ def init_db():
                 first_seen TEXT NOT NULL,
                 last_seen  TEXT NOT NULL
             )""",
+            # Outage explanations (v0.25.0, AI Tier 3): every run is kept (history);
+            # the newest one for an outage is shown. kind = 'service' | 'host'.
+            """CREATE TABLE IF NOT EXISTS ai_explanations (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                kind         TEXT NOT NULL,
+                target_id    INTEGER NOT NULL,
+                outage_start TEXT NOT NULL,
+                facts        TEXT NOT NULL DEFAULT '[]',
+                summary      TEXT,
+                model        TEXT,
+                ai_error     TEXT,
+                created_at   TEXT DEFAULT (datetime('now'))
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_ai_explanations_target ON ai_explanations(kind, target_id)",
+            # Daily digests that carried an AI summary (v0.25.0), for "Past digests".
+            # Kept and cleaned up by the AI history settings (backend/ai_history.py).
+            """CREATE TABLE IF NOT EXISTS ai_digests (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                title      TEXT NOT NULL,
+                body       TEXT NOT NULL,
+                summary    TEXT,
+                model      TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )""",
         ]:
             try:
                 conn.execute(sql)

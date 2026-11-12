@@ -113,9 +113,9 @@ def pool_usage(conn, pools: list[dict] | None = None) -> list[dict]:
     return out
 
 
-def digest_lines(conn) -> list[str]:
+def digest_lines(conn, mark: bool = True) -> list[str]:
     """Warnings not reported in an earlier digest (each is sent once, and again only
-    if it clears and comes back). Marks them reported."""
+    if it clears and comes back). Marks them reported, unless mark=False (preview)."""
     issues = find_issues(conn)
     lines = []
     host_rows = {r["ip"]: dict(r) for r in conn.execute("SELECT ip, hostname, dhcp_reported FROM hosts")}
@@ -129,7 +129,7 @@ def digest_lines(conn) -> list[str]:
                     else "important device on a DHCP pool address"
                 lines.append(f"⚠ {name}: {short}")
         new = ",".join(codes) or None
-        if new != (row.get("dhcp_reported") or None):
+        if mark and new != (row.get("dhcp_reported") or None):
             conn.execute("UPDATE hosts SET dhcp_reported=? WHERE ip=?", (new, ip))
     full = {p["subnet_id"]: p for p in issues["pools"]}
     for s in conn.execute("SELECT id, pool_reported FROM subnets"):
@@ -137,7 +137,7 @@ def digest_lines(conn) -> list[str]:
             p = full[s["id"]]
             lines.append(f"⚠ DHCP pool on {p.get('name') or p['cidr']} is {p['pct']}% full ({p['used']}/{p['size']})")
         flag = 1 if s["id"] in full else 0
-        if flag != (s["pool_reported"] or 0):
+        if mark and flag != (s["pool_reported"] or 0):
             conn.execute("UPDATE subnets SET pool_reported=? WHERE id=?", (flag, s["id"]))
     conn.commit()
     return lines
