@@ -2266,3 +2266,33 @@ table.fit-cols .port-list, table.fit-cols .svc-port-status { flex-wrap: nowrap; 
   background: none; color: var(--text-3); cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; }
 .pw-peek:hover, .pw-peek.on { color: var(--accent); }
 .pw-peek:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ── Subnets page (S-16) ───────────────────────────────────────────────────── */
+.sidebar-spacer { flex: 1; }
+#subnetsTable tbody tr[data-click] { cursor: pointer; }
+#subnetsTable td { vertical-align: middle; max-width: none; }   /* tbody td's max-width:0 squeezed cells so Scan/⋮ spilled off the page */
+#subnetsTable .sub-line2 { font-size: 11px; margin-top: 1px; }
+#subnetsTable .col-sub-scan { white-space: nowrap; }
+#subnetsTable .sub-desc { font-size: 11px; margin-top: 2px; }
+#subnetsTable .col-sub-cidr { white-space: nowrap; }
+#subnetsTable .col-sub-act { white-space: nowrap; text-align: right; width: 1%; }
+#subnetsTable .col-sub-act > * { vertical-align: middle; }
+#subnetsTable .col-sub-act .svc-actions { display: inline-block; position: relative; margin-left: 4px; }
+#subnetsTable .col-sub-map { width: 1%; text-align: center; }
+.sub-scan-btn { font-size: 11px; padding: 4px 10px; min-width: 74px; }
+.sub-eye { width: 26px; height: 24px; font-size: 13px; color: var(--text-2); }
+.sub-eye.off { color: var(--text-3); opacity: .7; }
+.pool-bar { display: inline-block; vertical-align: middle; width: 70px; height: 6px; margin: 0 6px 0 8px;
+  background: var(--surface3); border-radius: 3px; overflow: hidden; }
+.pool-bar > span { display: block; height: 100%; background: var(--accent); }
+.pool-bar.busy > span { background: oklch(72% 0.14 75); }
+.pool-bar.full > span { background: var(--red); }
+.pool-pct { font-size: 11px; color: var(--text-2); }
+.link-btn { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.filter-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 4px 2px 9px;
+  border: 1px solid var(--accent); color: var(--accent); border-radius: 999px; white-space: nowrap; }
+.filter-chip .btn-icon { width: 18px; height: 18px; font-size: 13px; color: var(--accent); }
+.subnets-hint { font-size: 11px; }
+@media (max-width: 1100px) { #subnetsTable .col-sub-pool { display: none; } .subnets-hint { display: none; } }
+@media (max-width: 700px)  { #subnetsTable .col-sub-scan { display: none; } }
+@media (max-width: 480px)  { #subnetsTable .col-sub-cidr { display: none; } }

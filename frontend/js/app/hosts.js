@@ -224,8 +224,14 @@ function svcMatches(s, q) {
 
 // The hosts the table shows (search + IP filter, in the current sort order).
 // Export uses the same list, so a download matches the screen.
+// Subnets page → "N hosts" opens this list filtered to one subnet (chip above the table)
+let hostsSubnetFilter = null;
+function clearHostsSubnetFilter() { hostsSubnetFilter = null; renderHostsTable(); }
+
 function hostsVisibleRows() {
   let visible = allHosts;
+  const sub = hostsSubnetFilter != null && subnets.find(s => s.id === hostsSubnetFilter);
+  if (sub) visible = visible.filter(h => !h.ip.startsWith("node-") && ipInCidr(h.ip, sub.cidr));
   if (filterText) visible = visible.filter(h => hostMatches(h, filterText));
   if (classFilterVal) {
     visible = classFilterVal === "unknown"
@@ -252,6 +258,12 @@ function renderHostsTable() {
 
   const count = document.getElementById("hostCount");
   if (count) count.textContent = `${sorted.length} of ${allHosts.length}`;
+  const chip = document.getElementById("hostsSubnetChip");
+  const sub = hostsSubnetFilter != null && subnets.find(s => s.id === hostsSubnetFilter);
+  if (chip) {
+    chip.hidden = !sub;
+    if (sub) chip.firstElementChild.textContent = `Subnet: ${sub.name} (${sub.cidr})`;
+  }
 
   if (!sorted.length) {
     tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${filterText ? "No matches." : "No hosts yet — add a subnet and scan."}</td></tr>`;
@@ -498,13 +510,13 @@ let _iphData = null;
 let _iphStatus = "all";              // chip filter; "all" leaves never-seen out
 let _iphSort = { key: "days", dir: -1 };
 
-function setHostsTab(tab) {
+function setHostsTab(tab, subnetId) {
   currentHostsTab = tab;
   document.getElementById("hosts-panel-list").style.display      = tab === "list"      ? "" : "none";
   document.getElementById("hosts-panel-iphistory").style.display = tab === "iphistory" ? "" : "none";
   document.querySelectorAll("#panel-hosts .svc-subtab").forEach(b => b.classList.remove("active"));
   document.getElementById(`hostsTabBtn-${tab}`)?.classList.add("active");
-  if (tab === "iphistory") loadIpHistory(true);
+  if (tab === "iphistory") loadIpHistory(true, subnetId);
 }
 
 const _IPH_STATUS = {
@@ -515,7 +527,7 @@ const _IPH_STATUS = {
   never:  { label: "Never seen", cls: "iph-never"  },
 };
 
-async function loadIpHistory(refreshSubnets = false) {
+async function loadIpHistory(refreshSubnets = false, pickSubnet = null) {
   const sel = document.getElementById("iphSubnet");
   if (refreshSubnets || !sel.options.length) {
     const prev = sel.value;
@@ -527,7 +539,8 @@ async function loadIpHistory(refreshSubnets = false) {
     sel.innerHTML = subnets.map(s =>
       `<option value="${s.id}">${escHtml(s.name || s.cidr)} · ${escHtml(s.cidr)}</option>`).join("");
     const withPool = subnets.find(s => s.dhcp_start && s.dhcp_end);
-    if (prev && subnets.some(s => String(s.id) === prev)) sel.value = prev;
+    if (pickSubnet != null && subnets.some(s => s.id === pickSubnet)) sel.value = pickSubnet;
+    else if (prev && subnets.some(s => String(s.id) === prev)) sel.value = prev;
     else if (withPool) sel.value = withPool.id;
   }
   try {
@@ -634,7 +647,8 @@ function renderIpHistory() {
 
 
 registerActions({
-  setHostsTab, hostsDeleteSelected, sortTable, hostsUpdateBulkBtn, toggleAliasRow, addLinkFromDetail,
+  clearHostsSubnetFilter,
+  setHostsTab: tab => setHostsTab(tab), hostsDeleteSelected, sortTable, hostsUpdateBulkBtn, toggleAliasRow, addLinkFromDetail,
   loadIpHistory: () => loadIpHistory(), renderIpHistory, sortIpHistory, setIpHistoryStatus,
   hostsToggleAllBox: function () { hostsToggleAll(this.checked); },
   editFieldBtn:      function (ip, field) { editField(ip, field, this.closest("td")); },

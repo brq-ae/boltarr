@@ -85,23 +85,32 @@ def find_issues(conn) -> dict:
                     "text": f"Important device ({why}) on a DHCP pool address ({rng}). Its IP can change; "
                             "consider a DHCP reservation or a static IP outside the pool."})
 
-    # Pool usage: distinct pool addresses (host IPs and alias IPs) seen recently
+    for p in pool_usage(conn, pools):
+        if p["size"] and p["pct"] >= POOL_FULL_PCT:
+            label = p.get("name") or p["cidr"]
+            result["pools"].append({
+                **{k: p[k] for k in ("subnet_id", "name", "cidr", "used", "size", "pct")},
+                "text": f"DHCP pool on {label} is {p['pct']}% full ({p['used']} of {p['size']} addresses seen in the last "
+                        f"{POOL_RECENT_DAYS} days). New devices may not get an address."})
+    return result
+
+
+def pool_usage(conn, pools: list[dict] | None = None) -> list[dict]:
+    """Every DHCP pool: distinct pool addresses (host IPs and alias IPs) seen recently.
+    [{subnet_id, name, cidr, used, size, pct}] — also shown on the Subnets page."""
+    if pools is None:
+        pools = _pools([dict(s) for s in conn.execute("SELECT id, name, cidr, dhcp_start, dhcp_end FROM subnets")])
     cutoff = (datetime.now(timezone.utc) - timedelta(days=POOL_RECENT_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     seen = [r["ip"] for r in conn.execute("SELECT ip FROM hosts WHERE last_seen >= ? OR online=1", (cutoff,))]
     seen += [r["ip"] for r in conn.execute("SELECT ip FROM host_aliases WHERE last_seen >= ? OR online=1", (cutoff,))]
     seen_n = {n for n in map(_ip_int, seen) if n is not None}
+    out = []
     for p in pools:
         size = p["_hi"] - p["_lo"] + 1
         used = sum(1 for n in seen_n if p["_lo"] <= n <= p["_hi"])
-        pct = round(used * 100 / size) if size else 0
-        if size and pct >= POOL_FULL_PCT:
-            label = p.get("name") or p["cidr"]
-            result["pools"].append({
-                "subnet_id": p["id"], "name": p.get("name"), "cidr": p["cidr"],
-                "used": used, "size": size, "pct": pct,
-                "text": f"DHCP pool on {label} is {pct}% full ({used} of {size} addresses seen in the last "
-                        f"{POOL_RECENT_DAYS} days). New devices may not get an address."})
-    return result
+        out.append({"subnet_id": p["id"], "name": p.get("name"), "cidr": p["cidr"],
+                    "used": used, "size": size, "pct": round(used * 100 / size) if size else 0})
+    return out
 
 
 def digest_lines(conn) -> list[str]:

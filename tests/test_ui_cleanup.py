@@ -76,7 +76,7 @@ def test_column_fit_script_loaded(client):
 
 
 APP_FILES = ["core", "hosts", "host-detail", "scans", "services", "services-detail",
-             "topology", "settings", "ssh", "boot"]
+             "topology", "subnets", "settings", "ssh", "boot"]
 
 
 def test_app_split_files_load_in_order(client):

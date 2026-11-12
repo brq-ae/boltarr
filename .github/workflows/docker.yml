@@ -33,6 +33,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Version label from the VERSION file (e.g. 0.24.0), so rolling back is just ":0.23.x"
+      - name: Read version
+        id: ver
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -40,4 +45,5 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/boltarr:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/boltarr:${{ steps.ver.outputs.version }}
             ${{ secrets.DOCKERHUB_USERNAME }}/boltarr:${{ github.sha }}

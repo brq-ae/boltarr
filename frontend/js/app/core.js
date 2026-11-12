@@ -9,6 +9,7 @@ let allDependencies = [];
 let allVlans        = [];
 let hiddenSubnets   = new Set();
 let activeRunId     = null;
+let activeScanSubnet = null;   // subnet whose scan was started here (Subnets page shows Stop)
 let pollTimer       = null;
 let sortCol         = "ip";
 let sortDir         = 1;
@@ -134,50 +135,27 @@ function closeSidebar() {
 async function loadSubnets() {
   subnets = await api("GET", "/api/subnets");
   window.subnets = subnets;
+  hiddenSubnets = new Set(subnets.filter(s => s.map_hidden).map(s => s.id));   // saved per subnet
   renderSubnetList();
-}
-
-function renderSubnetList() {
-  window.subnets = subnets; // expose for graph.js
-  const list = document.getElementById("subnetList");
-  if (!subnets.length) {
-    list.innerHTML = `<div style="padding:10px 16px;font-size:11px;color:var(--text-3)">No subnets yet.<br>Click + to add one.</div>`;
-    return;
-  }
-  list.innerHTML = subnets.map(s => {
-    const hidden = hiddenSubnets.has(s.id);
-    return `
-    <div class="subnet-row${hidden ? " subnet-hidden" : ""}" id="subnet-row-${s.id}" data-click="selectSubnetNodes" data-args="[${s.id}]" title="Click to select all hosts in this subnet">
-      <div class="subnet-dot" id="subnet-dot-${s.id}"></div>
-      <div class="subnet-info">
-        <div class="subnet-name">${escHtml(s.name)}</div>
-        <div class="subnet-cidr mono">${escHtml(s.cidr)}</div>
-      </div>
-      <button class="btn-icon subnet-eye" data-click="toggleSubnetVisibility" data-args="[${s.id}]" title="${hidden ? "Show" : "Hide"} in topology">${hidden ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>` : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`}</button>
-      <button class="btn-icon" data-click="openEditSubnet" data-args="[${s.id}]" title="Edit subnet (name, DHCP range)" style="color:var(--text-3);font-size:12px;padding:2px 5px">✎</button>
-      <button class="btn-scan" data-click="triggerScan" data-args="[${s.id}]" title="Scan ${escHtml(s.cidr)}">▶</button>
-      <button class="btn-icon" data-click="deleteSubnet" data-args="${dargs(s.id, s.name)}" title="Remove subnet" style="color:var(--text-3);font-size:13px;padding:2px 5px">✕</button>
-    </div>`;
-  }).join("");
+  loadSubnetSummary();
 }
 
 function toggleSubnetVisibility(subnetId) {
-  if (hiddenSubnets.has(subnetId)) hiddenSubnets.delete(subnetId);
-  else hiddenSubnets.add(subnetId);
+  const hide = !hiddenSubnets.has(subnetId);
+  if (hide) hiddenSubnets.add(subnetId); else hiddenSubnets.delete(subnetId);
   renderSubnetList();
   if (typeof applySubnetVisibility === "function") applySubnetVisibility();
+  api("PUT", `/api/subnets/${subnetId}`, { map_hidden: hide }).catch(() => {});   // remembered after a reload
 }
 
 async function deleteSubnet(id, name) {
-  if (!confirm(`Remove subnet "${name}"?\n\nThis will not delete any scanned hosts — only the subnet entry and its scan history.`)) return;
+  const n = (subnetSummary[id] || {}).schedules || 0;
+  const scheds = n ? ` and its ${n} scan schedule${n === 1 ? "" : "s"}` : "";
+  if (!confirm(`Delete subnet "${name}"?\n\nIts hosts stay in Boltarr. The subnet entry, its scan history${scheds} are deleted.`)) return;
   await api("DELETE", `/api/subnets/${id}`);
   subnets = subnets.filter(s => s.id !== id);
   hiddenSubnets.delete(id);
   renderSubnetList();
-}
-
-function selectSubnetNodes(subnetId) {
-  if (typeof selectNodesInSubnet === "function") selectNodesInSubnet(subnetId);
 }
 
 function _subnetFields(s) {
@@ -232,14 +210,13 @@ async function saveSubnet() {
 // ── Scanning ──────────────────────────────────────────────────────────────────
 
 async function triggerScan(subnetId) {
-  const dot = document.getElementById(`subnet-dot-${subnetId}`);
-  if (dot) dot.className = "subnet-dot scanning";
   try {
     const { run_id } = await api("POST", `/api/scan/${subnetId}`);
     activeRunId = run_id;
+    activeScanSubnet = subnetId;
+    renderSubnetList();           // the row's Scan turns into Stop
     startPolling(subnetId);
   } catch (e) {
-    if (dot) dot.className = "subnet-dot";
     alert("Scan error: " + e.message);
   }
 }
@@ -310,11 +287,13 @@ function startPolling(subnetId) {
       job.status === "completed"   ? `Done — ${job.total || 0} hosts` :
       job.status === "cancelled"   ? "Scan stopped" :
       job.status === "error"       ? "Error: " + (job.error || "?") : job.status;
+    const prog = document.getElementById(`subnet-prog-${subnetId}`);
+    if (prog) prog.textContent = job.status === "scanning" ? `${pct}%` : "";
 
     if (["completed", "error", "cancelled"].includes(job.status)) {
       clearInterval(pollTimer);
-      const dot = document.getElementById(`subnet-dot-${subnetId}`);
-      if (dot) dot.className = "subnet-dot " + (job.status === "completed" ? "scanned" : "");
+      activeScanSubnet = null;
+      loadSubnetSummary();          // Stop turns back into Scan; last scan updates
       setTimeout(() => overlay.classList.remove("visible"), 3000);
       await loadHosts();
       renderHostsTable();
@@ -357,7 +336,7 @@ async function loadModels() {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-const TAB_TITLES = { topology: "Topology", hosts: "Hosts", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys", search: "Search" };
+const TAB_TITLES = { topology: "Topology", hosts: "Hosts", subnets: "Subnets", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys", search: "Search" };
 // Hierarchy is a sub-tab of Topology (Graph | Hierarchy): its own panel, but the
 // nav highlights Topology, and Topology reopens whichever view was used last.
 const NAV_TAB = { hierarchy: "topology" };
@@ -387,6 +366,7 @@ function setTab(name) {
   if (name === "hierarchy") loadHierarchy();
   if (name === "services")  loadServicesTab();
   if (name === "sshkeys")   loadSshKeys();
+  if (name === "subnets")   loadSubnetSummary();
   if (name === "search")    window.renderSearchPage?.();
 
   // Live monitor dots only need refreshing while the Services tab is open
@@ -412,7 +392,7 @@ function toggleLegend() {
 
 registerActions({
   openTopology, setTab, toggleSidebar, closeSidebar, toggleChat, toggleLegend, stopScan,
-  openAddSubnet, closeAddSubnet, saveSubnet, selectSubnetNodes, toggleSubnetVisibility,
+  openAddSubnet, closeAddSubnet, saveSubnet, toggleSubnetVisibility,
   openEditSubnet, triggerScan, deleteSubnet,
   printPage: () => window.print(),
 });

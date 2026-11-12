@@ -352,6 +352,7 @@ class SubnetUpdate(BaseModel):
     description: Optional[str] = None
     dhcp_start:  Optional[str] = None   # "" clears it
     dhcp_end:    Optional[str] = None
+    map_hidden:  Optional[bool] = None   # hidden on the Topology map
 
 
 @app.get("/api/subnets")
@@ -392,14 +393,54 @@ def update_subnet(subnet_id: int, data: SubnetUpdate):
                     cidr        = COALESCE(?, cidr),
                     description = COALESCE(?, description),
                     dhcp_start  = CASE WHEN ? IS NULL THEN dhcp_start ELSE ? END,
-                    dhcp_end    = CASE WHEN ? IS NULL THEN dhcp_end   ELSE ? END
+                    dhcp_end    = CASE WHEN ? IS NULL THEN dhcp_end   ELSE ? END,
+                    map_hidden  = COALESCE(?, map_hidden)
                 WHERE id=?
             """, (data.name, data.cidr, data.description,
-                  data.dhcp_start, ds, data.dhcp_end, de, subnet_id))
+                  data.dhcp_start, ds, data.dhcp_end, de,
+                  None if data.map_hidden is None else int(data.map_hidden), subnet_id))
             conn.commit()
         except Exception as e:
             raise HTTPException(400, str(e))
         return dict(conn.execute("SELECT * FROM subnets WHERE id=?", (subnet_id,)).fetchone())
+
+
+@app.get("/api/subnets/summary")
+def subnets_summary():
+    """Per subnet, for the Subnets page: hosts in it (and online now), DHCP pool use,
+    the last subnet scan, a scan running now, and how many schedules target it."""
+    with get_conn() as conn:
+        subnets = [dict(s) for s in conn.execute("SELECT id, cidr FROM subnets")]
+        nets = {}
+        for s in subnets:
+            try:
+                nets[s["id"]] = ipaddress.ip_network(s["cidr"], strict=False)
+            except ValueError:
+                pass
+        counts = {sid: [0, 0] for sid in nets}
+        for h in conn.execute("SELECT ip, online FROM hosts"):
+            try:
+                addr = ipaddress.ip_address(h["ip"])
+            except ValueError:
+                continue                      # node-… placeholders
+            for sid, net in nets.items():
+                if addr.version == net.version and addr in net:
+                    counts[sid][0] += 1
+                    counts[sid][1] += 1 if h["online"] == 1 else 0
+        pools = {p["subnet_id"]: p for p in dhcp_check.pool_usage(conn)}
+        last = {r["subnet_id"]: dict(r) for r in conn.execute(
+            """SELECT subnet_id, started_at, completed_at, status, hosts_found FROM scan_runs
+               WHERE id IN (SELECT MAX(id) FROM scan_runs WHERE type='scan' AND status != 'running'
+                            GROUP BY subnet_id)""")}
+        running = {r["subnet_id"]: r["id"] for r in conn.execute(
+            "SELECT subnet_id, MAX(id) AS id FROM scan_runs WHERE type='scan' AND status='running' GROUP BY subnet_id")}
+        scheds = {r["subnet_id"]: r["n"] for r in conn.execute(
+            "SELECT subnet_id, COUNT(*) AS n FROM scan_schedules WHERE subnet_id IS NOT NULL GROUP BY subnet_id")}
+    return [{"id": s["id"],
+             "hosts": counts.get(s["id"], [0, 0])[0], "online": counts.get(s["id"], [0, 0])[1],
+             "pool": {k: pools[s["id"]][k] for k in ("used", "size", "pct")} if s["id"] in pools else None,
+             "last_scan": last.get(s["id"]), "running_run_id": running.get(s["id"]),
+             "schedules": scheds.get(s["id"], 0)} for s in subnets]
 
 
 @app.delete("/api/subnets/{subnet_id}")
