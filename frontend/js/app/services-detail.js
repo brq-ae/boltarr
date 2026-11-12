@@ -658,6 +658,7 @@ async function deleteConnFromEdit() {
 }
 
 registerActions({
+  resetHostUptime, openEditConnById,   // host panel (Services / Links tabs)
   resetAllUptime, resetSvcUptime, showSvcDetail, hideSvcDetail, saveSvcDetail, deleteSvcDetail,
   cycleSvcDetailStatus, toggleSvcMonitor, toggleSvcPublicName, updateSvcDetailUrlBtn,
   openBulkAddContainers, bulkSelectAll, bulkAddContainers, toggleBulkChip,

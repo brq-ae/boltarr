@@ -36,7 +36,7 @@ async function showHostDetail(ip) {
       <div class="sheet-handle-row">
         <span class="sheet-handle-label mono">${escHtml(sheetLabel)}</span>
         <span class="sheet-handle-hint" id="sheetHint">tap to expand</span>
-        <button class="btn-ghost sheet-close" onclick="hideHostDetail()" aria-label="Close" style="font-size:17px;padding:1px 6px;line-height:1;flex-shrink:0">×</button>
+        <button class="btn-ghost sheet-close" data-click="hideHostDetail" aria-label="Close" style="font-size:17px;padding:1px 6px;line-height:1;flex-shrink:0">×</button>
       </div>
     </div>
     <div class="detail-header">
@@ -47,24 +47,24 @@ async function showHostDetail(ip) {
       <span class="tag tag-${escHtml(dt)}" style="font-size:11px">${escHtml(dt)}</span>
       <div class="detail-header-right">
         <select id="analyzeModel" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
-        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="analyzeHost(${jsq(ip)})">Analyze</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openEditHost(${jsq(ip)})">Edit</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="openMergeHost(${jsq(ip)})">⇌ Merge</button>
+        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" data-click="analyzeHost" data-args="${dargs(ip)}">Analyze</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="openEditHost" data-args="${dargs(ip)}">Edit</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="openMergeHost" data-args="${dargs(ip)}">⇌ Merge</button>
         <select id="probeProfile" title="Scan profile for the probe" style="font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)">${_probeProfileOptions()}</select>
-        <button class="btn" style="font-size:11px;padding:5px 10px" onclick="probeHost(${jsq(ip)})">⟳ Probe</button>
-        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" onclick="deleteHost(${jsq(ip)})">Delete</button>
-        <button class="btn-ghost" onclick="hideHostDetail()" style="font-size:18px;padding:2px 8px">×</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="probeHost" data-args="${dargs(ip)}">⟳ Probe</button>
+        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" data-click="deleteHost" data-args="${dargs(ip)}">Delete</button>
+        <button class="btn-ghost" data-click="hideHostDetail" style="font-size:18px;padding:2px 8px">×</button>
       </div>
     </div>
 
     <div class="detail-tabs">
-      <button class="detail-tab active" data-tab="info" onclick="switchDetailTab('info')">Info</button>
-      <button class="detail-tab" data-tab="links" onclick="switchDetailTab('links')">Links (${countLinks(ip)})</button>
-      <button class="detail-tab" data-tab="ports" onclick="switchDetailTab('ports')">Ports (${(host.ports||[]).length})</button>
-      <button class="detail-tab" data-tab="services" onclick="switchDetailTab('services')">Services (${(host.services||[]).length})</button>
-      <button class="detail-tab" data-tab="analysis" onclick="switchDetailTab('analysis')">Analysis</button>
-      <button class="detail-tab" data-tab="ssh" onclick="switchDetailTab('ssh');loadHostSshSection(${jsq(ip)})">SSH</button>
-      <button class="detail-tab" data-tab="changes" onclick="switchDetailTab('changes');loadHostChanges(${jsq(ip)})">Changes</button>
+      <button class="detail-tab active" data-tab="info" data-click="switchDetailTab" data-args='["info"]'>Info</button>
+      <button class="detail-tab" data-tab="links" data-click="switchDetailTab" data-args='["links"]'>Links (${countLinks(ip)})</button>
+      <button class="detail-tab" data-tab="ports" data-click="switchDetailTab" data-args='["ports"]'>Ports (${(host.ports||[]).length})</button>
+      <button class="detail-tab" data-tab="services" data-click="switchDetailTab" data-args='["services"]'>Services (${(host.services||[]).length})</button>
+      <button class="detail-tab" data-tab="analysis" data-click="switchDetailTab" data-args='["analysis"]'>Analysis</button>
+      <button class="detail-tab" data-tab="ssh" data-click="detailTabSsh" data-args="${dargs(ip)}">SSH</button>
+      <button class="detail-tab" data-tab="changes" data-click="detailTabChanges" data-args="${dargs(ip)}">Changes</button>
     </div>
 
     <div class="detail-body">
@@ -96,7 +96,7 @@ async function showHostDetail(ip) {
             ${(host.aliases||[]).map(a => `
               <span class="alias-chip" title="${escHtml(aliasSeenTitle(host, a))}">
                 ${aliasDot(host, a)}<span class="mono">${escHtml(a)}</span>
-                <button class="btn-ghost" style="padding:0 3px;font-size:11px;line-height:1" onclick="removeAlias(${jsq(ip)},${jsq(a)})" title="Remove alias">×</button>
+                <button class="btn-ghost" style="padding:0 3px;font-size:11px;line-height:1" data-click="removeAlias" data-args="${dargs(ip, a)}" title="Remove alias">×</button>
               </span>`).join("")}
           </div>
         </div>` : ""}
@@ -118,7 +118,7 @@ async function showHostDetail(ip) {
                 <span class="port-svc">${escHtml(p.service||"unknown")}</span>
                 <span class="port-ver">${escHtml(p.version||"")}</span>
                 ${p.manual ? '<span class="port-manual-tag">manual</span>' : '<span></span>'}
-                <button class="btn-ghost btn-danger" onclick="deletePort(${p.id},${jsq(ip)})" style="font-size:12px;padding:2px 6px">✕</button>
+                <button class="btn-ghost btn-danger" data-click="deletePort" data-args="${dargs(p.id, ip)}" style="font-size:12px;padding:2px 6px">✕</button>
               </div>`).join("")
             : `<div style="padding:16px 10px;font-size:12px;color:var(--text-3)">No ports detected.</div>`
           }
@@ -128,7 +128,7 @@ async function showHostDetail(ip) {
           <div class="field"><label>Proto</label><select id="newProto" class="sel-proto"><option>tcp</option><option>udp</option></select></div>
           <div class="field"><label>Service</label><input type="text" id="newService" placeholder="http" class="inp-svc"></div>
           <div class="field"><label>Version</label><input type="text" id="newVersion" placeholder="nginx 1.24" class="inp-ver"></div>
-          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addPort(${jsq(ip)})">+ Add</button>
+          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" data-click="addPort" data-args="${dargs(ip)}">+ Add</button>
         </div>
       </div>
 
@@ -140,7 +140,7 @@ async function showHostDetail(ip) {
         </div>
         <div class="add-port-form">
           <div class="field"><label>Name</label><input type="text" id="newSvcName" placeholder="e.g. Plex"></div>
-          <div class="field"><label>Port</label><input type="number" id="newSvcPort" placeholder="8080" class="mono" oninput="autoFillSvcUrl(${jsq(ip)}, this.value, 'newSvcUrl')"></div>
+          <div class="field"><label>Port</label><input type="number" id="newSvcPort" placeholder="8080" class="mono" data-input="hostSvcPortTyped" data-args="${dargs(ip)}"></div>
           <div class="field"><label>Status</label>
             <select id="newSvcStatus">
               <option value="unknown">Unknown</option>
@@ -148,8 +148,8 @@ async function showHostDetail(ip) {
               <option value="stopped">Stopped</option>
             </select>
           </div>
-          <div class="field" style="flex:2"><label>URL</label><input type="text" id="newSvcUrl" placeholder="http://…" oninput="if(this.value!==this.dataset.auto)this.dataset.auto=''"></div>
-          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" onclick="addServiceToHost(${jsq(ip)})">+ Add</button>
+          <div class="field" style="flex:2"><label>URL</label><input type="text" id="newSvcUrl" placeholder="http://…" data-input="svcUrlTyped"></div>
+          <button class="btn btn-primary" style="font-size:11px;align-self:flex-end" data-click="addServiceToHost" data-args="${dargs(ip)}">+ Add</button>
         </div>
       </div>
 
@@ -199,7 +199,7 @@ async function loadHostUptime(ip) {
             : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
         }).join("")}</div>`
       : `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
-    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" onclick="resetHostUptime(${jsq(ip)})">↺ Reset uptime</button></div>`;
+    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetHostUptime" data-args="${dargs(ip)}">↺ Reset uptime</button></div>`;
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }
@@ -593,4 +593,17 @@ async function loadGraph() {
 }
 
 
-registerActions({ showHostDetail });
+// Edit host: the DHCP pool fields only show for a DHCP server.
+function editDhcpToggled() {
+  document.getElementById("editDhcpPoolRow").style.display = this.checked ? "" : "none";
+}
+
+registerActions({
+  showHostDetail, hideHostDetail, analyzeHost, openEditHost, openMergeHost, probeHost, deleteHost,
+  switchDetailTab, removeAlias, deletePort, addPort,
+  openAddHost, closeAddHost, saveAddHost, closeMergeHost, saveMergeHost,
+  closeEditHost, saveHostEdit, onEditPublicToggle, editDhcpToggled,
+  detailTabSsh:     ip => { switchDetailTab("ssh"); loadHostSshSection(ip); },
+  detailTabChanges: ip => { switchDetailTab("changes"); loadHostChanges(ip); },
+  hostSvcPortTyped: function (ip) { autoFillSvcUrl(ip, this.value, "newSvcUrl"); },
+});

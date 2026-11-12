@@ -32,7 +32,7 @@ function noteIsUrl(s) { return /^https?:\/\/\S+$/i.test((s || "").trim()); }
 
 // hover-✎ that opens the inline editor for a field on this host
 function editPencil(ip, field, label) {
-  return `<button class="cell-edit" title="Edit ${escHtml(label)}" onclick="event.stopPropagation();editField(${jsq(ip)},${jsq(field)},this.closest('td'))">✎</button>`;
+  return `<button class="cell-edit" title="Edit ${escHtml(label)}" data-click="editFieldBtn" data-args="${dargs(ip, field)}">✎</button>`;
 }
 
 // scan/text cell: escaped value (or —) + hover pencil
@@ -45,12 +45,12 @@ function textCell(h, field, raw) {
 function renderNoteCell(h) {
   const raw = h.notes || "";
   if (!raw) {
-    return `<span class="note-add" onclick="event.stopPropagation();editField(${jsq(h.ip)},'notes',this.closest('td'))">＋ note</span>`;
+    return `<span class="note-add" data-click="editFieldBtn" data-args="${dargs(h.ip, "notes")}">＋ note</span>`;
   }
   const full = escHtml(raw);
   const trunc = escHtml(raw.length > 42 ? raw.slice(0, 42) + "…" : raw);
   const inner = noteIsUrl(raw)
-    ? `<a class="note-link" href="${safeUrl(raw)}" target="_blank" rel="noopener" title="${full}" onclick="event.stopPropagation()">${trunc}</a>`
+    ? `<a class="note-link" href="${safeUrl(raw)}" target="_blank" rel="noopener" title="${full}" data-stop>${trunc}</a>`
     : `<span class="note-text" title="${full}">${trunc}</span>`;
   return inner + editPencil(h.ip, "notes", "note");
 }
@@ -94,10 +94,10 @@ async function saveField(ip, field, value) {
 
 // ── Phase D: inline editors for structured fields (type, class, MAC) ─────────
 function typePencil(ip) {
-  return `<button class="cell-edit" title="Edit type" onclick="event.stopPropagation();editType(${jsq(ip)},this.closest('td'))">✎</button>`;
+  return `<button class="cell-edit" title="Edit type" data-click="editTypeBtn" data-args="${dargs(ip)}">✎</button>`;
 }
 function macPencil(ip) {
-  return `<button class="cell-edit" title="Edit MAC" onclick="event.stopPropagation();editMac(${jsq(ip)},this.closest('td'))">✎</button>`;
+  return `<button class="cell-edit" title="Edit MAC" data-click="editMacBtn" data-args="${dargs(ip)}">✎</button>`;
 }
 
 function editType(ip, td) {
@@ -270,7 +270,7 @@ function renderHostsTable() {
     const aliases     = h.aliases || [];
     const expanded    = expandedAliases.has(h.ip);
     const aliasToggle = aliases.length
-      ? `<button class="alias-toggle${expanded ? " open" : ""}" onclick="event.stopPropagation();toggleAliasRow(${jsq(h.ip)})" title="${expanded ? "Hide" : "Show"} aliases">${expanded ? "▼" : "▶"} +${aliases.length}</button>`
+      ? `<button class="alias-toggle${expanded ? " open" : ""}" data-click="toggleAliasRow" data-args="${dargs(h.ip)}" title="${expanded ? "Hide" : "Show"} aliases">${expanded ? "▼" : "▶"} +${aliases.length}</button>`
       : "";
     const manualBadge = h.source === "manual" ? `<span class="port-badge" style="margin-left:4px;background:oklch(38% 0.1 280);color:oklch(78% 0.1 280)">manual</span>` : "";
     const ov = h.static_override ? " ·set" : "";
@@ -285,7 +285,7 @@ function renderHostsTable() {
     const dot = isSynthetic ? "" : livenessDot(h.online);
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${escHtml(h.ip)}" style="accent-color:var(--accent)" onclick="event.stopPropagation()" onchange="hostsUpdateBulkBtn()"></td>
+      <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${escHtml(h.ip)}" style="accent-color:var(--accent)" data-stop data-change="hostsUpdateBulkBtn"></td>
       <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
       <td class="td-host col-host">${textCell(h, 'hostname', h.hostname)}</td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac ? escHtml(h.mac) : '<span style="color:var(--text-3)">—</span>'}${macPencil(h.ip)}</td>
@@ -296,7 +296,8 @@ function renderHostsTable() {
       <td class="td-seen col-seen mono" style="color:var(--text-3)">${escHtml((h.last_seen||"—").substring(0,16))}</td>
       <td class="col-notes">${renderNoteCell(h)}</td>
     `;
-    tr.addEventListener("click", () => showHostDetail(h.ip));
+    tr.dataset.click = "showHostDetail";   // the ✎ buttons, checkbox and links inside run only their own
+    tr.dataset.args  = JSON.stringify([h.ip]);
     tbody.appendChild(tr);
     if (aliases.length && expanded) {
       const subTr = document.createElement("tr");
@@ -442,7 +443,7 @@ function buildLinksTab(ip, myTier) {
       <span class="tag tag-${escHtml(peerDt)}" style="font-size:10px;flex-shrink:0">${escHtml(peerDt)}</span>
       <span style="flex:1;font-size:12px;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(peerIp)}">${escHtml(peerLabel)}${peerIp.startsWith("node-") ? "" : `<br><span class="mono" style="font-size:10px;color:var(--text-3)">${escHtml(peerIp)}</span>`}</span>
       <div style="display:flex;gap:4px;align-items:center;flex-shrink:0">${speed}${mode}${vlanBadges}</div>
-      <button class="btn-ghost" style="font-size:11px;padding:2px 6px;flex-shrink:0" onclick="openEditConnById(${e.data.connection_id})">✎</button>
+      <button class="btn-ghost" style="font-size:11px;padding:2px 6px;flex-shrink:0" data-click="openEditConnById" data-args="[${e.data.connection_id}]">✎</button>
     </div>`;
   }).join("") || `<div style="padding:14px 10px;font-size:12px;color:var(--text-3)">No connections yet.</div>`;
 
@@ -462,8 +463,8 @@ function buildLinksTab(ip, myTier) {
         <select id="newLinkSpeed">${LINK_SPEEDS.map(s => `<option value="${s}">${s || "—"}</option>`).join("")}</select>
       </div>
       <div style="display:flex;gap:6px;align-items:flex-end;padding-bottom:1px">
-        <button class="btn btn-primary" style="font-size:11px" onclick="addLinkFromDetail(${jsq(ip)})">+ Connect</button>
-        <button class="btn" style="font-size:11px" onclick="openAddHost()">+ New Host</button>
+        <button class="btn btn-primary" style="font-size:11px" data-click="addLinkFromDetail" data-args="${dargs(ip)}">+ Connect</button>
+        <button class="btn" style="font-size:11px" data-click="openAddHost">+ New Host</button>
       </div>
     </div>`;
 }
@@ -586,7 +587,7 @@ function renderIpHistory() {
   const c = data.counts;
   const shown = c.in_use + c.recent + c.stale + c.gone;
   const chip = (st, label, n) =>
-    `<button class="iph-chip ${st !== "all" ? _IPH_STATUS[st].cls : ""}${_iphStatus === st ? " active" : ""}" onclick="setIpHistoryStatus(${jsq(st)})">${escHtml(label)} <b>${n}</b></button>`;
+    `<button class="iph-chip ${st !== "all" ? _IPH_STATUS[st].cls : ""}${_iphStatus === st ? " active" : ""}" data-click="setIpHistoryStatus" data-args="${dargs(st)}">${escHtml(label)} <b>${n}</b></button>`;
   document.getElementById("iphChips").innerHTML =
     chip("all", "All seen", shown) +
     ["in_use", "recent", "stale", "gone", "never"].map(st => chip(st, _IPH_STATUS[st].label, c[st])).join("");
@@ -631,3 +632,12 @@ function renderIpHistory() {
     tr.addEventListener("click", () => showHostDetail(tr.dataset.host)));
 }
 
+
+registerActions({
+  setHostsTab, hostsDeleteSelected, sortTable, hostsUpdateBulkBtn, toggleAliasRow, addLinkFromDetail,
+  loadIpHistory: () => loadIpHistory(), renderIpHistory, sortIpHistory, setIpHistoryStatus,
+  hostsToggleAllBox: function () { hostsToggleAll(this.checked); },
+  editFieldBtn:      function (ip, field) { editField(ip, field, this.closest("td")); },
+  editTypeBtn:       function (ip) { editType(ip, this.closest("td")); },
+  editMacBtn:        function (ip) { editMac(ip, this.closest("td")); },
+});

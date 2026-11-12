@@ -740,6 +740,7 @@ function setSvcTab(tab) {
 }
 
 registerActions({
+  addServiceToHost,   // host panel → Services tab
   setSvcTab, sortServices, svcDeleteSelected, openAddService, svcUpdateBulkBtn,
   autoFillSvcUrlModal, svcCheckTypeChanged, svcModalMonitorToggled, svcModalPublicToggled, toggleContainerPick, pickContainer,
   deleteServiceFromModal, closeServiceModal, saveServiceModal, svcDetailCheckChanged,

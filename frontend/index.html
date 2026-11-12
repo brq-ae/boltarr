@@ -233,8 +233,8 @@
       <div class="tab-panel" id="panel-hosts">
         <div class="svc-toolbar">
           <div class="svc-subtabs">
-            <button class="svc-subtab active" id="hostsTabBtn-list" onclick="setHostsTab('list')">List</button>
-            <button class="svc-subtab" id="hostsTabBtn-iphistory" onclick="setHostsTab('iphistory')">IP History</button>
+            <button class="svc-subtab active" id="hostsTabBtn-list" data-click="setHostsTab" data-args='["list"]'>List</button>
+            <button class="svc-subtab" id="hostsTabBtn-iphistory" data-click="setHostsTab" data-args='["iphistory"]'>IP History</button>
           </div>
         </div>
         <div id="hosts-panel-list" class="hosts-sub">
@@ -269,23 +269,23 @@
               <button type="button" data-export="hosts" data-fmt="json">JSON <span>for scripts</span></button>
             </div>
           </div>
-          <button class="btn btn-danger" id="hostsDeleteBtn" style="font-size:11px;padding:5px 11px;margin-left:auto;display:none" onclick="hostsDeleteSelected()">Delete selected</button>
-          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px" onclick="openAddHost()">+ Add Host</button>
+          <button class="btn btn-danger" id="hostsDeleteBtn" style="font-size:11px;padding:5px 11px;margin-left:auto;display:none" data-click="hostsDeleteSelected">Delete selected</button>
+          <button class="btn btn-primary" style="font-size:11px;padding:5px 11px" data-click="openAddHost">+ Add Host</button>
         </div>
         <div class="table-wrap">
           <table id="hostsTable">
             <thead>
               <tr>
-                <th class="td-check"><input type="checkbox" id="hostsSelectAll" onchange="hostsToggleAll(this.checked)" style="accent-color:var(--accent)"></th>
-                <th class="td-ip" onclick="sortTable('ip')">IP</th>
-                <th class="td-host col-host" onclick="sortTable('hostname')">Hostname</th>
-                <th class="td-mac col-mac" onclick="sortTable('mac')">MAC</th>
-                <th class="col-vendor" onclick="sortTable('vendor')">Vendor</th>
-                <th class="td-type col-type" onclick="sortTable('device_type')">Type</th>
+                <th class="td-check"><input type="checkbox" id="hostsSelectAll" data-change="hostsToggleAllBox" style="accent-color:var(--accent)"></th>
+                <th class="td-ip" data-click="sortTable" data-args='["ip"]'>IP</th>
+                <th class="td-host col-host" data-click="sortTable" data-args='["hostname"]'>Hostname</th>
+                <th class="td-mac col-mac" data-click="sortTable" data-args='["mac"]'>MAC</th>
+                <th class="col-vendor" data-click="sortTable" data-args='["vendor"]'>Vendor</th>
+                <th class="td-type col-type" data-click="sortTable" data-args='["device_type"]'>Type</th>
                 <th class="col-os">OS</th>
-                <th class="col-ports" onclick="sortTable('open_ports')">Ports</th>
-                <th class="td-seen col-seen" onclick="sortTable('last_seen')">Last Seen</th>
-                <th class="col-notes" onclick="sortTable('notes')">Notes</th>
+                <th class="col-ports" data-click="sortTable" data-args='["open_ports"]'>Ports</th>
+                <th class="td-seen col-seen" data-click="sortTable" data-args='["last_seen"]'>Last Seen</th>
+                <th class="col-notes" data-click="sortTable" data-args='["notes"]'>Notes</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -296,8 +296,8 @@
         <!-- IP History: static-range IPs and how long since each last answered -->
         <div id="hosts-panel-iphistory" class="hosts-sub" style="display:none">
           <div class="table-toolbar">
-            <select id="iphSubnet" class="search-input" style="max-width:220px;flex-shrink:0" onchange="loadIpHistory()"></select>
-            <input type="text" class="search-input" id="iphFilter" placeholder="Filter by IP, hostname, MAC…" oninput="renderIpHistory()">
+            <select id="iphSubnet" class="search-input" style="max-width:220px;flex-shrink:0" data-change="loadIpHistory"></select>
+            <input type="text" class="search-input" id="iphFilter" placeholder="Filter by IP, hostname, MAC…" data-input="renderIpHistory">
             <span class="host-count" id="iphCount"></span>
             <div class="export-wrap">
               <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
@@ -314,8 +314,8 @@
               <thead>
                 <tr>
                   <th>Status</th>
-                  <th class="td-ip" onclick="sortIpHistory('ip')">IP</th>
-                  <th onclick="sortIpHistory('days')">Last seen</th>
+                  <th class="td-ip" data-click="sortIpHistory" data-args='["ip"]'>IP</th>
+                  <th data-click="sortIpHistory" data-args='["days"]'>Last seen</th>
                   <th>Hostname</th>
                   <th class="td-mac">MAC</th>
                   <th>Vendor</th>
@@ -759,8 +759,8 @@
       <select id="mergeTargetIp"></select>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeMergeHost()">Cancel</button>
-      <button class="btn btn-danger" onclick="saveMergeHost()">Merge &amp; Delete</button>
+      <button class="btn" data-click="closeMergeHost">Cancel</button>
+      <button class="btn btn-danger" data-click="saveMergeHost">Merge &amp; Delete</button>
     </div>
   </div>
 </div>
@@ -805,8 +805,8 @@
       <textarea id="addHostNotes" placeholder="Anything useful about this device…"></textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeAddHost()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAddHost()">Add Host</button>
+      <button class="btn" data-click="closeAddHost">Cancel</button>
+      <button class="btn btn-primary" data-click="saveAddHost">Add Host</button>
     </div>
   </div>
 </div>
@@ -873,7 +873,7 @@
       </div>
       <div class="form-row">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400;padding-top:18px">
-          <input type="checkbox" id="editIsDhcp" style="accent-color:#e07820;width:14px;height:14px" onchange="document.getElementById('editDhcpPoolRow').style.display=this.checked?'':'none'">
+          <input type="checkbox" id="editIsDhcp" style="accent-color:#e07820;width:14px;height:14px" data-change="editDhcpToggled">
           <span style="color:var(--text-2)">DHCP Server</span>
         </label>
       </div>
@@ -910,7 +910,7 @@
     </div>
     <div class="form-row">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
-        <input type="checkbox" id="editPublic" onchange="onEditPublicToggle()" style="accent-color:var(--accent);width:14px;height:14px">
+        <input type="checkbox" id="editPublic" data-change="onEditPublicToggle" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">Show on public status page <span style="color:var(--text-3)">(only the name, up/down &amp; uptime — never the IP)</span></span>
       </label>
     </div>
@@ -925,8 +925,8 @@
       </label>
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeEditHost()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveHostEdit()">Save</button>
+      <button class="btn" data-click="closeEditHost">Cancel</button>
+      <button class="btn btn-primary" data-click="saveHostEdit">Save</button>
     </div>
   </div>
 </div>

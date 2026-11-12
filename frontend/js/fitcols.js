@@ -16,7 +16,7 @@
       menu: "colMenu", hiddenKey: "boltarr.hostsHiddenCols", pinKey: "boltarr.hostsPinnedCols",
       prefix: "hide-", flex: "host",
       // th selector per column key, and the width it needs
-      cols: { check: [".td-check", 34], ip: [".td-ip", 140], host: [".col-host", 170], mac: [".col-mac", 150],
+      cols: { check: [".td-check", 34], ip: [".td-ip", 180], host: [".col-host", 140], mac: [".col-mac", 150],
               vendor: [".col-vendor", 160], type: [".col-type", 170], os: [".col-os", 160],
               ports: [".col-ports", 190], seen: [".col-seen", 130], notes: [".col-notes", 180] },
       order: ["os", "vendor", "notes", "ports", "mac", "seen", "type"],   // first to hide → last
