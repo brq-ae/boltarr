@@ -599,6 +599,7 @@ function editDhcpToggled() {
 }
 
 registerActions({
+  openNetworkAnalysis, runNetworkAnalysis, closeNetworkAnalysis,
   showHostDetail, hideHostDetail, analyzeHost, openEditHost, openMergeHost, probeHost, deleteHost,
   switchDetailTab, removeAlias, deletePort, addPort,
   openAddHost, closeAddHost, saveAddHost, closeMergeHost, saveMergeHost,

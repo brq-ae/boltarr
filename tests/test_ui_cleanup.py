@@ -108,29 +108,22 @@ def test_assets_fingerprinted_and_cached(client):
     assert client.get("/api/version").headers.get("cache-control") != "public, max-age=31536000, immutable"
 
 
-def test_no_inline_handlers_in_converted_areas():
-    """F-08 part B: converted areas use data-click/-change/-input, not on…= (CSP step)."""
+def test_no_inline_code_anywhere():
+    """F-08 part B (done in v0.23.5): strict mode blocks inline code, so no page or
+    script may use on…= handlers, inline <script> blocks or javascript: links."""
     import pathlib
     import re
     fe = pathlib.Path(__file__).resolve().parent.parent / "frontend"
     html = (fe / "index.html").read_text()
-    for start, end in [('id="factoryResetModal"', 'class="topbar"'),
-                       ('id="panel-scans"', 'id="panel-services"'),
-                       ('id="scheduleModal"', 'id="subnetModal"'),
-                       ('id="panel-services"', 'id="panel-sshkeys"'),
-                       ('id="serviceModal"', 'id="editConnModal"'),
-                       ('id="svcDetailPanel"', '<script src='),
-                       ('id="panel-sshkeys"', 'id="panel-search"'),
-                       ('id="settingsModal"', 'id="svcDetailPanel"'),
-                       ('id="panel-hosts"', 'id="panel-scans"'),
-                       ('id="mergeModal"', 'id="connModal"')]:
-        a = html.index(start)
-        part = html[a:html.index(end, a)]
-        assert not re.findall(r"\son[a-z]+=", part), start
-    for f in ["settings", "ssh", "scans", "services", "services-detail", "hosts", "host-detail"]:
-        assert not re.findall(r"\son[a-z]+=", (fe / "js" / "app" / f"{f}.js").read_text()), f
+    files = [*fe.glob("*.html"), *(fe / "js").glob("*.js"), *(fe / "js" / "app").glob("*.js")]
+    for f in files:
+        text = f.read_text()
+        assert not re.findall(r"\son[a-z]+\s*=\s*[\"'`$]", text), f.name
+        assert "javascript:" not in text.replace("javascript:/data:", ""), f.name
+        if f.suffix == ".html":
+            assert not re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", text), f.name
     # every action named in the page is registered by some app file
     js = "".join((fe / "js" / "app" / f"{f}.js").read_text() for f in APP_FILES)
-    reg = "".join(re.findall(r"registerActions\(\{(.*?)\}\);", js, re.S))
+    reg = "".join(re.findall(r"registerActions\((.*?)\);\n", js, re.S))
     for name in set(re.findall(r'data-(?:click|change|input)="([A-Za-z]+)"', html + js)):
         assert re.search(rf"\b{name}\b", reg), name

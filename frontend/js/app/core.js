@@ -147,16 +147,16 @@ function renderSubnetList() {
   list.innerHTML = subnets.map(s => {
     const hidden = hiddenSubnets.has(s.id);
     return `
-    <div class="subnet-row${hidden ? " subnet-hidden" : ""}" id="subnet-row-${s.id}" onclick="selectSubnetNodes(${s.id})" title="Click to select all hosts in this subnet">
+    <div class="subnet-row${hidden ? " subnet-hidden" : ""}" id="subnet-row-${s.id}" data-click="selectSubnetNodes" data-args="[${s.id}]" title="Click to select all hosts in this subnet">
       <div class="subnet-dot" id="subnet-dot-${s.id}"></div>
       <div class="subnet-info">
         <div class="subnet-name">${escHtml(s.name)}</div>
         <div class="subnet-cidr mono">${escHtml(s.cidr)}</div>
       </div>
-      <button class="btn-icon subnet-eye" onclick="event.stopPropagation(); toggleSubnetVisibility(${s.id})" title="${hidden ? "Show" : "Hide"} in topology">${hidden ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>` : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`}</button>
-      <button class="btn-icon" onclick="event.stopPropagation(); openEditSubnet(${s.id})" title="Edit subnet (name, DHCP range)" style="color:var(--text-3);font-size:12px;padding:2px 5px">✎</button>
-      <button class="btn-scan" onclick="event.stopPropagation(); triggerScan(${s.id})" title="Scan ${escHtml(s.cidr)}">▶</button>
-      <button class="btn-icon" onclick="event.stopPropagation(); deleteSubnet(${s.id},${jsq(s.name)})" title="Remove subnet" style="color:var(--text-3);font-size:13px;padding:2px 5px">✕</button>
+      <button class="btn-icon subnet-eye" data-click="toggleSubnetVisibility" data-args="[${s.id}]" title="${hidden ? "Show" : "Hide"} in topology">${hidden ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>` : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`}</button>
+      <button class="btn-icon" data-click="openEditSubnet" data-args="[${s.id}]" title="Edit subnet (name, DHCP range)" style="color:var(--text-3);font-size:12px;padding:2px 5px">✎</button>
+      <button class="btn-scan" data-click="triggerScan" data-args="[${s.id}]" title="Scan ${escHtml(s.cidr)}">▶</button>
+      <button class="btn-icon" data-click="deleteSubnet" data-args="${dargs(s.id, s.name)}" title="Remove subnet" style="color:var(--text-3);font-size:13px;padding:2px 5px">✕</button>
     </div>`;
   }).join("");
 }
@@ -409,3 +409,10 @@ function toggleLegend() {
   chevron.textContent = collapsed ? "▾" : "▴";
 }
 
+
+registerActions({
+  openTopology, setTab, toggleSidebar, closeSidebar, toggleChat, toggleLegend, stopScan,
+  openAddSubnet, closeAddSubnet, saveSubnet, selectSubnetNodes, toggleSubnetVisibility,
+  openEditSubnet, triggerScan, deleteSubnet,
+  printPage: () => window.print(),
+});

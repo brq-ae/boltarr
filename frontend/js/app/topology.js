@@ -54,7 +54,7 @@ function hierNodeHTML(ip, childrenMap, hostMap, tiers, connEdge, depth) {
   const children = (childrenMap[ip] || []).sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip));
 
   return `<div class="hier-node">
-    <div class="hier-node-row" onclick="showHostDetail(${jsq(ip)})">
+    <div class="hier-node-row" data-click="showHostDetail" data-args="${dargs(ip)}">
       <span class="hier-tier-badge">${tierBadge}</span>
       <span class="hier-dot" style="background:${color}"></span>
       <span class="hier-ip mono">${escHtml(ip)}</span>
@@ -63,9 +63,9 @@ function hierNodeHTML(ip, childrenMap, hostMap, tiers, connEdge, depth) {
       ${pill}
       <span class="hier-node-actions">
         <button class="btn" style="font-size:10px;padding:2px 7px"
-          onclick="event.stopPropagation();hierLinkFrom(${jsq(ip)})">Link</button>
+          data-click="hierLinkFrom" data-args="${dargs(ip)}">Link</button>
         <button class="btn" style="font-size:10px;padding:2px 7px"
-          onclick="event.stopPropagation();hierMultiLinkFrom(${jsq(ip)})">Multi</button>
+          data-click="hierMultiLinkFrom" data-args="${dargs(ip)}">Multi</button>
       </span>
     </div>
     ${children.length ? `<div class="hier-children">${children.map(c =>
@@ -167,8 +167,8 @@ function renderVlans() {
       <div class="vlan-swatch" style="background:${escHtml(v.color)}"></div>
       <span class="vlan-tag mono">VLAN ${escHtml(v.tag)}</span>
       <span class="vlan-name">${escHtml(v.name)}</span>
-      <button class="btn-ghost" onclick="openEditVlan(${v.id})" style="font-size:11px;padding:2px 5px" title="Edit">✎</button>
-      <button class="btn-ghost btn-danger" onclick="deleteVlan(${v.id})" style="font-size:11px;padding:2px 5px" title="Delete">✕</button>
+      <button class="btn-ghost" data-click="openEditVlan" data-args="[${v.id}]" style="font-size:11px;padding:2px 5px" title="Edit">✎</button>
+      <button class="btn-ghost btn-danger" data-click="deleteVlan" data-args="[${v.id}]" style="font-size:11px;padding:2px 5px" title="Delete">✕</button>
     </div>
   `).join("");
 }
@@ -276,3 +276,16 @@ function getTaggedOnly(sectionId) {
   return cb ? cb.checked : false;
 }
 
+
+// No browser menu on right-click over the graph (it has its own).
+document.getElementById("cy")?.addEventListener("contextmenu", e => e.preventDefault());
+
+registerActions({
+  loadHierarchy, hierLinkFrom, hierMultiLinkFrom,
+  openVlanPanel, closeVlanPanel, addVlan, openEditVlan, cancelEditVlan, saveEditVlan, deleteVlan,
+  connPortModeChanged: function (section) { updateConnVlans(section, this.value); },
+});
+// graph.js functions, looked up when clicked (graph.js loads before registerActions exists)
+registerActions(Object.fromEntries(["toggleConnectMode", "toggleMultiConnectMode", "openMultiConnModal",
+  "saveLayoutToDb", "closeConnModal", "saveConnection", "closeMultiConnModal", "saveMultiConnections"]
+  .map(n => [n, function (...a) { return window[n].apply(this, a); }])));

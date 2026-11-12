@@ -46,6 +46,7 @@ def startup():
     from .config import CONFIG_PATH
     fresh = not CONFIG_PATH.exists()
     init_db()
+    security.drop_stale_reports()
     if fresh:
         with get_conn() as conn:
             empty = not conn.execute("SELECT 1 FROM hosts UNION ALL SELECT 1 FROM subnets LIMIT 1").fetchone()
@@ -171,6 +172,11 @@ async def csp_report(request: Request):
 @app.get("/api/security/reports")
 def get_security_reports():
     return security.list_reports()
+
+
+@app.get("/api/security/status")
+def get_security_status():
+    return {"strict": security.strict()}
 
 
 @app.delete("/api/security/reports")

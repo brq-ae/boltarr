@@ -35,8 +35,8 @@ function showNoPasswordBanner() {
   bar.className = "restored-banner nopw-banner";
   bar.setAttribute("role", "status");
   bar.innerHTML = `<span>🔓 Boltarr has no password — anyone on your network can change it.</span>
-    <button class="btn" style="font-size:12px" onclick="openLoginSettings()">Set a password</button>
-    <button class="btn-ghost" style="font-size:12px" onclick="snoozeNoPwBanner()">Not now</button>`;
+    <button class="btn" style="font-size:12px" data-click="openLoginSettings">Set a password</button>
+    <button class="btn-ghost" style="font-size:12px" data-click="snoozeNoPwBanner">Not now</button>`;
   document.body.prepend(bar);
 }
 
@@ -113,4 +113,4 @@ async function logout() {
   location.href = "/login.html";
 }
 
-registerActions({ enableLogin, changeLoginPassword, saveLoginProxy, disableLogin });
+registerActions({ enableLogin, changeLoginPassword, saveLoginProxy, disableLogin, logout, openLoginSettings, snoozeNoPwBanner });

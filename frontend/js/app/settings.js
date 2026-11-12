@@ -147,12 +147,16 @@ function onSettingsProviderChange() {
   }
 }
 
-// ── Security: strict-mode check (CSP report-only findings) ────────────────────
+// ── Security: strict mode (what the browser blocked / would block) ───────────────
 
 async function loadCspReports() {
   const sum = document.getElementById("cspSummary"), list = document.getElementById("cspList");
-  let rows = [];
-  try { rows = await api("GET", "/api/security/reports"); } catch (_) { sum.textContent = "Couldn't load the report."; return; }
+  let rows = [], status = { strict: true };
+  try {
+    [rows, status] = await Promise.all([api("GET", "/api/security/reports"), api("GET", "/api/security/status")]);
+  } catch (_) { sum.textContent = "Couldn't load the report."; return; }
+  if (!status.strict) document.getElementById("cspModeText").textContent =
+    "Strict mode is off (BOLTARR_ALLOW_INLINE_SCRIPTS is set). Your browser blocks nothing and only reports what strict mode would block.";
   // A frame block is the protection working (another site tried to embed Boltarr),
   // never a broken Boltarr page — so it gets its own calm line, not the red warning.
   const isFrame  = r => r.directive === "frame-ancestors";
@@ -165,9 +169,10 @@ async function loadCspReports() {
     const times = framed.reduce((n, r) => n + r.count, 0);
     parts.push(`<span style="color:var(--text-2)">🛡 A site was stopped from showing Boltarr in a frame (×${times}). If that was your dashboard, add it under Allowed dashboards.</span>`);
   }
-  parts.push(strict.length
-    ? `${strict.length} place${strict.length === 1 ? "" : "s"} would be blocked in strict mode`
-    : "Nothing reported yet — use Boltarr normally and check back.");
+  if (strict.length) parts.push(status.strict
+    ? `${strict.length} old report${strict.length === 1 ? "" : "s"} from before strict mode (safe to clear)`
+    : `${strict.length} place${strict.length === 1 ? "" : "s"} would be blocked in strict mode`);
+  if (!rows.length) parts.push(status.strict ? "Nothing blocked." : "Nothing reported yet — use Boltarr normally and check back.");
   sum.innerHTML = parts.join("<br>");
   list.innerHTML = rows.length ? rows.slice(0, 100).map(r => {
     const where = r.source ? `${r.source.replace(location.origin, "")}${r.line ? ":" + r.line : ""}` : "";
@@ -638,6 +643,7 @@ async function doFactoryReset() {
 }
 
 registerActions({
+  openSettings,
   closeSettings, saveSettings, updateTzPreview, toggleCspList, clearCspReports,
   onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification,
   generateStatusToken, testStatusPush, downloadBackup, openFactoryReset,

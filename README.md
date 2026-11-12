@@ -192,6 +192,10 @@ docker exec boltarr reset-password
 
 Use your container's name if it isn't `boltarr`. Without Docker, run `venv/bin/python -m backend.reset_password` from the Boltarr folder.
 
+## Browser security
+
+Boltarr tells your browser to refuse any code written into its pages (strict mode), so code slipped into a hostname or note can't run. **Settings → 🛡 Security** lists anything the browser blocked. If a button stops working after an update, set `BOLTARR_ALLOW_INLINE_SCRIPTS=1` in the container's environment to switch strict mode off, restart, and please open an issue.
+
 ## Updating
 
 ```bash

@@ -2,18 +2,19 @@
 
 Every response carries a Content-Security-Policy that only lets the page load
 scripts, styles, fonts and data from Boltarr itself, so injected code can't
-pull more code in or send data out. Inline code (onclick="…") is still allowed
-because the UI uses it throughout.
+pull more code in or send data out. Inline code (onclick="…", <script>…</script>)
+is blocked too (strict mode, v0.23.5): the UI names actions with data-click etc.
+Anything the browser blocks is reported to /api/csp-report and listed in
+Settings → Security.
 
-A second, report-only policy has inline code switched off. The browser blocks
-nothing for it, only reports what it would have blocked to /api/csp-report.
-Those reports are the to-do list for moving the UI off inline code; once they
-stop, the enforced policy can drop 'unsafe-inline'.
+Off-switch: BOLTARR_ALLOW_INLINE_SCRIPTS=1 goes back to allowing inline code,
+with a report-only strict policy that lists what strict mode would block.
 
 Dashboards (Homarr, Organizr, Home Assistant…) may show Boltarr in a frame only
 when their address is listed in Settings → Security.
 """
 import json
+import os
 import threading
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,6 +32,11 @@ _BASE = ("default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' d
 # report-uri only: when report-to is also present Chrome ignores report-uri, and
 # report-to (the Reporting API) only works over HTTPS — most LAN installs are HTTP.
 _REPORT = f"report-uri {REPORT_PATH}"
+
+
+def strict() -> bool:
+    """Strict mode (no inline code) unless BOLTARR_ALLOW_INLINE_SCRIPTS is set."""
+    return os.environ.get("BOLTARR_ALLOW_INLINE_SCRIPTS", "").lower() not in ("1", "true", "yes", "on")
 
 
 def parse_frame_origins(text: str) -> list[str]:
@@ -57,27 +63,32 @@ _cache: tuple = ("\0", {})
 def headers_for(frame_origins: str) -> dict:
     """Headers for every response. Cached per frame_origins setting."""
     global _cache
+    key = (frame_origins, strict())
     with _cache_lock:
-        if _cache[0] == frame_origins:
+        if _cache[0] == key:
             return _cache[1]
     try:
         origins = parse_frame_origins(frame_origins)
     except ValueError:
         origins = []                       # a bad saved value fails closed
     ancestors = " ".join(["'self'", *origins])
-    h = {
-        "Content-Security-Policy":
-            f"{_BASE}; script-src 'self' 'unsafe-inline'; frame-ancestors {ancestors}; {_REPORT}",
-        "Content-Security-Policy-Report-Only":
-            f"script-src 'self' 'report-sample'; {_REPORT}",
+    if key[1]:
+        h = {"Content-Security-Policy":
+             f"{_BASE}; script-src 'self' 'report-sample'; frame-ancestors {ancestors}; {_REPORT}"}
+    else:
+        h = {"Content-Security-Policy":
+             f"{_BASE}; script-src 'self' 'unsafe-inline'; frame-ancestors {ancestors}; {_REPORT}",
+             "Content-Security-Policy-Report-Only":
+             f"script-src 'self' 'report-sample'; {_REPORT}"}
+    h.update({
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "same-origin",
         "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-    }
+    })
     if not origins:
         h["X-Frame-Options"] = "SAMEORIGIN"   # older browsers that ignore frame-ancestors
     with _cache_lock:
-        _cache = (frame_origins, h)
+        _cache = (key, h)
     return h
 
 
@@ -150,6 +161,16 @@ def list_reports() -> list[dict]:
             """SELECT mode, directive, blocked, source, line, sample, count, first_seen, last_seen
                FROM csp_reports ORDER BY mode = 'enforced' DESC, count DESC, last_seen DESC""").fetchall()
     return [dict(r) for r in rows]
+
+
+def drop_stale_reports() -> None:
+    """In strict mode the browser no longer sends report-only ('strict-check') reports,
+    so any still stored are from before it (all fixed by v0.23.5) — drop them."""
+    if not strict():
+        return
+    with get_conn() as conn:
+        conn.execute("DELETE FROM csp_reports WHERE mode != 'enforced'")
+        conn.commit()
 
 
 def clear_reports() -> None:

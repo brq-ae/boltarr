@@ -20,19 +20,19 @@
     </div>
 
     <nav class="sidebar-nav">
-      <button class="sidebar-nav-item active" data-tab="topology" onclick="openTopology()">
+      <button class="sidebar-nav-item active" data-tab="topology" data-click="openTopology">
         <span class="nav-icon">⬡</span> Topology
       </button>
-      <button class="sidebar-nav-item" data-tab="services" onclick="setTab('services')">
+      <button class="sidebar-nav-item" data-tab="services" data-click="setTab" data-args='["services"]'>
         <span class="nav-icon">◈</span> Services
       </button>
-      <button class="sidebar-nav-item" data-tab="hosts" onclick="setTab('hosts')">
+      <button class="sidebar-nav-item" data-tab="hosts" data-click="setTab" data-args='["hosts"]'>
         <span class="nav-icon">▤</span> Hosts
       </button>
-      <button class="sidebar-nav-item" data-tab="scans" onclick="setTab('scans')">
+      <button class="sidebar-nav-item" data-tab="scans" data-click="setTab" data-args='["scans"]'>
         <span class="nav-icon">◷</span> Scans
       </button>
-      <button class="sidebar-nav-item" data-tab="sshkeys" onclick="setTab('sshkeys')">
+      <button class="sidebar-nav-item" data-tab="sshkeys" data-click="setTab" data-args='["sshkeys"]'>
         <span class="nav-icon">🔑</span> SSH Keys
       </button>
     </nav>
@@ -41,7 +41,7 @@
 
     <div class="sidebar-section-header">
       Subnets
-      <button class="btn-icon" onclick="openAddSubnet()" title="Add subnet">+</button>
+      <button class="btn-icon" data-click="openAddSubnet" title="Add subnet">+</button>
     </div>
 
     <div class="sidebar-section" id="subnetList">
@@ -49,7 +49,7 @@
     </div>
 
     <div class="sidebar-footer">
-      <button class="ai-settings-btn" id="aiSettingsBtn" onclick="openSettings()">
+      <button class="ai-settings-btn" id="aiSettingsBtn" data-click="openSettings">
         <span id="aiStatusDot" class="ai-status-dot ai-status-none"></span>
         ⚙ Settings
       </button>
@@ -164,7 +164,7 @@
 
   <!-- ── Top bar ────────────────────────────────────────────────────────────── -->
   <header class="topbar">
-    <button class="btn-menu" id="menuBtn" onclick="toggleSidebar()">☰</button>
+    <button class="btn-menu" id="menuBtn" data-click="toggleSidebar">☰</button>
     <span class="topbar-title" id="topbarTitle">Topology</span>
     <div class="topbar-spacer"></div>
     <div class="gsearch">
@@ -176,8 +176,8 @@
         <div class="gs-results" id="gsResults" role="listbox" hidden></div>
       </div>
     </div>
-    <button class="btn" onclick="toggleChat()" title="Network assistant">💬 Chat</button>
-    <button class="btn" id="logoutBtn" onclick="logout()" title="Log out" hidden>⎋ Log out</button>
+    <button class="btn" data-click="toggleChat" title="Network assistant">💬 Chat</button>
+    <button class="btn" id="logoutBtn" data-click="logout" title="Log out" hidden>⎋ Log out</button>
   </header>
 
   <!-- ── Content ────────────────────────────────────────────────────────────── -->
@@ -186,24 +186,24 @@
 
       <!-- Topology tab -->
       <div class="tab-panel active" id="panel-topology">
-        <div id="cy" oncontextmenu="return false"></div>
+        <div id="cy"></div>
 
         <div class="graph-toolbar">
           <div class="svc-subtabs topo-subtabs">
-            <button class="svc-subtab active" onclick="setTab('topology')">Graph</button>
-            <button class="svc-subtab" onclick="setTab('hierarchy')">Hierarchy</button>
+            <button class="svc-subtab active" data-click="setTab" data-args='["topology"]'>Graph</button>
+            <button class="svc-subtab" data-click="setTab" data-args='["hierarchy"]'>Hierarchy</button>
           </div>
-          <button class="btn" onclick="openNetworkAnalysis()">⬡ Analyze Network</button>
-          <button class="btn" id="vlanBtn" onclick="openVlanPanel()">◈ VLANs</button>
-          <button class="btn" id="connectBtn" onclick="toggleConnectMode()">◎ Link</button>
-          <button class="btn" id="multiConnBtn" onclick="toggleMultiConnectMode()">⊕ Multi-Link</button>
-          <button class="btn btn-primary" id="multiConfirmBtn" onclick="openMultiConnModal()" style="display:none">Link (0)</button>
-          <button class="btn" id="saveLayoutBtn" onclick="saveLayoutToDb()">⊙ Save Layout</button>
+          <button class="btn" data-click="openNetworkAnalysis">⬡ Analyze Network</button>
+          <button class="btn" id="vlanBtn" data-click="openVlanPanel">◈ VLANs</button>
+          <button class="btn" id="connectBtn" data-click="toggleConnectMode">◎ Link</button>
+          <button class="btn" id="multiConnBtn" data-click="toggleMultiConnectMode">⊕ Multi-Link</button>
+          <button class="btn btn-primary" id="multiConfirmBtn" data-click="openMultiConnModal" style="display:none">Link (0)</button>
+          <button class="btn" id="saveLayoutBtn" data-click="saveLayoutToDb">⊙ Save Layout</button>
           <span class="connect-hint" id="connectHint"></span>
         </div>
 
         <div class="graph-legend" id="graphLegend">
-          <div class="legend-toggle" onclick="toggleLegend()">Legend <span id="legendChevron">▴</span></div>
+          <div class="legend-toggle" data-click="toggleLegend">Legend <span id="legendChevron">▴</span></div>
           <div id="legendItems" class="legend-items">
           <div class="legend-item"><div class="legend-dot" style="background:#1a6fa8"></div>Router / GW</div>
           <div class="legend-item"><div class="legend-dot" style="background:#155a8a"></div>Switch / Firewall</div>
@@ -225,7 +225,7 @@
             <div class="progress-bar" id="progressBar" style="width:0%"></div>
           </div>
           <span id="progressLabel" style="color:var(--text-2);font-size:11px">Starting…</span>
-          <button class="btn btn-danger" id="stopScanBtn" style="font-size:11px;padding:3px 10px;margin-left:8px" onclick="stopScan()">Stop</button>
+          <button class="btn btn-danger" id="stopScanBtn" style="font-size:11px;padding:3px 10px;margin-left:8px" data-click="stopScan">Stop</button>
         </div>
       </div>
 
@@ -540,11 +540,11 @@
         <div class="hierarchy-wrap">
           <div class="hierarchy-toolbar">
           <div class="svc-subtabs topo-subtabs">
-            <button class="svc-subtab" onclick="setTab('topology')">Graph</button>
-            <button class="svc-subtab active" onclick="setTab('hierarchy')">Hierarchy</button>
+            <button class="svc-subtab" data-click="setTab" data-args='["topology"]'>Graph</button>
+            <button class="svc-subtab active" data-click="setTab" data-args='["hierarchy"]'>Hierarchy</button>
           </div>
-            <button class="btn" onclick="loadHierarchy()">↻ Recalculate</button>
-            <button class="btn" onclick="window.print()">⎙ Print / PDF</button>
+            <button class="btn" data-click="loadHierarchy">↻ Recalculate</button>
+            <button class="btn" data-click="printPage">⎙ Print / PDF</button>
             <span style="font-size:11px;color:var(--text-3);margin-left:4px">
               L1 = manual (set in Edit Host). L2+ derived from connections.
             </span>
@@ -564,7 +564,7 @@
           <button class="btn-ghost chat-hbtn" id="chatCopyAll" title="Copy the whole conversation">⧉</button>
           <button class="btn-ghost chat-hbtn" id="chatDownload" title="Download the conversation (.md)">⤓</button>
           <button class="btn-ghost chat-hbtn chat-wide-btn" id="chatWide" title="Wider chat">⤢</button>
-          <button class="btn-ghost" onclick="toggleChat()" style="font-size:16px;padding:2px 6px">×</button>
+          <button class="btn-ghost" data-click="toggleChat" style="font-size:16px;padding:2px 6px">×</button>
         </div>
       </div>
       <div class="chat-messages" id="chatMessages">
@@ -584,21 +584,21 @@
 </div><!-- .shell -->
 
 <!-- Mobile sidebar overlay -->
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+<div class="sidebar-overlay" id="sidebarOverlay" data-click="closeSidebar"></div>
 
 <!-- Mobile bottom nav -->
 <nav class="bottom-nav">
   <div class="bottom-nav-inner">
-    <button class="bottom-nav-btn active" data-tab="topology" onclick="openTopology()">
+    <button class="bottom-nav-btn active" data-tab="topology" data-click="openTopology">
       <span class="bottom-nav-icon">⬡</span>Topo
     </button>
-    <button class="bottom-nav-btn" data-tab="services" onclick="setTab('services')">
+    <button class="bottom-nav-btn" data-tab="services" data-click="setTab" data-args='["services"]'>
       <span class="bottom-nav-icon">◈</span>Svcs
     </button>
-    <button class="bottom-nav-btn" data-tab="hosts" onclick="setTab('hosts')">
+    <button class="bottom-nav-btn" data-tab="hosts" data-click="setTab" data-args='["hosts"]'>
       <span class="bottom-nav-icon">▤</span>Hosts
     </button>
-    <button class="bottom-nav-btn" data-tab="scans" onclick="setTab('scans')">
+    <button class="bottom-nav-btn" data-tab="scans" data-click="setTab" data-args='["scans"]'>
       <span class="bottom-nav-icon">◷</span>Scans
     </button>
   </div>
@@ -735,8 +735,8 @@
       <input type="text" id="subnetDhcpEnd" placeholder="192.168.1.254" class="mono" style="flex:1;min-width:120px">
     </div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeAddSubnet()">Cancel</button>
-      <button class="btn btn-primary" id="subnetSaveBtn" onclick="saveSubnet()">Add Subnet</button>
+      <button class="btn" data-click="closeAddSubnet">Cancel</button>
+      <button class="btn btn-primary" id="subnetSaveBtn" data-click="saveSubnet">Add Subnet</button>
     </div>
   </div>
 </div>
@@ -954,7 +954,7 @@
       </div>
       <div class="form-row">
         <label>Port mode</label>
-        <select id="connPortMode" onchange="updateConnVlans('connVlanSection', this.value)">
+        <select id="connPortMode" data-change="connPortModeChanged" data-args='["connVlanSection"]'>
           <option value="">— none —</option>
           <option value="access">Access</option>
           <option value="trunk">Trunk</option>
@@ -985,8 +985,8 @@
     </div>
     <div id="connVlanSection" style="display:none"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeConnModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveConnection()">Link</button>
+      <button class="btn" data-click="closeConnModal">Cancel</button>
+      <button class="btn btn-primary" data-click="saveConnection">Link</button>
     </div>
   </div>
 </div>
@@ -1103,7 +1103,7 @@
       </div>
       <div class="form-row">
         <label>Port mode</label>
-        <select id="editConnPortMode" onchange="updateConnVlans('editConnVlanSection', this.value)">
+        <select id="editConnPortMode" data-change="connPortModeChanged" data-args='["editConnVlanSection"]'>
           <option value="">— none —</option>
           <option value="access">Access</option>
           <option value="trunk">Trunk</option>
@@ -1134,9 +1134,9 @@
     </div>
     <div id="editConnVlanSection" style="display:none"></div>
     <div class="modal-actions">
-      <button class="btn btn-danger" onclick="deleteConnFromEdit()">Delete</button>
-      <button class="btn" onclick="closeEditConn()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveConnEdit()">Save</button>
+      <button class="btn btn-danger" data-click="deleteConnFromEdit">Delete</button>
+      <button class="btn" data-click="closeEditConn">Cancel</button>
+      <button class="btn btn-primary" data-click="saveConnEdit">Save</button>
     </div>
   </div>
 </div>
@@ -1166,7 +1166,7 @@
       </div>
       <div class="form-row">
         <label>Port mode</label>
-        <select id="multiConnPortMode" onchange="updateConnVlans('multiConnVlanSection', this.value)">
+        <select id="multiConnPortMode" data-change="connPortModeChanged" data-args='["multiConnVlanSection"]'>
           <option value="">— none —</option>
           <option value="access">Access</option>
           <option value="trunk">Trunk</option>
@@ -1197,8 +1197,8 @@
     </div>
     <div id="multiConnVlanSection" style="display:none"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeMultiConnModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveMultiConnections()">Link All</button>
+      <button class="btn" data-click="closeMultiConnModal">Cancel</button>
+      <button class="btn btn-primary" data-click="saveMultiConnections">Link All</button>
     </div>
   </div>
 </div>
@@ -1208,7 +1208,7 @@
   <div class="modal" style="width:420px">
     <div class="modal-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>VLAN Manager</span>
-      <button class="btn-ghost" onclick="closeVlanPanel()" style="font-size:18px;padding:2px 7px">×</button>
+      <button class="btn-ghost" data-click="closeVlanPanel" style="font-size:18px;padding:2px 7px">×</button>
     </div>
 
     <!-- VLAN list -->
@@ -1232,8 +1232,8 @@
         <label style="margin:0;white-space:nowrap">Color</label>
         <input type="color" id="editVlanColor" value="#888888" style="flex:none;width:44px;height:30px;padding:1px 2px;cursor:pointer">
         <div class="modal-actions" style="margin:0;flex:1;justify-content:flex-end">
-          <button class="btn" onclick="cancelEditVlan()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveEditVlan()">Save</button>
+          <button class="btn" data-click="cancelEditVlan">Cancel</button>
+          <button class="btn btn-primary" data-click="saveEditVlan">Save</button>
         </div>
       </div>
     </div>
@@ -1254,7 +1254,7 @@
       <div class="form-row" style="display:flex;align-items:center;gap:10px">
         <label style="margin:0;white-space:nowrap">Color</label>
         <input type="color" id="newVlanColor" value="#888888" style="flex:none;width:44px;height:30px;padding:1px 2px;cursor:pointer">
-        <button class="btn btn-primary" style="margin-left:auto" onclick="addVlan()">+ Add VLAN</button>
+        <button class="btn btn-primary" style="margin-left:auto" data-click="addVlan">+ Add VLAN</button>
       </div>
     </div>
 
@@ -1268,8 +1268,8 @@
       <span>Network Analysis</span>
       <div style="display:flex;gap:8px;align-items:center">
         <select id="netAnalyzeModel" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
-        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" onclick="runNetworkAnalysis()">↻ Run Analysis</button>
-        <button class="btn-ghost" onclick="closeNetworkAnalysis()" style="font-size:18px;padding:2px 7px">×</button>
+        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" data-click="runNetworkAnalysis">↻ Run Analysis</button>
+        <button class="btn-ghost" data-click="closeNetworkAnalysis" style="font-size:18px;padding:2px 7px">×</button>
       </div>
     </div>
     <div id="networkAnalysisResult" style="min-height:120px;max-height:65vh;overflow-y:auto;margin-top:4px">
@@ -1358,9 +1358,9 @@
             With login on, the dashboard should be on the same domain as Boltarr (e.g. both under <code>example.com</code>), otherwise browsers won't keep you logged in inside the frame.
           </p>
 
-          <div class="settings-sub">Strict-mode check</div>
-          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
-            Your browser quietly reports what a stricter security mode would block. Nothing is blocked now — this list shows what still needs updating before that mode can be turned on.
+          <div class="settings-sub">Strict mode</div>
+          <p class="text-3" id="cspModeText" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+            Strict mode is on: your browser refuses to run code written into the page, so code slipped into a hostname or note can't run. Anything it blocks is listed here.
           </p>
           <div id="cspSummary" class="text-3" style="font-size:12px;margin-bottom:6px">—</div>
           <div id="cspList" class="csp-list" hidden></div>

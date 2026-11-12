@@ -14,10 +14,11 @@ def test_headers_on_pages_and_api(client):
     for path in ("/", "/api/version", "/login.html"):
         r = client.get(path)
         csp = _csp(r)
-        assert "script-src 'self' 'unsafe-inline'" in csp and "connect-src 'self'" in csp
+        assert "script-src 'self' 'report-sample'" in csp and "unsafe-inline' ;" not in csp
+        assert "script-src 'self' 'unsafe-inline'" not in csp and "connect-src 'self'" in csp   # strict mode
         assert "object-src 'none'" in csp and "frame-ancestors 'self'" in csp
         assert "report-uri /api/csp-report" in csp and "report-to" not in csp   # report-to is HTTPS-only
-        assert r.headers["content-security-policy-report-only"].startswith("script-src 'self' 'report-sample'")
+        assert "content-security-policy-report-only" not in r.headers
         assert r.headers["x-content-type-options"] == "nosniff"
         assert r.headers["referrer-policy"] == "same-origin"
         assert r.headers["x-frame-options"] == "SAMEORIGIN"
@@ -109,3 +110,25 @@ def test_own_files_always_revalidated(client):
         assert r.headers["cache-control"] == "no-cache", path
         assert r.headers.get("etag") or r.headers.get("last-modified") or path in ("/", "/login.html")
     assert "cache-control" not in client.get("/vendor/cytoscape.min.js").headers
+
+
+def test_off_switch_allows_inline_scripts(client, monkeypatch):
+    assert client.get("/api/security/status").json() == {"strict": True}
+    monkeypatch.setenv("BOLTARR_ALLOW_INLINE_SCRIPTS", "1")
+    r = client.get("/")
+    assert "script-src 'self' 'unsafe-inline'" in _csp(r)
+    assert r.headers["content-security-policy-report-only"].startswith("script-src 'self' 'report-sample'")
+    assert client.get("/api/security/status").json() == {"strict": False}
+
+
+def test_old_strict_check_reports_dropped_at_start(client, monkeypatch):
+    security.record([{"mode": "strict-check", "directive": "script-src-attr", "blocked": "inline",
+                      "source": "/js/app.js", "line": 1, "sample": "x()"},
+                     {"mode": "enforced", "directive": "frame-ancestors", "blocked": "http://10.0.0.9/",
+                      "source": "", "line": 0, "sample": ""}])
+    monkeypatch.setenv("BOLTARR_ALLOW_INLINE_SCRIPTS", "1")
+    security.drop_stale_reports()                       # off-switch on: kept, they're current
+    assert len(security.list_reports()) == 2
+    monkeypatch.delenv("BOLTARR_ALLOW_INLINE_SCRIPTS")
+    security.drop_stale_reports()                       # strict: only real blocks stay
+    assert [r["mode"] for r in security.list_reports()] == ["enforced"]
