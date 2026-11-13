@@ -79,14 +79,17 @@ async function cycleServiceStatus(id, current, hostIp) {
 }
 
 function svcMonToggle(s) {
-  const on = !!s.monitored;
-  return `<button class="svc-toggle ${on ? 'on' : ''}" data-click="svcRowToggleMonitor" data-args="[${s.id}]" title="${on ? 'Monitoring on — status is set automatically' : 'Monitoring off — status is manual'}">${on ? 'On' : 'Off'}</button>`;
+  const on = !!s.monitored, paused = !on && s.monitor_resume_at;
+  const title = on ? 'Monitoring on — status is set automatically'
+    : paused ? `Monitoring paused until ${fmtLocal(s.monitor_resume_at)}` : 'Monitoring off — status is manual';
+  return `<button class="svc-toggle ${on ? 'on' : ''}" data-click="svcRowToggleMonitor" data-args="[${s.id}]" title="${escHtml(title)}">${on ? 'On' : paused ? 'Paused' : 'Off'}</button>`;
 }
 async function svcRowToggleMonitor(id) {
   const s = allServices.find(x => x.id === id);
   if (!s) return;
   const on = !s.monitored;
   s.monitored = on ? 1 : 0;
+  s.monitor_resume_at = null;      // by hand: ends any timed pause
   renderServicesTable();
   try {
     const r = await api("POST", `/api/services/${id}/monitor`, { enabled: on });
@@ -416,7 +419,7 @@ async function saveServiceModal() {
     const cur = allServices.find(s => s.id === svcId) || {};
     if (!!cur.monitored !== monitored) {
       const r = await api("POST", `/api/services/${svcId}/monitor`, { enabled: monitored });
-      cur.monitored = monitored ? 1 : 0; cur.monitor_status = r.monitor_status;
+      cur.monitored = monitored ? 1 : 0; cur.monitor_status = r.monitor_status; cur.monitor_resume_at = null;
     }
     if (!!cur.public !== isPublic || (isPublic && (cur.public_name || "") !== publicName)) {
       await api("POST", `/api/services/${svcId}/public`, { enabled: isPublic, name: publicName });
@@ -447,6 +450,27 @@ async function loadServicesData() {
   try { allServices = await api("GET", "/api/services"); } catch { allServices = []; }
   try { allDependencies = await api("GET", "/api/service-dependencies"); } catch { allDependencies = []; }
   populateSvcHostFilter();
+  scheduleSvcResumeRefresh();
+}
+
+// A timed pause (AI action) ends on the server at its resume time. Reload then, so the
+// table and an open panel switch back to On without a click. Long pauses re-check hourly
+// (setTimeout can't wait more than ~24 days).
+let svcResumeTimer = null;
+function scheduleSvcResumeRefresh() {
+  clearTimeout(svcResumeTimer);
+  const next = Math.min(...allServices.filter(s => !s.monitored && s.monitor_resume_at).map(s => _ts(s.monitor_resume_at) ?? Infinity));
+  if (!isFinite(next)) return;
+  svcResumeTimer = setTimeout(refreshServicesAfterResume, Math.min(Math.max(0, next - Date.now()) + 2000, 3600000));
+}
+async function refreshServicesAfterResume() {
+  const before = allServices.find(s => s.id === svcDetailId);
+  await loadServicesData();
+  renderServicesTable();
+  const after = allServices.find(s => s.id === svcDetailId);
+  // Only redraw an open panel when its monitoring changed, so nothing being typed is lost
+  if (after && before && after.monitored !== before.monitored
+      && document.getElementById("svcDetailPanel").classList.contains("open")) showSvcDetail(after.id);
 }
 
 function populateSvcHostFilter() {

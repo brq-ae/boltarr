@@ -31,6 +31,7 @@ from . import dhcp_check
 from . import changes
 from . import explain
 from . import ai_history
+from . import ai_actions
 from .changes import classify_host
 from .llm import (
     list_models, generate, chat, chat_stream, is_configured, get_default_model,
@@ -1365,6 +1366,10 @@ class ServiceUpdate(BaseModel):
 
 @app.get("/api/services")
 def list_all_services():
+    try:
+        monitor.resume_due()      # also here, so a pause ends on time even with the loops off
+    except Exception:
+        pass
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT s.*, h.ip, h.hostname, h.online AS host_online
@@ -1421,6 +1426,7 @@ def update_service(svc_id: int, data: ServiceUpdate):
                 fields[f] = getattr(data, f)
         if "monitored" in sent and data.monitored is not None:
             fields["monitored"] = _flag(data.monitored)
+            fields["monitor_resume_at"] = None          # a change by hand ends any timed pause
         if "container_ip" in sent and data.container_ip is not None:  # "" clears the override
             fields["container_ip"] = data.container_ip.strip() or None
         if "check_type" in sent and data.check_type is not None:
@@ -1446,13 +1452,7 @@ def set_service_monitor(svc_id: int, data: MonitorToggleIn):
         s = conn.execute("SELECT id FROM services WHERE id=?", (svc_id,)).fetchone()
         if not s:
             raise HTTPException(404, "Service not found")
-        if data.enabled:
-            conn.execute("UPDATE services SET monitored=1 WHERE id=?", (svc_id,))
-        else:
-            conn.execute(
-                "UPDATE services SET monitored=0, monitor_status='unknown', "
-                "monitor_fail_since=NULL, monitor_alerted=0 WHERE id=?",
-                (svc_id,))
+        monitor.set_monitored(conn, svc_id, data.enabled)   # by hand: clears any resume time
         conn.commit()
     status = "unknown"
     if data.enabled:
@@ -1890,7 +1890,7 @@ def _chat_context() -> str:
         down_hosts, down_svcs = [], []
         mon_services, host_min = [], []          # for the recent-outages section
         open_by = _rows_by_host(conn, "SELECT host_id, port, service FROM ports WHERE state='open'")
-        svc_by  = _rows_by_host(conn, "SELECT host_id, id, name, port, status, monitored, monitor_status FROM services")
+        svc_by  = _rows_by_host(conn, "SELECT host_id, id, name, port, status, monitored, monitor_status, monitor_resume_at FROM services")
         for h in hosts:
             label = h.get("hostname") or h.get("device_type") or "unknown"
             live = h.get("online")
@@ -1900,6 +1900,7 @@ def _chat_context() -> str:
             if h.get("vendor"):   parts.append(f"vendor={h['vendor']}")
             if h.get("os_guess"): parts.append(f"os={h['os_guess']}")
             if h.get("has_wifi"): parts.append("wifi=yes")
+            if h.get("notes"):    parts.append(f"note={h['notes'][:150]!r}")
             if live == 0:
                 down_hosts.append(f"{h['ip']} ({label})")
             ports = open_by.get(h["id"], [])
@@ -1914,6 +1915,10 @@ def _chat_context() -> str:
                     mon = s.get("monitored")
                     st = (s.get("monitor_status") if mon and s.get("monitor_status") else s.get("status")) or "?"
                     cell = f"{s['name']}:{s.get('port') or '?'}[{st}]"
+                    if mon:
+                        cell += " monitored"
+                    elif s.get("monitor_resume_at"):
+                        cell += f" monitoring-paused-until={ai_actions.local_str(s['monitor_resume_at'])}"
                     if mon:
                         u = monitor.uptime(s["id"], 86400)
                         if u and u.get("pct") is not None:
@@ -2018,7 +2023,12 @@ def _chat_context() -> str:
         problems.append("Offline hosts: " + "; ".join(down_hosts))
     if down_svcs:
         problems.append("Down monitored services: " + "; ".join(down_svcs))
-    network_ctx = f"Current time: {datetime.now(_tz).strftime('%Y-%m-%d %H:%M %Z')}\n\n"
+    network_ctx = f"Current time: {datetime.now(_tz).strftime('%Y-%m-%d %H:%M %Z')}\n"
+    if not get_config().get("general", {}).get("timezone"):
+        network_ctx += ("All times in this data are UTC, because no timezone is set in Boltarr. Always write "
+                        "'UTC' after any time you mention, and if the user talks about times, tell them once "
+                        "that they can set their timezone in Settings → General.\n")
+    network_ctx += "\n"
     network_ctx += "Currently down:\n  " + (
         "\n  ".join(problems) if problems else "Nothing — all monitored items are up.") + "\n\n"
     if lines:
@@ -2043,6 +2053,7 @@ def _chat_context() -> str:
         "anything currently down or notably unstable when relevant, and reference specific IPs, "
         "hostnames and times. Be concise, and if the data doesn't cover something, say so rather "
         "than guessing.\n\n"
+        + ai_actions.prompt_section() + "\n\n"
         + network_ctx
     )
     return system_msg
@@ -2073,6 +2084,40 @@ async def chat_stream_endpoint(req: ChatReq):
             yield f"\n\n[AI error: {e}]"
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+
+
+class AiActionsCheckReq(BaseModel):
+    actions: list[str]            # the JSON inside each [[action …]] line of a reply
+
+
+class AiActionRunReq(BaseModel):
+    action: dict
+    model:  str = ""     # for the AI actions record
+    asked:  str = ""     # what the user asked in the chat (cut to 300 characters)
+
+
+@app.post("/api/ai-actions/check")
+def ai_actions_check(req: AiActionsCheckReq):
+    """Turn the AI's suggested actions into cards (checked by Boltarr, nothing done)."""
+    return {"cards": [ai_actions.check(a) for a in req.actions[:10]]}
+
+
+@app.post("/api/ai-actions/run")
+def ai_actions_run(req: AiActionRunReq):
+    """Do one suggested action after the user clicked Do it (checked again first)."""
+    return ai_actions.run(req.action, req.model[:100], req.asked[:2000])
+
+
+@app.post("/api/ai-actions/cancel")
+def ai_actions_cancel(req: AiActionRunReq):
+    """The user clicked Cancel on a card: nothing is done, it's only recorded."""
+    return ai_actions.cancel(req.action, req.model[:100], req.asked[:2000])
+
+
+@app.get("/api/ai-actions/log")
+def ai_actions_log():
+    """The AI actions record, newest first (empty while AI history is off)."""
+    return {"actions": ai_history.actions()}
 
 
 # ── Settings ─────────────────────────────────────────────────────────────────

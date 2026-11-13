@@ -114,17 +114,19 @@ async function sendChat() {
       const { done, value } = await reader.read();
       if (done) break;
       full += decoder.decode(value, { stream: true });
-      div.innerHTML = renderMarkdown(full);   // escapes everything first, see markdown.js
+      div.innerHTML = chatReplyHtml(full);    // markdown (escapes first) + action slots, see app/ai-actions.js
       msgs.scrollTop = msgs.scrollHeight;
     }
     if (!full) div.textContent = "(no response)";
     chatHistory.push({ role: "assistant", content: full });
+    attachActionCards(div, full, chatHistory.length - 1);
   } catch (e) {
     thinking.remove();
     if (e.name === "AbortError") {
       if (full) {
         // Keep what was written so far, so the conversation still makes sense.
         chatHistory.push({ role: "assistant", content: full });
+        attachActionCards(div, full, chatHistory.length - 1);
         div.insertAdjacentHTML("beforeend", '<div class="msg-stopped">■ Stopped</div>');
       } else {
         // Nothing came back yet: forget the question, as if it was never asked.

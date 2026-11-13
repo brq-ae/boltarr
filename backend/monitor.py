@@ -270,6 +270,34 @@ def _alert_up(svc: dict, down_seconds: float | None) -> None:
     )
 
 
+# ── Pause / resume (v0.26.0) ──────────────────────────────────────────────────
+
+def set_monitored(conn, svc_id: int, on: bool, resume_at: str | None = None) -> None:
+    """Turn a service's monitoring on or off. Off resets the live status; `resume_at`
+    (UTC ISO) makes it a pause that ends by itself (resume_due). Either way any
+    earlier resume time is replaced. Caller commits."""
+    if on:
+        conn.execute("UPDATE services SET monitored=1, monitor_resume_at=NULL WHERE id=?", (svc_id,))
+    else:
+        conn.execute(
+            "UPDATE services SET monitored=0, monitor_status='unknown', monitor_fail_since=NULL, "
+            "monitor_alerted=0, monitor_resume_at=? WHERE id=?", (resume_at, svc_id))
+
+
+def resume_due() -> list[int]:
+    """Turn monitoring back on for paused services whose resume time has passed."""
+    now = _now_dt()
+    with get_conn() as conn:
+        rows = conn.execute("SELECT id, monitor_resume_at FROM services "
+                            "WHERE monitored=0 AND monitor_resume_at IS NOT NULL").fetchall()
+        due = [r["id"] for r in rows if (_parse(r["monitor_resume_at"]) or now) <= now]
+        for sid in due:
+            set_monitored(conn, sid, True)
+        if due:
+            conn.commit()
+    return due
+
+
 # ── Public entry points ───────────────────────────────────────────────────────
 
 def check_now(svc_id: int) -> dict:
@@ -686,6 +714,11 @@ def _loop() -> None:
                 # Probe services only when the configured interval has elapsed. This
                 # is the detection cadence — slower interval = slower to notice a
                 # change, but cheaper.
+                try:
+                    if resume_due():
+                        last_sweep = 0.0      # probe the resumed ones straight away
+                except Exception:
+                    pass
                 if now_ts - last_sweep >= check:
                     _sweep()
                     last_sweep = now_ts

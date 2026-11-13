@@ -199,6 +199,7 @@ async function loadHostUptime(ip) {
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     const outages = outageListHtml("host", d.host_id, d.outages);
     el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetHostUptime" data-args="${dargs(ip)}">↺ Reset uptime</button></div>`;
+    maybeAutoExplain("host", el);
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }

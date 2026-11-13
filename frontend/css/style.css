@@ -2327,6 +2327,21 @@ table.fit-cols .port-list, table.fit-cols .svc-port-status { flex-wrap: nowrap; 
 .ai-earlier-item .analysis-meta { margin-bottom: 0; }
 .ai-earlier-full > summary { cursor: pointer; color: var(--text-3); font-size: 10.5px; }
 .ai-hist-note { color: var(--yellow); font-size: 11px; line-height: 1.5; }
+.ai-log-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.ai-log-head > span:last-child { white-space: nowrap; font-size: 11px; }
+.ai-log-asked { font-size: 11px; font-style: italic; overflow-wrap: anywhere; }
 .ai-hist-clean { display: flex; align-items: center; gap: 8px; }
 .ai-hist-confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11.5px;
   border: 1px solid var(--red); border-radius: 6px; padding: 6px 8px; }
+/* AI actions in the chat (AI Tier 4): a card per suggested action */
+.ai-action { border: 1px solid var(--border2, var(--border)); border-left: 3px solid var(--accent); border-radius: 6px;
+  background: var(--surface); padding: 7px 9px; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.ai-action-wait { color: var(--text-3); border-left-color: var(--border); font-style: italic; }
+.ai-action-bad { border-left-color: var(--yellow); color: var(--yellow); font-size: 11.5px; }
+.ai-action-title { font-weight: 600; }
+.ai-action-row { display: grid; grid-template-columns: 44px 1fr; gap: 6px; font-size: 11.5px; word-break: break-word; }
+.ai-action-btns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.ai-action-btns .btn { font-size: 11px; padding: 3px 10px; }
+.ai-action-status { font-size: 11px; }
+.ai-action-ok { color: var(--green); }
+.ai-action-fail { color: var(--red); }

@@ -158,6 +158,7 @@ def init_db():
             "ALTER TABLE services ADD COLUMN public INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE services ADD COLUMN public_name TEXT",
             "ALTER TABLE services ADD COLUMN check_type TEXT",   # http | tcp | icmp | NULL(auto-infer)
+            "ALTER TABLE services ADD COLUMN monitor_resume_at TEXT",   # paused until (UTC ISO); NULL = no end
             # DHCP range lives on the subnet (one range per subnet for now; multi-pool
             # per subnet can be added later if requested). Hosts are classified static/
             # dynamic by whether their IP falls in it; static_override forces a value.
@@ -284,6 +285,21 @@ def init_db():
                 created_at   TEXT DEFAULT (datetime('now'))
             )""",
             "CREATE INDEX IF NOT EXISTS idx_ai_explanations_target ON ai_explanations(kind, target_id)",
+            # AI actions record (v0.26.0): each Do it (done/failed) and Cancel on a chat
+            # action card. item = "host:<id>" | "service:<id>" | "subnet:<id>" | "other",
+            # for keep-N-per-item. Kept and cleaned up by the AI history settings.
+            """CREATE TABLE IF NOT EXISTS ai_action_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                item       TEXT NOT NULL DEFAULT 'other',
+                action     TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                detail     TEXT,
+                result     TEXT NOT NULL,
+                message    TEXT,
+                model      TEXT,
+                asked      TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )""",
             # Daily digests that carried an AI summary (v0.25.0), for "Past digests".
             # Kept and cleaned up by the AI history settings (backend/ai_history.py).
             """CREATE TABLE IF NOT EXISTS ai_digests (

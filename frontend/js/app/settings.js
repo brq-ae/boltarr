@@ -451,6 +451,27 @@ async function loadAiHistory() {
           </div>`).join("")}</details>`
       : "";
   } catch (e) { document.getElementById("pastDigests").innerHTML = ""; }
+  try {
+    const { actions } = await api("GET", "/api/ai-actions/log");
+    document.getElementById("aiActionsLog").innerHTML = actions.length
+      ? `<details class="ai-earlier"><summary>AI actions (${actions.length})</summary>${actions.map(_aiLogItemHtml).join("")}</details>`
+      : `<div class="text-3" style="font-size:11px">AI actions: none recorded yet.</div>`;
+  } catch (e) { document.getElementById("aiActionsLog").innerHTML = ""; }
+}
+
+const _AI_LOG_RESULT = { done: ["✓ Done", "ai-action-ok"], failed: ["✕ Failed", "ai-action-fail"], cancelled: ["Cancelled", "text-3"] };
+
+function _aiLogItemHtml(a) {
+  const [label, cls] = _AI_LOG_RESULT[a.result] || [a.result, "text-3"];
+  const detail = (a.detail || []).map(([k, v]) =>
+    `<div class="ai-action-row"><span class="text-3">${escHtml(k)}</span><span>${escHtml(v)}</span></div>`).join("");
+  return `<div class="ai-earlier-item ai-log-item">
+      <div class="analysis-meta">${escHtml(aiMeta(a))}</div>
+      <div class="ai-log-head"><span class="ai-action-title">${escHtml(a.title)}</span><span class="${cls}">${escHtml(label)}</span></div>
+      ${detail}
+      ${a.result === "failed" && a.message ? `<div class="ai-action-fail">${escHtml(a.message)}</div>` : ""}
+      ${a.asked ? `<div class="text-3 ai-log-asked">You asked: “${escHtml(a.asked)}”</div>` : ""}
+    </div>`;
 }
 
 function askCleanAiHistory()    { document.getElementById("aiHistConfirm").hidden = false; }

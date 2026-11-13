@@ -286,9 +286,12 @@ function _setSvcDetailIcon(name) {
   el.textContent       = name.replace(/[^a-z0-9]/gi, "").substring(0, 2).toUpperCase() || "??";
 }
 
-function showSvcDetail(id) {
+function showSvcDetail(id, fresh = false) {
   const s = allServices.find(s => s.id === id);
   if (!s) return;
+  // A timed pause that has already ended: reload first, so the panel isn't out of date
+  if (!fresh && !s.monitored && s.monitor_resume_at && _ts(s.monitor_resume_at) <= Date.now())
+    return loadServicesData().then(() => { renderServicesTable(); showSvcDetail(id, true); });
   hideHostDetail();
   svcDetailId     = id;
   svcDetailStatus = s.status || "unknown";
@@ -317,6 +320,8 @@ function showSvcDetail(id) {
 
   document.getElementById("svcDetailMonitored").checked = !!s.monitored;
   setSvcDetailMonDot(s.monitored ? (s.monitor_status || "unknown") : "off");
+  if (!s.monitored && s.monitor_resume_at)      // a timed pause (AI action)
+    document.getElementById("svcDetailMonitorText").textContent = "paused until " + fmtLocal(s.monitor_resume_at);
 
   document.getElementById("svcDetailPublic").checked = !!s.public;
   document.getElementById("svcDetailPublicName").value = s.public_name || "";
@@ -354,6 +359,7 @@ async function loadSvcUptime(id, monitored) {
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     const outages = outageListHtml("service", id, d.outages);
     el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetSvcUptime" data-args="[${id}]">↺ Reset uptime</button></div>`;
+    maybeAutoExplain("service", el);
   } catch (e) {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
   }
@@ -411,7 +417,7 @@ async function toggleSvcMonitor() {
     // Dedicated endpoint — only touches the `monitored` flag, never other fields
     const r = await api("POST", `/api/services/${svcDetailId}/monitor`, { enabled: on });
     allServices = allServices.map(s => s.id === svcDetailId
-      ? { ...s, monitored: on ? 1 : 0, monitor_status: r.monitor_status } : s);
+      ? { ...s, monitored: on ? 1 : 0, monitor_status: r.monitor_status, monitor_resume_at: null } : s);
     setSvcDetailMonDot(on ? (r.monitor_status || "unknown") : "off");
     loadSvcUptime(svcDetailId, on);
     renderServicesTable();

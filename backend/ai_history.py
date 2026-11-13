@@ -1,26 +1,30 @@
 """AI history (v0.25.0, AI Tier 3 part 3): saved AI results and their clean-up.
 
-Four kinds of result are kept, each grouped into "items":
+Five kinds of result are kept, each grouped into "items":
   - host Analyze        llm_analyses, host_id = the host        (one item per host)
   - Analyze Network     llm_analyses, host_id IS NULL           (one item)
   - outage Explain      ai_explanations                         (one item per outage)
   - digest AI summary   ai_digests                              (one item)
+  - AI actions record   ai_action_log                           (one item per host/service/subnet)
 
 Settings → AI → AI history: `enabled` off means nothing new is saved and saved
 results are hidden (not deleted). `keep_per_item` keeps the newest N per item and
 `keep_days` (0 = no limit) deletes anything older — both apply to every result,
 the newest included, whether saving is on or off. "Clean history" deletes it all.
 """
+import json
+
 from .config import get_ai_history_config
 from .database import get_conn
 
-TABLES = ("llm_analyses", "ai_explanations", "ai_digests")
+TABLES = ("llm_analyses", "ai_explanations", "ai_digests", "ai_action_log")
 
 # How each table's rows are grouped into items, for "keep the newest N per item"
 _ITEM_KEY = {
     "llm_analyses":    "COALESCE(host_id, -1)",
     "ai_explanations": "kind, target_id, outage_start",
     "ai_digests":      "1",
+    "ai_action_log":   "item",
 }
 
 
@@ -109,3 +113,37 @@ def digests() -> list[dict]:
         return []
     with get_conn() as c:
         return [dict(r) for r in c.execute("SELECT * FROM ai_digests ORDER BY id DESC")]
+
+
+# ── AI actions record ────────────────────────────────────────────────────────
+
+ASKED_MAX = 300
+
+
+def save_action(item: str, action: str, title: str, detail, result: str,
+                message: str = "", model: str = "", asked: str = "") -> None:
+    """Record a Do it (result done/failed) or Cancel on a chat action card."""
+    if not enabled():
+        return
+    asked = (asked or "").strip()
+    if len(asked) > ASKED_MAX:
+        asked = asked[:ASKED_MAX - 1] + "…"
+    with get_conn() as c:
+        c.execute("INSERT INTO ai_action_log (item, action, title, detail, result, message, model, asked) "
+                  "VALUES (?,?,?,?,?,?,?,?)",
+                  (item or "other", action, title, json.dumps(detail or []), result, message, model, asked))
+        prune(c)
+
+
+def actions() -> list[dict]:
+    """The AI actions record, newest first."""
+    if not enabled():
+        return []
+    with get_conn() as c:
+        rows = [dict(r) for r in c.execute("SELECT * FROM ai_action_log ORDER BY id DESC")]
+    for r in rows:
+        try:
+            r["detail"] = json.loads(r["detail"] or "[]")
+        except ValueError:
+            r["detail"] = []
+    return rows
