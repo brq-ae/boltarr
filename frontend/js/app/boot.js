@@ -63,6 +63,7 @@ async function renderLoginSettings() {
   $("loginUserName").textContent = s.username || "admin";
   $("loginTrustProxy").checked = !!s.trust_proxy;
   $("loginProxies").value = s.trusted_proxies || "";
+  loginProxyCheck();
   $("loginProxyHeader").value = s.proxy_header || "Remote-User";
   ["loginNewPw", "loginNewPw2", "loginCurPw", "loginChgPw", "loginChgPw2", "loginOffPw"].forEach(id => { $(id).value = ""; });
 }
@@ -89,10 +90,24 @@ async function changeLoginPassword() {
   await renderLoginSettings();
 }
 
+// F-35: a whole range (e.g. 172.18.0.0/16) trusts every device in it — say so under the box.
+function loginProxyCheck() {
+  const box = document.getElementById("loginProxies"), warn = document.getElementById("loginProxiesWarn");
+  if (!box || !warn) return;
+  const wide = box.value.split(/[,\n]/).map(x => x.trim()).filter(x => {
+    const m = x.match(/\/(\d+)$/);
+    return m && +m[1] < (x.includes(":") ? 128 : 32);
+  });
+  warn.textContent = wide.length ? `${wide.join(", ")} ${wide.length > 1 ? "are whole ranges" : "is a whole range"}: every device ` +
+    `or container in it is trusted to say who is logged in. Use the login service's own IP (e.g. 172.18.0.5) if you can.` : "";
+  warn.hidden = !wide.length;
+}
+
 async function saveLoginProxy() {
   const $ = id => document.getElementById(id);
+  let r;
   try {
-    await api("PUT", "/api/auth/settings", { trusted_proxies: $("loginProxies").value,
+    r = await api("PUT", "/api/auth/settings", { trusted_proxies: $("loginProxies").value,
       proxy_header: $("loginProxyHeader").value, trust_proxy: $("loginTrustProxy").checked });
   } catch (e) { return alert("Not saved: " + e.message); }
   showToast("Saved");
@@ -113,4 +128,4 @@ async function logout() {
   location.href = "/login.html";
 }
 
-registerActions({ enableLogin, changeLoginPassword, saveLoginProxy, disableLogin, logout, openLoginSettings, snoozeNoPwBanner });
+registerActions({ enableLogin, changeLoginPassword, saveLoginProxy, loginProxyCheck, disableLogin, logout, openLoginSettings, snoozeNoPwBanner });

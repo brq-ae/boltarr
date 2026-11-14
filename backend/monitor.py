@@ -93,6 +93,8 @@ def _probe_icmp(host: str) -> bool:
     the `ping` binary is not installed in the container. Up = nmap reports it up."""
     try:
         import nmap
+        from .scanner import check_target
+        check_target(host)                # never pass anything nmap could read as an option
         proc = subprocess.run(
             ["nmap", "-sn", "-PE", "-n", "-oX", "-", host],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=ICMP_TIMEOUT + 4)

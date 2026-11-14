@@ -230,6 +230,8 @@ async function loadScans() {
         : live === "starting" ? "starting…" : "running…";
       const bits = s.status === "skipped"
         ? [started, `<span style="color:var(--yellow)">skipped${s.note ? ": " + escHtml(s.note) : ""}</span>`]
+        : s.status === "error" && s.note
+        ? [started, `<span style="color:var(--red)">error: ${escHtml(s.note)}</span>`]
         : running
         ? [started, `${runLabel} · <span class="scan-elapsed" data-started="${_ts(s.started_at)}">${fmtDur((Date.now() - _ts(s.started_at)) / 1000)}</span>`]
         : [started, `${s.hosts_found || 0} hosts`, scanDurationHTML(s)].filter(Boolean);
@@ -376,21 +378,21 @@ const _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 let scanSchedules = [];
 
 function _schedTimingText(s) {
-  const win = s.window_start && s.window_end ? ` · only ${s.window_start}–${s.window_end}` : "";
+  const win = s.window_start && s.window_end ? ` · only ${escHtml(s.window_start)}–${escHtml(s.window_end)}` : "";
   if (s.timing_type === "interval") {
-    const h = s.interval_hours;
-    const base = `every ${h === 1 ? "hour" : h + " hours"}`;
-    return (s.at_time ? `${base} from ${s.at_time}` : base) + win;
+    const h = escHtml(String(s.interval_hours));
+    const base = `every ${h === "1" ? "hour" : h + " hours"}`;
+    return (s.at_time ? `${base} from ${escHtml(s.at_time)}` : base) + win;
   }
   const days = (s.days_of_week || "").split(",").filter(d => d !== "");
   const label = days.length === 7 ? "daily"
     : days.map(d => _DAY_NAMES[+d]).join(", ");
-  return `${escHtml(label)} at ${s.at_time || "?"}${win}`;
+  return `${escHtml(label)} at ${escHtml(s.at_time || "?")}${win}`;
 }
 
 function _schedTargetText(s) {
   const where = s.subnet_id ? escHtml(s.subnet_name || `subnet ${s.subnet_id}`) : "All subnets";
-  const filt = s.host_filter === "all" ? "whole range" : `${s.host_filter} only`;
+  const filt = s.host_filter === "all" ? "whole range" : `${escHtml(s.host_filter)} only`;
   return `${where} · ${filt}`;
 }
 

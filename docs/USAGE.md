@@ -143,7 +143,7 @@ same up/down history — the host equivalent of the service uptime view.
 
 ## Timezone
 
-**Settings → General → Timezone** sets an IANA timezone (e.g. `Asia/Dubai`). It
+**Settings → General → Timezone** sets an IANA timezone (e.g. `Europe/London`). It
 drives all time-of-day logic — schedule fire times, quiet hours, the daily
 digest — and how times are displayed throughout the app. Leave it as *Server
 default* to use the server's own clock (UTC in most containers). Set it to your

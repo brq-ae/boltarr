@@ -15,6 +15,7 @@ from .database import get_conn
 from .config import get_liveness_config
 from . import changes
 from . import maintenance
+from .scanner import check_target
 
 
 def _host_event(conn, host_id: int, status: str) -> None:
@@ -33,6 +34,7 @@ def _sweep_live_ips() -> set[str]:
     live: set[str] = set()
     for cidr in cidrs:
         try:
+            check_target(cidr)            # never pass anything nmap could read as an option
             proc = subprocess.run(
                 ["nmap", "-sn", "-T4", "--min-parallelism", "10", "-oX", "-", cidr],
                 capture_output=True, timeout=120)

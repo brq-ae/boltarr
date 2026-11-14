@@ -82,7 +82,8 @@ async function api(method, path, body) {
   }
   const r = await fetch(path, opts);
   if (!r.ok) throw new Error(apiErrorText(await r.text()));
-  return r.json();
+  const text = await r.text();          // 204 "done" answers have no body
+  return text ? JSON.parse(text) : null;
 }
 
 // FastAPI errors arrive as {"detail": "..."} or a list of field errors — show
@@ -91,7 +92,11 @@ function apiErrorText(text) {
   try {
     const d = JSON.parse(text).detail;
     if (typeof d === "string") return d;
-    if (Array.isArray(d)) return d.map(x => `${(x.loc || []).slice(1).join(".")}: ${x.msg}`).join("\n");
+    if (Array.isArray(d)) return d.map(x => {
+      const where = (x.loc || []).slice(1).join(".");
+      const msg = String(x.msg || "").replace(/^Value error, /, "");
+      return where ? `${where}: ${msg}` : msg;
+    }).join("\n");
   } catch (_) {}
   return text;
 }

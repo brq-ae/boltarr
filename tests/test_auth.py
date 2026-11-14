@@ -33,7 +33,12 @@ def login_on(client):
 def test_off_by_default_everything_open(client):
     assert client.get("/api/auth/status").json()["enabled"] is False
     assert _anon().get("/api/hosts").status_code == 200
-    assert _anon().put("/api/settings/ip-history", json={"stale_days": 30}).status_code == 200  # no header needed
+    # F-15: even with login off, a change without X-Boltarr (a forged cross-site request) is refused
+    r = _anon().put("/api/settings/ip-history", json={"stale_days": 30})
+    assert r.status_code == 403 and "X-Boltarr" in r.text
+    assert _anon().put("/api/settings/ip-history", json={"stale_days": 30}, headers=H).status_code == 200
+    r = _anon().post("/api/scan/preview", content=b'{"timing":"T4"}')       # no-cors fetch: no Content-Type, no header
+    assert r.status_code == 403
 
 
 def test_gate_when_on(login_on):

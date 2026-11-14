@@ -81,7 +81,7 @@ def test_old_backup_without_manifest_still_works(client):
 def test_refused_while_scan_running(client, monkeypatch):
     import backend.main as m
     chk = client.post("/api/restore/check", files={"file": ("b.zip", _backup(client))}).json()
-    monkeypatch.setitem(m.scan_jobs, 999999, {"status": "running"})
+    monkeypatch.setitem(m.scan_jobs, 999999, {"status": "scanning"})
     r = client.post(f"/api/restore/{chk['token']}")
     assert r.status_code == 409 and "scan" in r.json()["detail"].lower()
 

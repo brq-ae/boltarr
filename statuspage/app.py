@@ -538,25 +538,43 @@ _WINDOW    = 600     # 10 min sliding window
 _LOCKOUT   = 900     # 15 min lock once tripped
 
 
+_GLOBAL_MAX = 200    # failures from everyone within the window before all logins pause
+_ATTEMPTS_MAX = 10000
+
+
 def _client_ip(request: Request) -> str:
     if TRUST_PROXY:
         xff = request.headers.get("x-forwarded-for", "")
         if xff:
-            return xff.split(",")[0].strip()
+            # The proxy APPENDS the address it saw, so the right-most entry is the
+            # real client; anything to its left was sent by the client itself.
+            return xff.split(",")[-1].strip()
     return request.client.host if request.client else "?"
 
 
 def _locked_for(ip: str) -> float:
     now = time.time()
     fails = [t for t in _ATTEMPTS.get(ip, []) if now - t < _LOCKOUT]
-    _ATTEMPTS[ip] = fails
+    if fails:
+        _ATTEMPTS[ip] = fails
+    else:
+        _ATTEMPTS.pop(ip, None)
     recent = [t for t in fails if now - t < _WINDOW]
     if len(recent) >= _MAX_FAILS:
         return _LOCKOUT - (now - min(recent))
+    everyone = [t for ts in _ATTEMPTS.values() for t in ts if now - t < _WINDOW]
+    if len(everyone) >= _GLOBAL_MAX:      # many addresses guessing at once
+        return _WINDOW - (now - min(everyone))
     return 0.0
 
 
 def _record_fail(ip: str) -> None:
+    if len(_ATTEMPTS) >= _ATTEMPTS_MAX:   # keep memory bounded: drop the stalest
+        now = time.time()
+        for k in [k for k, ts in _ATTEMPTS.items() if not ts or now - ts[-1] > _WINDOW]:
+            _ATTEMPTS.pop(k, None)
+        if len(_ATTEMPTS) >= _ATTEMPTS_MAX:
+            _ATTEMPTS.pop(next(iter(_ATTEMPTS)))
     _ATTEMPTS.setdefault(ip, []).append(time.time())
 
 

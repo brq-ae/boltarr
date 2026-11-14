@@ -179,6 +179,9 @@ _fails: dict[str, tuple[int, float]] = {}
 _fails_lock = threading.Lock()
 
 
+_FAILS_MAX = 10000                  # addresses remembered (memory stays bounded)
+
+
 def retry_after(ip: str) -> int:
     with _fails_lock:
         _, until = _fails.get(ip, (0, 0.0))
@@ -187,6 +190,12 @@ def retry_after(ip: str) -> int:
 
 def record_failure(ip: str) -> None:
     with _fails_lock:
+        if ip not in _fails and len(_fails) >= _FAILS_MAX:
+            now = time.time()
+            for k in [k for k, (_, u) in _fails.items() if u < now]:
+                _fails.pop(k, None)
+            if len(_fails) >= _FAILS_MAX:
+                _fails.pop(next(iter(_fails)))
         count, _ = _fails.get(ip, (0, 0.0))
         count += 1
         wait = min(300, 15 * 2 ** (count - _FREE_TRIES)) if count >= _FREE_TRIES else 0

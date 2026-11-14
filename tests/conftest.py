@@ -22,7 +22,8 @@ from backend.main import app  # noqa: E402
 
 @pytest.fixture(scope="session")
 def client():
-    with TestClient(app) as c:
+    # Boltarr's own pages always send X-Boltarr (core.js); tests do the same.
+    with TestClient(app, headers={"X-Boltarr": "1"}) as c:
         yield c
 
 

@@ -55,6 +55,8 @@ async function openSettings() {
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
     document.getElementById("setApiKey").value       = llm.api_key  || "";
+    _SECRET_ORIG.ai = _aiAddr(llm.provider, llm.base_url);
+    _SECRET_ORIG.aiKey = llm.api_key || "";
     document.getElementById("setModel").value        = llm.model    || "";
     fillModelSuggestions(AI_MODELS);
     const ah = ai_history || {};
@@ -75,6 +77,7 @@ async function openSettings() {
     document.getElementById("setNtfyServer").value    = n.server || "";
     document.getElementById("setNtfyTopic").value     = n.topic  || "";
     document.getElementById("setNtfyToken").value     = n.token  || "";
+    _SECRET_ORIG.ntfy = (n.server || "").trim(); _SECRET_ORIG.ntfyKey = n.token || "";
     document.getElementById("setCheckSeconds").value  = n.check_seconds ?? 60;
     document.getElementById("setAlertAfter").value    = n.alert_after_minutes ?? 5;
     document.getElementById("setQuietEnabled").checked = !!n.quiet_enabled;
@@ -88,6 +91,8 @@ async function openSettings() {
     document.getElementById("setSpEnabled").checked = !!sp.enabled;
     document.getElementById("setSpUrl").value   = sp.url   || "";
     document.getElementById("setSpToken").value = sp.token || "";
+    _SECRET_ORIG.sp = (sp.url || "").trim(); _SECRET_ORIG.spKey = sp.token || "";
+    secretMoveCheck();
     document.getElementById("setSpTestResult").style.display = "none";
 
     const ct = change_tracking || {};
@@ -186,6 +191,68 @@ function onQuietToggle() {
   document.getElementById("setQuietRange").style.display = on ? "inline-flex" : "none";
 }
 
+// F-16: a hidden saved secret only goes to the address it was saved for. When the
+// address changes and the secret wasn't retyped, a tick box asks to send it anyway.
+const _SECRET_ORIG = {};
+const _SECRET_FIELDS = {
+  ai:   { row: "setKeyMoveRow",  ok: "setKeyMoveOk",  key: "setApiKey",
+          addr: () => _aiAddr(document.getElementById("setProvider").value, document.getElementById("setBaseUrl").value) },
+  ntfy: { row: "setNtfyMoveRow", ok: "setNtfyMoveOk", key: "setNtfyToken",
+          addr: () => document.getElementById("setNtfyServer").value.trim() },
+  sp:   { row: "setSpMoveRow",   ok: "setSpMoveOk",   key: "setSpToken",
+          addr: () => document.getElementById("setSpUrl").value.trim() },
+};
+// Same rule as the server's _ai_addr: Anthropic always uses its own address.
+function _aiAddr(provider, url) {
+  provider = provider || "none";
+  if (provider === "anthropic") return "anthropic";
+  return `${provider}|${_normAddr(url || PROVIDER_URLS[provider] || "")}`;
+}
+const _normAddr = a => String(a || "").trim().replace(/\/+$/, "").toLowerCase();
+
+function _secretMoving(name) {
+  const f = _SECRET_FIELDS[name], saved = _SECRET_ORIG[name + "Key"];
+  if (!saved || document.getElementById(f.key).value !== saved) return false;   // nothing saved, or retyped
+  if (name === "ai" && document.getElementById("setProvider").value === "none") return false;
+  return _normAddr(f.addr()) !== _normAddr(_SECRET_ORIG[name]);
+}
+
+function secretMoveCheck() {
+  for (const name of Object.keys(_SECRET_FIELDS)) {
+    const f = _SECRET_FIELDS[name], row = document.getElementById(f.row);
+    if (!row) continue;
+    const moving = _secretMoving(name);
+    if (!moving) document.getElementById(f.ok).checked = false;
+    row.hidden = !moving;
+  }
+}
+
+// After a save: what the server now holds is the new "saved" address and secret.
+function _rememberSecrets(saved) {
+  if (!saved) return;
+  const set = (id, v) => { const el = document.getElementById(id); el.value = v || ""; el.type = "password"; };
+  if (saved.llm) {
+    _SECRET_ORIG.ai = _aiAddr(saved.llm.provider, saved.llm.base_url);
+    _SECRET_ORIG.aiKey = saved.llm.api_key || "";
+    set("setApiKey", saved.llm.api_key);
+  }
+  if (saved.notifications) {
+    _SECRET_ORIG.ntfy = (saved.notifications.server || "").trim();
+    _SECRET_ORIG.ntfyKey = saved.notifications.token || "";
+    set("setNtfyToken", saved.notifications.token);
+  }
+  if (saved.statuspage) {
+    _SECRET_ORIG.sp = (saved.statuspage.url || "").trim();
+    _SECRET_ORIG.spKey = saved.statuspage.token || "";
+    set("setSpToken", saved.statuspage.token);
+  }
+  secretMoveCheck();
+}
+
+function _moveSecret(name) {
+  return _secretMoving(name) && document.getElementById(_SECRET_FIELDS[name].ok).checked;
+}
+
 function _numCtxValue() {
   const n = parseInt(document.getElementById("setNumCtx").value);
   return Number.isNaN(n) ? 8192 : Math.max(0, n);
@@ -208,6 +275,7 @@ function onSettingsProviderChange() {
   if (PROVIDER_KEY_PLACEHOLDER[p]) {
     keyInput.placeholder = PROVIDER_KEY_PLACEHOLDER[p];
   }
+  secretMoveCheck();
 }
 
 // ── Security: strict mode (what the browser blocked / would block) ───────────────
@@ -268,6 +336,7 @@ async function saveSettings(keepOpen = false) {
     timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
     long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
     num_ctx:      _numCtxValue(),
+    move_secret:  _moveSecret("ai"),
   };
   const ntfyPayload = {
     enabled: document.getElementById("setNtfyEnabled").checked,
@@ -280,11 +349,13 @@ async function saveSettings(keepOpen = false) {
     quiet_start:   document.getElementById("setQuietStart").value,
     quiet_end:     document.getElementById("setQuietEnd").value,
     suppress_when_host_down: document.getElementById("setSuppressHostDown").checked,
+    move_secret: _moveSecret("ntfy"),
   };
   const spPayload = {
     enabled: document.getElementById("setSpEnabled").checked,
     url:     document.getElementById("setSpUrl").value.trim(),
     token:   document.getElementById("setSpToken").value,
+    move_secret: _moveSecret("sp"),
   };
   const ctPayload = {
     enabled:          document.getElementById("setCtEnabled").checked,
@@ -324,7 +395,7 @@ async function saveSettings(keepOpen = false) {
   const generalPayload = { timezone: document.getElementById("setTimezone").value };
   try {
     // One request: the server checks every section and saves all or nothing
-    await api("PUT", "/api/settings/all", {
+    const saved = await api("PUT", "/api/settings/all", {
       general:         generalPayload,
       llm:             payload,
       notifications:   ntfyPayload,
@@ -340,6 +411,7 @@ async function saveSettings(keepOpen = false) {
       security:        { frame_origins: document.getElementById("setFrameOrigins").value.trim() },
     });
     APP_TZ = generalPayload.timezone;
+    _rememberSecrets(saved);   // the new addresses are now the saved ones (F-16)
     if (keepOpen) { _flashApplied(); loadAiHistory(); } else closeSettings();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
@@ -372,11 +444,13 @@ async function testStatusPush() {
   resultEl.textContent = "Saving & pushing…";
   try {
     // save current values first so the push uses what's typed
-    await api("PUT", "/api/settings/statuspage", {
+    const saved = await api("PUT", "/api/settings/statuspage", {
       enabled: document.getElementById("setSpEnabled").checked,
       url:     document.getElementById("setSpUrl").value.trim(),
       token:   document.getElementById("setSpToken").value,
+      move_secret: _moveSecret("sp"),
     });
+    _rememberSecrets(saved);
     const r = await api("POST", "/api/statuspage/test");
     if (r.ok) {
       resultEl.className = "settings-test-result ok";
@@ -401,6 +475,7 @@ async function testNotification() {
       server: document.getElementById("setNtfyServer").value.trim(),
       topic:  document.getElementById("setNtfyTopic").value.trim(),
       token:  document.getElementById("setNtfyToken").value,
+      move_secret: _moveSecret("ntfy"),
     });
     if (result.ok) {
       resultEl.className = "settings-test-result ok";
@@ -523,6 +598,7 @@ async function testLLMConnection() {
       timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
       long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
       num_ctx:      _numCtxValue(),
+      move_secret:  _moveSecret("ai"),
     };
     await api("PUT", "/api/settings", payload);
     const result = await api("POST", "/api/settings/test");
@@ -812,7 +888,7 @@ registerActions({
   closeSettings, saveSettings, updateTzPreview, toggleCspList, clearCspReports,
   aiHistoryChanged, askCleanAiHistory, cancelCleanAiHistory, cleanAiHistory,
   onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification,
-  generateStatusToken, testStatusPush, downloadBackup, openFactoryReset,
+  generateStatusToken, testStatusPush, secretMoveCheck, downloadBackup, openFactoryReset,
   onResetConfirmInput, closeFactoryReset, doFactoryReset, openBackupModal, closeBackupModal,
   onBackupProtectChange, cancelRestore, applyRestore, closeRestoreOverlay,
   pickRestoreFile:    () => document.getElementById("restoreInput").click(),

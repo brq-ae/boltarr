@@ -5,11 +5,27 @@ on:
     branches: [master, main]
     paths:
       - 'statuspage/**'
+      - 'tests/test_statuspage.py'
       - '.github/workflows/statuspage.yml'
   workflow_dispatch:  # allow manual trigger from GitHub UI
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run status page tests
+        run: |
+          pip install -r requirements-dev.txt
+          python -m pytest -q tests/test_statuspage.py
+
   build:
+    needs: test  # no image is pushed unless the status page tests pass
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

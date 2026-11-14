@@ -345,16 +345,16 @@ function renderAdmin(d){
 
   const cf = (key, label) =>
     `<label class="color-fld">${label}<span class="color-pair">` +
-    `<input type="color" class="color-swatch" data-brand="${key}" value="${BRAND[key] || '#000000'}">` +
-    `<input type="text" class="color-hex" data-hex="${key}" value="${BRAND[key] || '#000000'}" maxlength="7" spellcheck="false"></span></label>`;
+    `<input type="color" class="color-swatch" data-brand="${key}" value="${esc(BRAND[key] || '#000000')}">` +
+    `<input type="text" class="color-hex" data-hex="${key}" value="${esc(BRAND[key] || '#000000')}" maxlength="7" spellcheck="false"></span></label>`;
   const brandingBody = `
     <div class="logo-row">
-      <img id="brandLogoPrev" class="logo-preview" src="${BRAND.logo || '/static/boltarr-logo.svg'}" alt="">
+      <img id="brandLogoPrev" class="logo-preview" src="${esc(BRAND.logo || '/static/boltarr-logo.svg')}" alt="">
       <label class="btn small">Upload logo<input id="brandLogoFile" type="file" accept="image/*" class="hidden"></label>
       <button class="btn small" id="brandLogoDefault">Use default</button>
     </div>
     <div class="logo-row">
-      <img id="brandFavPrev" class="logo-preview fav-preview" src="${BRAND.favicon || BRAND.logo || '/static/boltarr-logo.svg'}" alt="">
+      <img id="brandFavPrev" class="logo-preview fav-preview" src="${esc(BRAND.favicon || BRAND.logo || '/static/boltarr-logo.svg')}" alt="">
       <label class="btn small">Upload favicon<input id="brandFavFile" type="file" accept="image/*" class="hidden"></label>
       <button class="btn small" id="brandFavDefault">Same as logo</button>
       <span class="muted">The small icon in the browser tab.</span>
@@ -453,7 +453,7 @@ async function setVisibility(patch){
     if(r.ok) await load(); }catch(e){}
 }
 async function changeTimezone(){
-  const name = prompt("IANA timezone (e.g. Asia/Dubai, Europe/London, UTC):", TZ);
+  const name = prompt("IANA timezone (e.g. Europe/London, America/New_York, UTC):", TZ);
   if(!name) return;
   try{ const r = await fetch("/api/timezone", { method:"POST",
       headers:{ "Content-Type":"application/json", "X-CSRF": CSRF }, body: JSON.stringify({ timezone: name.trim() }) });

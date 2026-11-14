@@ -49,7 +49,7 @@ function hierNodeHTML(ip, childrenMap, hostMap, tiers, connEdge, depth) {
   const pill  = connEdge ? (() => {
     const parts = [connEdge.type];
     if (connEdge.port_mode) parts.push(connEdge.port_mode);
-    return `<span class="hier-conn-pill">${parts.join("·")}</span>`;
+    return `<span class="hier-conn-pill">${escHtml(parts.join("·"))}</span>`;
   })() : "";
   const children = (childrenMap[ip] || []).sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip));
 

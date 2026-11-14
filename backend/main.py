@@ -16,10 +16,10 @@ from typing import Literal, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
 
 from .database import init_db, get_conn
-from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_command
+from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_command, check_opts, check_target, ScanOptionError
 from .config import get_config, get_llm_config, get_notifications_config, save_config, invalidate_config_cache
 from . import notify
 from . import monitor
@@ -31,6 +31,7 @@ from . import dhcp_check
 from . import changes
 from . import explain
 from . import ai_history
+from . import maintenance
 from . import ai_actions
 from .changes import classify_host
 from .llm import (
@@ -88,9 +89,11 @@ async def login_gate(request: Request, call_next):
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "Login required"}, status_code=401)
             return RedirectResponse("/login.html", status_code=303)
-    # Forged cross-site requests: changes must come from Boltarr's own pages
-    # (the browser's own security reports can't carry the header)
-    if (gated and path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS")
+    # Forged cross-site requests: changes must come from Boltarr's own pages,
+    # with or without login (F-15) — another site can't add this header without
+    # a CORS preflight, which Boltarr never allows. The browser's own security
+    # reports can't carry it.
+    if (path.startswith("/api/") and request.method not in ("GET", "HEAD", "OPTIONS")
             and auth.CSRF_HEADER not in request.headers and path != security.REPORT_PATH):
         return JSONResponse({"detail": "Missing X-Boltarr header"}, status_code=403)
     return await call_next(request)
@@ -337,10 +340,28 @@ def auth_settings_put(data: AuthSettingsIn):
             raise HTTPException(422, "Add the proxy's IP address first")
         a["trust_proxy"] = data.trust_proxy
     save_config(cfg)
-    return auth_settings_get()
+    out = auth_settings_get()
+    wide = [str(n) for n in auth.parse_proxies(a.get("trusted_proxies", ""))
+            if n.num_addresses > 1]
+    if wide:                         # F-35: every address in a range is trusted
+        out["warning"] = ("These are whole ranges: " + ", ".join(wide) + ". Every device in them is trusted "
+                          "to say who is logged in — use the login service's own IP if you can.")
+    return out
 
 
 # ── Subnets ───────────────────────────────────────────────────────────────────
+
+def _valid_cidr(v: Optional[str]) -> Optional[str]:
+    """A subnet must be a real network (it goes to nmap as the scan target, F-14)."""
+    if v is None:
+        return v
+    v = v.strip()
+    try:
+        ipaddress.ip_network(v, strict=False)
+    except ValueError:
+        raise ValueError(f"'{v[:60]}' is not a valid subnet (use CIDR, e.g. 192.168.1.0/24)")
+    return v
+
 
 class SubnetIn(BaseModel):
     name: str
@@ -348,6 +369,8 @@ class SubnetIn(BaseModel):
     description: Optional[str] = None
     dhcp_start:  Optional[str] = None
     dhcp_end:    Optional[str] = None
+
+    _cidr = field_validator("cidr")(_valid_cidr)
 
 
 class SubnetUpdate(BaseModel):
@@ -357,6 +380,8 @@ class SubnetUpdate(BaseModel):
     dhcp_start:  Optional[str] = None   # "" clears it
     dhcp_end:    Optional[str] = None
     map_hidden:  Optional[bool] = None   # hidden on the Topology map
+
+    _cidr = field_validator("cidr")(_valid_cidr)
 
 
 @app.get("/api/subnets")
@@ -551,6 +576,12 @@ class ScanOptions(BaseModel):
     pn:                bool = False
     udp:               bool = False
     scripts:           str  = ""
+
+    @model_validator(mode="after")
+    def _safe(self):
+        # The screens only offer safe choices; the API refuses anything else (F-14)
+        check_opts(self.model_dump())
+        return self
 
 
 @app.post("/api/scan/preview")
@@ -873,13 +904,45 @@ def _get_alias_info(conn, host_id: int) -> list[dict]:
         "SELECT ip, online, last_seen FROM host_aliases WHERE host_id=? ORDER BY ip", (host_id,))]
 
 
+# F-25: a public key / name / username is written into authorized_keys and into the
+# copied deploy command, so a newline or quote could add lines or shell commands.
+_SSH_KEY_RE  = re.compile(r"(ssh-[a-z0-9-]+|ecdsa-sha2-nistp\d+|sk-[a-z0-9@.-]+) [A-Za-z0-9+/=]+( [^\x00-\x1f\x7f]*)?")
+_SSH_USER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,31}")
+_CTRL_RE     = re.compile(r"[\x00-\x1f\x7f]")
+
+
 class SshKeyIn(BaseModel):
     name: str
     public_key: str
 
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v):
+        v = v.strip()
+        if not v or len(v) > 100 or _CTRL_RE.search(v):
+            raise ValueError("Key name must be 1-100 characters on one line")
+        return v
+
+    @field_validator("public_key")
+    @classmethod
+    def _key(cls, v):
+        v = v.strip()
+        if len(v) > 16000 or not _SSH_KEY_RE.fullmatch(v):
+            raise ValueError("Not a valid public key (one line: type, key, optional comment, e.g. 'ssh-ed25519 AAAA… me@pc')")
+        return v
+
+
 class SshAccessIn(BaseModel):
     ssh_key_id: int
     username: str = "root"
+
+    @field_validator("username")
+    @classmethod
+    def _user(cls, v):
+        v = v.strip()
+        if not _SSH_USER_RE.fullmatch(v):
+            raise ValueError("Username may only use letters, digits, _ . - (up to 32, not starting with a digit)")
+        return v
 
 
 def _rows_by_host(conn, sql: str, params=()) -> dict:
@@ -947,7 +1010,7 @@ def add_host_ssh_access(ip: str, data: SshAccessIn):
         try:
             cur = conn.execute(
                 "INSERT INTO ssh_access (ssh_key_id, host_ip, username) VALUES (?,?,?)",
-                (data.ssh_key_id, ip, data.username.strip())
+                (data.ssh_key_id, ip, data.username)
             )
             conn.commit()
         except Exception:
@@ -958,6 +1021,14 @@ def add_host_ssh_access(ip: str, data: SshAccessIn):
         """, (cur.lastrowid,)).fetchone()
     return dict(row)
 
+@app.delete("/api/ssh-access/{access_id}", status_code=204)
+def delete_ssh_access(access_id: int):
+    """Take one key off one host (the ✕ in the host's SSH section)."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM ssh_access WHERE id=?", (access_id,))
+        conn.commit()
+
+
 @app.get("/api/hosts/{ip}/authorized-keys")
 def get_authorized_keys(ip: str, user: str = "root"):
     with get_conn() as conn:
@@ -967,7 +1038,8 @@ def get_authorized_keys(ip: str, user: str = "root"):
             WHERE a.host_ip = ? AND a.username = ?
             ORDER BY k.name
         """, (ip, user)).fetchall()
-    lines = [f"{r['public_key']} {r['name']}" for r in rows]
+    # Rows saved before the checks above: never let one break into extra lines.
+    lines = [_CTRL_RE.sub(" ", f"{r['public_key']} {r['name']}") for r in rows]
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
 
@@ -1040,6 +1112,11 @@ def create_host(data: HostCreate):
     ip = (data.ip or "").strip()
     if not ip:
         ip = "node-" + uuid.uuid4().hex[:8]
+    else:
+        try:
+            check_target(ip)          # it may be probed later (F-14)
+        except ScanOptionError as e:
+            raise HTTPException(422, str(e))
     with get_conn() as conn:
         existing = conn.execute("SELECT id FROM hosts WHERE ip=?", (ip,)).fetchone()
         if existing:
@@ -1191,6 +1268,7 @@ def delete_host(ip: str):
             raise HTTPException(404, "Host not found")
         conn.execute("DELETE FROM hosts WHERE ip=?", (ip,))
         conn.execute("DELETE FROM connections WHERE src_ip=? OR dst_ip=?", (ip, ip))
+        conn.execute("DELETE FROM ssh_access WHERE host_ip=?", (ip,))   # a new device at this IP mustn't inherit keys
         conn.commit()
     return {"ok": True}
 
@@ -1208,6 +1286,7 @@ def bulk_delete_hosts(data: HostBulkDelete):
         conn.execute(f"DELETE FROM hosts WHERE ip IN ({ph})", data.ips)
         conn.execute(f"DELETE FROM connections WHERE src_ip IN ({ph}) OR dst_ip IN ({ph})",
                      data.ips + data.ips)
+        conn.execute(f"DELETE FROM ssh_access WHERE host_ip IN ({ph})", data.ips)
         conn.commit()
     return {"ok": True, "deleted": len(data.ips)}
 
@@ -2252,9 +2331,38 @@ class LLMSettingsIn(BaseModel):
     timeout:      Optional[int] = None
     long_timeout: Optional[int] = None
     num_ctx:      Optional[int] = None   # Ollama context window; 0 = Ollama's default
+    move_secret:  Optional[bool] = None  # "send my saved key to this new address" (F-16)
 
 
 _MASKED = "••••••••"
+
+
+def _addr(v) -> str:
+    return str(v or "").strip().rstrip("/").lower()
+
+
+_AI_DEFAULT_URL = {"ollama": "http://localhost:11434", "openai": "https://api.openai.com/v1"}
+
+
+def _ai_addr(provider, base_url) -> str:
+    """Where the AI key would really go: Anthropic always uses its own address."""
+    provider = provider or "none"
+    if provider == "anthropic":
+        return "anthropic"
+    return f"{provider}|{_addr(base_url or _AI_DEFAULT_URL.get(provider, ''))}"
+
+
+def _guard_secret_move(what: str, saved_secret, new_secret, old_addr, new_addr, confirmed) -> None:
+    """A saved (hidden) secret is only sent where it was saved for (F-16). Moving it
+    to a new address without retyping it needs the 'send my saved key' tick."""
+    if not saved_secret or confirmed:
+        return
+    if new_secret is not None and new_secret != _MASKED:
+        return                      # a new secret was typed
+    if new_addr is None or _addr(new_addr) == _addr(old_addr):
+        return
+    raise HTTPException(409, f"Your saved {what} isn't sent to a new address on its own. Type it again, "
+                             f"or tick 'Send my saved {what} to this new address' (it stays saved either way).")
 
 
 class NotificationSettingsIn(BaseModel):
@@ -2268,12 +2376,14 @@ class NotificationSettingsIn(BaseModel):
     quiet_start:          Optional[str]  = None
     quiet_end:            Optional[str]  = None
     suppress_when_host_down: Optional[bool] = None
+    move_secret:          Optional[bool] = None   # F-16, see _guard_secret_move
 
 
 class StatusPageSettingsIn(BaseModel):
     enabled: Optional[bool] = None
     url:     Optional[str]  = None
     token:   Optional[str]  = None
+    move_secret: Optional[bool] = None   # F-16, see _guard_secret_move
 
 
 @app.get("/api/settings")
@@ -2379,6 +2489,14 @@ def _apply_general(cfg: dict, data: GeneralIn):
 
 def _apply_llm(cfg: dict, data: LLMSettingsIn):
     llm = cfg.setdefault("llm", {})
+    new_addr = None
+    if data.provider is not None or data.base_url is not None:
+        new_addr = _ai_addr(data.provider if data.provider is not None else llm.get("provider"),
+                            data.base_url if data.base_url is not None else llm.get("base_url"))
+    if data.provider == "none":
+        new_addr = None              # AI switched off: the key goes nowhere
+    _guard_secret_move("AI key", llm.get("api_key"), data.api_key,
+                       _ai_addr(llm.get("provider"), llm.get("base_url")), new_addr, data.move_secret)
     if data.provider     is not None: llm["provider"]     = data.provider
     if data.base_url     is not None: llm["base_url"]     = data.base_url.strip()
     if data.model        is not None: llm["model"]        = data.model.strip()
@@ -2392,6 +2510,8 @@ def _apply_llm(cfg: dict, data: LLMSettingsIn):
 
 def _apply_notifications(cfg: dict, data: NotificationSettingsIn):
     ntfy = cfg.setdefault("notifications", {})
+    _guard_secret_move("ntfy token", ntfy.get("token"), data.token,
+                       ntfy.get("server"), data.server, data.move_secret)
     if data.enabled is not None: ntfy["enabled"] = data.enabled
     if data.server  is not None: ntfy["server"]  = data.server.strip().rstrip("/")
     if data.topic   is not None: ntfy["topic"]   = data.topic.strip()
@@ -2415,6 +2535,8 @@ def _apply_notifications(cfg: dict, data: NotificationSettingsIn):
 
 def _apply_statuspage(cfg: dict, data: StatusPageSettingsIn):
     sp = cfg.setdefault("statuspage", {})
+    _guard_secret_move("status page token", sp.get("token"), data.token,
+                       sp.get("url"), data.url, data.move_secret)
     if data.enabled is not None: sp["enabled"] = data.enabled
     if data.url     is not None: sp["url"]     = data.url.strip().rstrip("/")
     if data.token is not None and data.token != _MASKED:
@@ -2598,6 +2720,8 @@ def test_notification(data: NotificationSettingsIn):
     # Build the config to test with: use posted values, but fall back to the
     # saved token when the field came in masked (user didn't retype it).
     cfg = get_notifications_config()
+    _guard_secret_move("ntfy token", cfg.get("token"), data.token,
+                       cfg.get("server"), data.server, data.move_secret)
     test_cfg = {
         "server": (data.server or cfg.get("server") or "").strip().rstrip("/"),
         "topic":  (data.topic  or cfg.get("topic")  or "").strip(),
@@ -2788,14 +2912,12 @@ def list_ssh_keys():
 
 @app.post("/api/ssh-keys", status_code=201)
 def add_ssh_key(data: SshKeyIn):
-    key = data.public_key.strip()
-    if not key.startswith("ssh-"):
-        raise HTTPException(400, "Invalid public key format")
+    key = data.public_key            # checked by SshKeyIn
     fp = _ssh_fingerprint(key)
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO ssh_keys (name, public_key, fingerprint) VALUES (?,?,?)",
-            (data.name.strip(), key, fp)
+            (data.name, key, fp)
         )
         conn.commit()
         row = conn.execute("SELECT * FROM ssh_keys WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -2892,6 +3014,23 @@ def _backup_password_error(code: str, message: str):
     return HTTPException(422, {"code": code, "message": message})
 
 
+_UPLOAD_MAX   = 500 * 1024 * 1024    # a backup upload (normal ones are a few MB)
+_UNZIPPED_MAX = 1024 * 1024 * 1024   # what may come out of it (zip bombs, F-35)
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """The uploaded backup, refused past _UPLOAD_MAX instead of filling memory."""
+    chunks, size = [], 0
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        size += len(chunk)
+        if size > _UPLOAD_MAX:
+            raise HTTPException(413, f"This file is bigger than {_UPLOAD_MAX // (1024 * 1024)} MB — not a Boltarr backup")
+        chunks.append(chunk)
+
+
 def _inspect_backup(data: bytes, password: Optional[str] = None) -> tuple[dict, bytes, Optional[bytes]]:
     """Validate a backup zip without touching live data. Returns (summary,
     db bytes, config bytes or None); raises HTTPException(400) if unusable, or
@@ -2917,6 +3056,8 @@ def _inspect_backup(data: bytes, password: Optional[str] = None) -> tuple[dict, 
             raise HTTPException(400, "Invalid file in ZIP")
     if "boltarr.db" not in names:
         raise HTTPException(400, "ZIP does not contain boltarr.db")
+    if sum(i.file_size for i in zf.infolist() if i.filename in ("boltarr.db", "config.yaml", "manifest.json")) > _UNZIPPED_MAX:
+        raise HTTPException(413, "This backup unpacks to more than 1 GB — not a Boltarr backup")
 
     manifest = {}
     if "manifest.json" in names:
@@ -2963,7 +3104,8 @@ def _inspect_backup(data: bytes, password: Optional[str] = None) -> tuple[dict, 
 
 
 def _scan_running() -> bool:
-    return any(j.get("status") == "running" for j in scan_jobs.values())
+    # Live job statuses are starting / discovering / scanning (F-22: "running" never occurs)
+    return any(j.get("status") not in ("completed", "error", "cancelled") for j in scan_jobs.values())
 
 
 def _apply_restore(db_bytes: bytes, cfg_bytes: Optional[bytes]) -> None:
@@ -3007,7 +3149,7 @@ def _announce_restore(summary: dict) -> None:
 @app.post("/api/restore/check")
 async def restore_check(file: UploadFile = File(...), password: Optional[str] = Form(None)):
     """Step 1: inspect an uploaded backup. Nothing live changes."""
-    summary, db_bytes, cfg_bytes = _inspect_backup(await file.read(), password)
+    summary, db_bytes, cfg_bytes = _inspect_backup(await _read_upload(file), password)
     with get_conn() as conn:
         current = _db_counts(conn)
     token = uuid.uuid4().hex
@@ -3047,7 +3189,7 @@ def restore_apply(token: str):
 @app.post("/api/restore")
 async def restore(file: UploadFile = File(...), password: Optional[str] = Form(None)):
     """One-shot restore (check + apply) for scripts and older clients."""
-    summary, db_bytes, cfg_bytes = _inspect_backup(await file.read(), password)
+    summary, db_bytes, cfg_bytes = _inspect_backup(await _read_upload(file), password)
     if _scan_running():
         raise HTTPException(409, "A scan is running — wait for it to finish (or cancel it), then restore")
     try:
@@ -3068,14 +3210,25 @@ class FactoryResetIn(BaseModel):
 def factory_reset(data: FactoryResetIn):
     """Wipe all network data. Row-deletes (no file swap) so no restart needed.
     keep_settings=False also resets config.yaml to defaults."""
-    with get_conn() as conn:
-        conn.execute("PRAGMA foreign_keys=OFF")
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
-        for t in tables:
-            conn.execute(f"DELETE FROM {t}")
-        conn.commit()
-    init_db()   # re-ensure schema + re-seed the built-in scan profiles
+    if _scan_running():
+        raise HTTPException(409, "A scan is running — wait for it to finish (or cancel it), then reset")
+    try:
+        # Like restore (F-22): the background checks pause, so nothing writes
+        # into the half-wiped database.
+        with maintenance.exclusive():
+            conn = get_conn()
+            try:
+                conn.execute("PRAGMA foreign_keys=OFF")
+                tables = [r[0] for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+                for t in tables:
+                    conn.execute(f"DELETE FROM {t}")
+                conn.commit()
+            finally:
+                conn.close()
+            init_db()   # re-ensure schema + re-seed the built-in scan profiles
+    except (TimeoutError, RuntimeError) as e:
+        raise HTTPException(409, str(e))
     if not data.keep_settings:
         (_DATA_DIR / "config.yaml").unlink(missing_ok=True)   # back to defaults
         invalidate_config_cache()

@@ -1,3 +1,4 @@
+import re
 import threading
 import subprocess
 import nmap
@@ -39,6 +40,52 @@ _DEFAULT_OPTS = {
     "udp": False,         # -sU UDP scan
     "scripts": "",        # --script <...> NSE scripts
 }
+
+
+class ScanOptionError(ValueError):
+    """A scan option or target that could make nmap do something else (F-14)."""
+
+
+_PORT_MODES = {"none", "top1000", "topN", "all", "custom"}
+_TIMING_RE  = re.compile(r"T[0-5]")
+_RANGE_RE   = re.compile(r"[0-9TUSP:,\-]+")            # nmap -p syntax: 22,80,8000-8100 or T:80,U:53
+_SCRIPTS_RE = re.compile(r"[A-Za-z0-9_\-,*() ]+")      # NSE names / categories / expressions, no file paths
+_TARGET_RE  = re.compile(r"[A-Za-z0-9:][A-Za-z0-9.:/\-]*")   # IP, CIDR, range or hostname, never an option
+
+
+def check_target(t: str) -> str:
+    """One nmap target (IP, CIDR, a1-b range or hostname). Anything that could be
+    read as an nmap option (starts with '-', has spaces or '=') is refused."""
+    t = (t or "").strip()
+    if not t or len(t) > 255 or not _TARGET_RE.fullmatch(t):
+        raise ScanOptionError(f"Not a valid scan target: {t[:60]!r}")
+    return t
+
+
+def check_opts(opts: dict | None) -> dict:
+    """norm_opts + refuse values the screens never send (they'd reach nmap as extra options)."""
+    o = norm_opts(opts)
+    if not isinstance(o["timing"], str) or not _TIMING_RE.fullmatch(o["timing"]):
+        raise ScanOptionError("Timing must be T0 to T5.")
+    if o["ports"] not in _PORT_MODES:
+        raise ScanOptionError(f"Unknown ports choice: {str(o['ports'])[:30]!r}")
+    pr = (o.get("port_range") or "").strip()
+    if pr and (len(pr) > 500 or not _RANGE_RE.fullmatch(pr)):
+        raise ScanOptionError("Port range may only use numbers, commas and dashes (e.g. 22,80,8000-8100).")
+    sc = (o.get("scripts") or "").strip()
+    if sc and (len(sc) > 300 or sc.startswith("-") or not _SCRIPTS_RE.fullmatch(sc)):
+        raise ScanOptionError("Scripts may only be NSE script names or categories (e.g. default,vuln), no file paths.")
+    for key, lo, hi in (("top_n", 1, 65535), ("version_intensity", 0, 9)):
+        try:
+            v = int(o.get(key) if o.get(key) is not None else _DEFAULT_OPTS[key])
+        except (TypeError, ValueError):
+            raise ScanOptionError(f"{key} must be a number.")
+        if not lo <= v <= hi:
+            raise ScanOptionError(f"{key} must be between {lo} and {hi}.")
+        o[key] = v
+    for key in ("sv", "os", "pn", "udp"):
+        o[key] = bool(o[key])
+    return o
 
 
 def norm_opts(opts: dict | None) -> dict:
@@ -148,12 +195,14 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
     try:
         with _lock:
             job = scan_jobs[run_id]
+        o = check_opts(opts)                         # again here: saved profiles and schedules too
+        targets = [check_target(t) for t in cidr.split()]
 
         update(status="discovering", progress=0)
 
         # `cidr` may be a single CIDR ("192.168.1.0/24") or a space-separated list
-        # of specific IPs (host-filtered scheduled scans) — nmap takes many targets.
-        targets = cidr.split()
+        # of specific IPs (host-filtered scheduled scans) — nmap takes many targets
+        # (checked above).
         xml = _run_nmap(["-sn", f"-{o['timing']}", "--min-parallelism", "10"] + targets, job)
         if xml is None or is_cancelled():
             mark_cancelled()
@@ -335,7 +384,8 @@ def _do_scan(run_id: int, cidr: str, opts: dict | None = None):
             scan_jobs[run_id]["error"] = str(e)
         try:
             conn = get_conn()
-            conn.execute("UPDATE scan_runs SET status='error' WHERE id=?", (run_id,))
+            conn.execute("UPDATE scan_runs SET status='error', note=?, completed_at=datetime('now') WHERE id=?",
+                         (str(e)[:300], run_id))
             conn.commit()
             conn.close()
         except Exception:
@@ -362,6 +412,8 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
     try:
         with _lock:
             job = scan_jobs[run_id]
+        o = check_opts(opts)
+        ip = check_target(ip)
 
         update(status="scanning", progress=0)
 
@@ -460,7 +512,8 @@ def _do_probe(run_id: int, ip: str, opts: dict | None = None):
             scan_jobs[run_id]["error"] = str(e)
         try:
             conn = get_conn()
-            conn.execute("UPDATE scan_runs SET status='error' WHERE id=?", (run_id,))
+            conn.execute("UPDATE scan_runs SET status='error', note=?, completed_at=datetime('now') WHERE id=?",
+                         (str(e)[:300], run_id))
             conn.commit()
             conn.close()
         except Exception:

@@ -189,8 +189,12 @@ async function removeHostSshAccess(accessId, ip) {
   await loadHostSshSection(ip);
 }
 
+// Same rule as the server: a username can't carry quotes or spaces into the command (F-25).
+const SSH_USER_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
+
 function sshDeployCmd(ip, user) {
-  const url = `${location.protocol}//${location.host}/api/hosts/${ip}/authorized-keys?user=${user}`;
+  if (!SSH_USER_RE.test(user)) throw new Error(`The username "${user}" has characters that aren't safe in a command — remove this entry and add it again.`);
+  const url = `${location.protocol}//${location.host}/api/hosts/${encodeURIComponent(ip)}/authorized-keys?user=${encodeURIComponent(user)}`;
   // Resolves the TARGET user's home (root→/root, john→/home/john), creates ~/.ssh,
   // appends keys, dedupes, and fixes perms + ownership. Run as root (or via sudo).
   return `sudo sh -c 'U="${user}"; H=$(getent passwd "$U" | cut -d: -f6); ` +
@@ -202,12 +206,14 @@ function sshDeployCmd(ip, user) {
 }
 
 async function copySshCurl(ip, user) {
-  await navigator.clipboard.writeText(sshDeployCmd(ip, user));
+  let cmd;
+  try { cmd = sshDeployCmd(ip, user); } catch (e) { return showToast(e.message); }
+  await navigator.clipboard.writeText(cmd);
   showToast(`Copied — deploys to ${user}'s ~/.ssh/authorized_keys`);
 }
 
 async function downloadAuthorizedKeys(ip, user) {
-  const text = await fetch(`/api/hosts/${ip}/authorized-keys?user=${user}`).then(r => r.text());
+  const text = await fetch(`/api/hosts/${encodeURIComponent(ip)}/authorized-keys?user=${encodeURIComponent(user)}`).then(r => r.text());
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
   a.download = "authorized_keys";

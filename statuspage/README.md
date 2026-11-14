@@ -32,6 +32,15 @@ docker compose up -d
 The app listens on port **12102** (change the host port in
 `docker-compose.yml` if that's taken).
 
+### Runs as a normal user
+
+The container starts as root only long enough to hand the `data` folder to a
+normal user, then runs the status page as that user (user/group **1000** by
+default). Existing installs need nothing: their files are handed over on the
+first start. To pick the user — e.g. on **Unraid** use `99`/`100` — set
+`PUID` and `PGID` in `.env`. If the folder can't be handed over (some network
+shares refuse it), the container logs a warning and runs as root, as before.
+
 ### Token
 
 `STATUS_TOKEN` is a shared secret — the same value goes in this app's `.env`

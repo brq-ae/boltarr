@@ -4,7 +4,7 @@ from backend import config
 
 def _all(**over):
     body = {
-        "general": {"timezone": "Asia/Dubai"},
+        "general": {"timezone": "Europe/Berlin"},
         "llm": {"provider": "none", "model": "m1"},
         "notifications": {"enabled": False, "topic": "t1", "check_seconds": 90},
         "statuspage": {"enabled": False, "url": "http://status.example/"},
@@ -21,7 +21,7 @@ def test_save_all_writes_every_section(client):
     r = client.put("/api/settings/all", json=_all())
     assert r.status_code == 200, r.text
     cfg = config.get_config()
-    assert cfg["general"]["timezone"] == "Asia/Dubai"
+    assert cfg["general"]["timezone"] == "Europe/Berlin"
     assert cfg["llm"]["model"] == "m1"
     assert cfg["monitoring"]["check_seconds"] == 90
     assert cfg["statuspage"]["url"] == "http://status.example"

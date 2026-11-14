@@ -140,3 +140,19 @@ def test_boltarr_sends_keyed_incidents_per_item(client):
         with get_conn() as conn:
             conn.execute("DELETE FROM hosts WHERE id=?", (hid,))
             conn.commit()
+
+
+def test_rate_limit_uses_the_address_the_proxy_saw(sp, monkeypatch):
+    """F-35: behind a trusted proxy, a client can't dodge the login limit by sending its own X-Forwarded-For."""
+    m = sp.mod
+    monkeypatch.setattr(m, "TRUST_PROXY", True)
+
+    class R:
+        headers = {"x-forwarded-for": "1.2.3.4, 10.9.9.9"}   # client-sent first, proxy-appended last
+        client = None
+    assert m._client_ip(R) == "10.9.9.9"
+    monkeypatch.setattr(m, "_ATTEMPTS", {})
+    monkeypatch.setattr(m, "_ATTEMPTS_MAX", 5)
+    for i in range(20):
+        m._record_fail(f"10.9.0.{i}")
+    assert len(m._ATTEMPTS) <= 5

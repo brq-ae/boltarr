@@ -13,7 +13,7 @@ _DATA_DIR = Path(os.environ.get("BOLTARR_DATA_DIR") or (Path(__file__).parent.pa
 CONFIG_PATH = _DATA_DIR / "config.yaml"
 
 _DEFAULTS: dict = {
-    # General app settings. `timezone` is an IANA name (e.g. "Asia/Dubai"); empty
+    # General app settings. `timezone` is an IANA name (e.g. "Europe/London"); empty
     # means the server's own clock. It drives all time-of-day logic — schedule
     # fire times, quiet hours, the daily digest — and how times are displayed.
     "general": {

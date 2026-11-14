@@ -1358,7 +1358,12 @@
             <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px">
               <input type="checkbox" id="loginTrustProxy" style="accent-color:var(--accent)"> Trust the login service
             </label>
-            <div class="form-row"><label>Its IP address(es)</label><input id="loginProxies" type="text" class="mono" placeholder="172.18.0.5, 10.0.0.0/24"></div>
+            <div class="form-row"><label>Its IP address(es)</label><input id="loginProxies" type="text" class="mono" placeholder="172.18.0.5" data-input="loginProxyCheck"></div>
+            <p id="loginProxiesWarn" class="secret-move" hidden></p>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+              Use the login service's <b>own</b> address. A whole range (like <code>172.18.0.0/16</code>) trusts every device
+              or container in it to say who is logged in.
+            </p>
             <div class="form-row"><label>User header</label><input id="loginProxyHeader" type="text" class="mono" placeholder="Remote-User"></div>
             <button class="btn" style="font-size:12px" data-click="saveLoginProxy">Save</button>
 
@@ -1413,12 +1418,16 @@
       </div>
       <div id="setUrlRow" class="form-row" style="display:none">
         <label>Base URL</label>
-        <input id="setBaseUrl" type="text" placeholder="http://localhost:11434">
+        <input id="setBaseUrl" data-input="secretMoveCheck" type="text" placeholder="http://localhost:11434">
       </div>
       <div id="setKeyRow" class="form-row" style="display:none">
         <label>API Key</label>
-        <input id="setApiKey" type="password" placeholder="sk-…">
+        <input id="setApiKey" data-input="secretMoveCheck" type="password" placeholder="sk-…">
       </div>
+      <label id="setKeyMoveRow" class="secret-move" hidden>
+        <input type="checkbox" id="setKeyMoveOk"> <span><b>Send my saved AI key to this new address.</b>
+        Your AI key is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
+      </label>
       <div class="form-row">
         <label>Default Model</label>
         <input id="setModel" type="text" list="setModelList" autocomplete="off" title="Pick a model from your AI server, or type any name" placeholder="Pick from the list or type a name">
@@ -1478,7 +1487,7 @@
       </p>
       <div class="form-row">
         <label>Server</label>
-        <input id="setNtfyServer" type="text" placeholder="https://ntfy.sh">
+        <input id="setNtfyServer" data-input="secretMoveCheck" type="text" placeholder="https://ntfy.sh">
       </div>
       <div class="form-row">
         <label>Topic</label>
@@ -1486,8 +1495,12 @@
       </div>
       <div class="form-row">
         <label>Access token</label>
-        <input id="setNtfyToken" type="password" placeholder="(optional — only if your ntfy needs a login)">
+        <input id="setNtfyToken" data-input="secretMoveCheck" type="password" placeholder="(optional — only if your ntfy needs a login)">
       </div>
+      <label id="setNtfyMoveRow" class="secret-move" hidden>
+        <input type="checkbox" id="setNtfyMoveOk"> <span><b>Send my saved ntfy token to this new address.</b>
+        Your ntfy token is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
+      </label>
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Probe each service every</label>
         <input id="setCheckSeconds" type="number" min="15" max="600" style="width:64px" value="60">
@@ -1537,13 +1550,17 @@
       </p>
       <div class="form-row">
         <label>Status app URL</label>
-        <input id="setSpUrl" type="text" placeholder="http://192.168.1.20:12102">
+        <input id="setSpUrl" data-input="secretMoveCheck" type="text" placeholder="http://192.168.1.20:12102">
       </div>
       <div class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Token</label>
-        <input id="setSpToken" type="password" placeholder="shared secret" style="flex:1;min-width:160px">
+        <input id="setSpToken" data-input="secretMoveCheck" type="password" placeholder="shared secret" style="flex:1;min-width:160px">
         <button class="btn" type="button" data-click="generateStatusToken" title="Generate a random token, then copy it into the status app's .env">Generate</button>
       </div>
+      <label id="setSpMoveRow" class="secret-move" hidden>
+        <input type="checkbox" id="setSpMoveOk"> <span><b>Send my saved status page token to this new address.</b>
+        Your status page token is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
+      </label>
       <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
         The same token must be set in the status app's <code>.env</code> (<code>STATUS_TOKEN</code>).
       </p>

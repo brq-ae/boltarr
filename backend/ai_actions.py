@@ -98,6 +98,11 @@ def _profile(conn, name) -> dict:
         opts = json.loads(r["options"] or "{}")
     except ValueError:
         opts = {}
+    from .scanner import check_opts, ScanOptionError
+    try:
+        check_opts(opts)
+    except ScanOptionError as e:
+        raise ActionError(f"The scan profile '{r['name']}' has a setting Boltarr won't run: {e}")
     return {"name": r["name"], "options": opts}
 
 
