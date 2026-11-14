@@ -1878,12 +1878,77 @@ class ChatReq(BaseModel):
 
 
 _NETGEAR = {"router", "gateway", "switch", "unmanaged-switch", "firewall", "ap"}
-_HOST_CAP = 80          # full host lines sent to the model; the rest are summarised
+_HOST_CAP = 40          # full host lines always sent (down > infra/monitored > ports); see _chat_pins
+_PIN_CAP = 15           # extra full lines for hosts the conversation mentions
+_ROLL_CAP = 300         # short roll-call lines for every other host; above this only a count
+_INDEX_CHARS = 4800     # budget (~1.2k tokens) for the open-ports index
 _CONN_CAP = 120
+_IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
-def _chat_context() -> str:
-    """Build the chat system message: live network state + recent history."""
+def _chat_texts(messages) -> list[str]:
+    """What the user is asking about: the latest user message, the two before it,
+    and the AI's last reply (so a follow-up like "pause it" still finds the host)."""
+    msgs = [(m.get("role"), m.get("content") or "") if isinstance(m, dict) else (m.role, m.content or "")
+            for m in (messages or [])]
+    users = [c for r, c in msgs if r == "user"][-3:]
+    bots = [c for r, c in msgs if r == "assistant"][-1:]
+    return [t.lower() for t in users + bots if t]
+
+
+def _word_in(word: str, texts: list[str]) -> bool:
+    pat = re.compile(r"(?<![\w.-])" + re.escape(word) + r"(?![\w-])")
+    return any(pat.search(t) for t in texts)
+
+
+def _chat_pins(hosts: list[dict], svc_by: dict, texts: list[str]) -> list[int]:
+    """Host ids the conversation mentions, best match first: IP, then hostname
+    (with or without its domain), then a service name, then the vendor."""
+    if not texts:
+        return []
+    ips = {ip for t in texts for ip in _IP_RE.findall(t)}
+    tiers: list[list[int]] = [[], [], [], []]
+    for h in hosts:
+        hid = h["id"]
+        if h["ip"] in ips:
+            tiers[0].append(hid); continue
+        hn = (h.get("hostname") or "").lower().strip()
+        if hn and (_word_in(hn, texts) or ("." in hn and len(hn.split(".")[0]) >= 2
+                                           and _word_in(hn.split(".")[0], texts))):
+            tiers[1].append(hid); continue
+        names = {(sv.get("name") or "").lower().strip() for sv in svc_by.get(hid, [])}
+        if any(len(n) >= 3 and _word_in(n, texts) for n in names):
+            tiers[2].append(hid); continue
+        v = re.sub(r"[^\w-]", "", ((h.get("vendor") or "").split() or [""])[0]).lower()
+        if len(v) >= 3 and _word_in(v, texts):
+            tiers[3].append(hid)
+    out: list[int] = []
+    for t in tiers:
+        out += [i for i in t if i not in out]
+    return out[:_PIN_CAP]
+
+
+def _ip_split(ip: str) -> tuple[str, str]:
+    """'10.0.0.23' → ('10.0.0.x', '.23'); anything else → ('other', ip)."""
+    parts = ip.split(".")
+    if len(parts) == 4:
+        return ".".join(parts[:3]) + ".x", "." + parts[3]
+    return "other", ip
+
+
+def _ip_key(ip: str):
+    try:
+        return (0, int(ipaddress.ip_address(ip)))
+    except ValueError:
+        return (1, 0)
+
+
+def _chat_context(messages=None) -> str:
+    """Build the chat system message: live network state + recent history.
+
+    Full detail goes to the most important hosts plus the ones the conversation
+    mentions; every other host still gets a short roll-call line, and an index of
+    open ports covers questions like "which devices have SSH open?"."""
     with get_conn() as conn:
         hosts = [dict(h) for h in conn.execute("SELECT * FROM hosts ORDER BY ip")]
         host_entries = []                        # (priority, rendered_line, device_type)
@@ -1896,7 +1961,7 @@ def _chat_context() -> str:
             live = h.get("online")
             hstatus = "online" if live == 1 else "offline" if live == 0 else "unknown"
             host_min.append((h["id"], h["ip"], label))
-            parts = [f"{h['ip']} ({label}, {h.get('device_type','?')}) status={hstatus}"]
+            parts = [f"{h['ip']} ({label}, {h.get('device_type') or '?'}) status={hstatus}"]
             if h.get("vendor"):   parts.append(f"vendor={h['vendor']}")
             if h.get("os_guess"): parts.append(f"os={h['os_guess']}")
             if h.get("has_wifi"): parts.append("wifi=yes")
@@ -1935,19 +2000,52 @@ def _chat_context() -> str:
             host_down = live == 0 or any(s.get("monitored") and s.get("monitor_status") == "down" for s in svc_rows)
             has_mon = any(s.get("monitored") for s in svc_rows)
             prio = 4 if host_down else 3 if (dt in _NETGEAR or has_mon) else 2 if (ports or svc_rows) else 1
-            host_entries.append((prio, "  " + "  ".join(parts), h.get("device_type") or "unknown"))
+            host_entries.append((prio, "  " + "  ".join(parts), h))
 
-        # Trim: keep the most relevant hosts in full (down > infra/monitored > has
-        # ports/services > plain clients); summarise the rest so a big network
-        # doesn't overflow the model. Stable sort preserves IP order within a tier.
+        # Full lines: hosts the conversation mentions, then the most relevant ones
+        # (down > infra/monitored > has ports/services > plain clients). Stable sort
+        # keeps IP order within a tier.
+        pins = _chat_pins(hosts, svc_by, _chat_texts(messages))
         host_entries.sort(key=lambda x: x[0], reverse=True)
-        lines = [e[1] for e in host_entries[:_HOST_CAP]]
-        _dropped = host_entries[_HOST_CAP:]
-        if _dropped:
+        by_id = {e[2]["id"]: e for e in host_entries}
+        full = [by_id[i] for i in pins] + [e for e in host_entries if e[2]["id"] not in pins][:_HOST_CAP]
+        full_ids = {e[2]["id"] for e in full}
+        lines = [e[1] for e in full]
+
+        # Roll-call: one short line for every other host, grouped by /24.
+        rest = sorted((e[2] for e in host_entries if e[2]["id"] not in full_ids), key=lambda h: _ip_key(h["ip"]))
+        roll_lines = []
+        if len(rest) > _ROLL_CAP:
             from collections import Counter
-            _cnt = ", ".join(f"{n} {t}" for t, n in Counter(e[2] for e in _dropped).most_common())
-            lines.append(f"  ... and {len(_dropped)} more hosts not shown ({_cnt}). "
-                         f"Ask about a specific IP for full detail.")
+            _cnt = ", ".join(f"{n} {t}" for t, n in
+                             Counter(h.get("device_type") or "unknown" for h in rest).most_common())
+            roll_lines.append(f"  {len(rest)} more hosts, too many to list ({_cnt}).")
+        else:
+            _grp = None
+            for h in rest:
+                g, tail = _ip_split(h["ip"])
+                if g != _grp:
+                    roll_lines.append(f"  {g}:"); _grp = g
+                vendor = ((h.get("vendor") or "").split() or [""])[0]
+                cell = " ".join(x for x in (tail, h.get("hostname") or "-", h.get("device_type") or "?", vendor) if x)
+                if h.get("online") == 0:
+                    cell += " [off]"
+                roll_lines.append("    " + cell)
+
+        # Open-ports index: every host, most common ports first, within a budget.
+        _ip_of = {h["id"]: h["ip"] for h in hosts}
+        port_hosts: dict = {}
+        for hid, plist in open_by.items():
+            for p in plist:
+                port_hosts.setdefault((p["port"], p["service"] or "?"), []).append(_ip_of.get(hid, "?"))
+        index_lines, used, skipped = [], 0, 0
+        for (port, svc), ips in sorted(port_hosts.items(), key=lambda kv: (-len(kv[1]), kv[0][0])):
+            line = f"  {port}/{svc}: " + " ".join(sorted(ips, key=_ip_key))   # full IPs: small models misread ".N"
+            if used + len(line) > _INDEX_CHARS:
+                skipped += 1; continue
+            index_lines.append(line); used += len(line)
+        if skipped:
+            index_lines.append(f"  ... and {skipped} rarer ports not listed.")
 
         conns = [dict(c) for c in conn.execute("SELECT * FROM connections ORDER BY src_ip")]
         conn_lines = []
@@ -2032,8 +2130,18 @@ def _chat_context() -> str:
     network_ctx += "Currently down:\n  " + (
         "\n  ".join(problems) if problems else "Nothing — all monitored items are up.") + "\n\n"
     if lines:
-        network_ctx += ("Hosts (status = live liveness state; up24h/up7d = uptime of monitored "
+        network_ctx += ("Hosts in full detail (status = live liveness state; up24h/up7d = uptime of monitored "
                         "services):\n" + "\n".join(lines) + "\n")
+    if roll_lines:
+        network_ctx += ("\nOther hosts (short list: last part of the IP, hostname, type, vendor; "
+                        "[off] = offline). Their ports are in the index below; their notes and services "
+                        "are not shown. If the user needs more about one of them, say so and ask them to "
+                        "name it (IP or hostname) — its full detail is then included:\n"
+                        + "\n".join(roll_lines) + "\n")
+    if index_lines:
+        network_ctx += ("\nOpen ports index (port/service: IPs of every host that has it open). "
+                        "Use it for questions like 'which devices have SSH open':\n"
+                        + "\n".join(index_lines) + "\n")
     if conn_lines:
         network_ctx += "\nConnections:\n" + "\n".join(conn_lines) + "\n"
     if vlan_lines:
@@ -2042,7 +2150,7 @@ def _chat_context() -> str:
         network_ctx += "\nRecent changes (last 7 days, newest first):\n" + "\n".join(change_lines) + "\n"
     if outage_lines:
         network_ctx += "\nRecent outages (last 7 days, newest first):\n" + "\n".join(outage_lines) + "\n"
-    if not lines:
+    if not host_entries:
         network_ctx = "No hosts scanned yet."
 
     system_msg = (
@@ -2059,9 +2167,23 @@ def _chat_context() -> str:
     return system_msg
 
 
+def _chat_prompt(messages) -> str:
+    """The chat system message, with its rough size logged (and a warning when it
+    won't fit the Ollama context window, which would cut it off silently)."""
+    system_msg = _chat_context(messages)
+    total = len(system_msg) + sum(len(m.content or "") for m in messages)
+    approx = total // 4
+    llm_cfg = get_llm_config()
+    ctx = int(llm_cfg.get("num_ctx") or 0) if llm_cfg.get("provider") == "ollama" else 0
+    warn = f" — more than the {ctx}-token context, the start may be cut off" if ctx and approx > ctx * 0.9 else ""
+    print(f"[chat] prompt ~{approx} tokens ({len(system_msg)} chars of network notes, "
+          f"{len(messages)} messages){warn}")
+    return system_msg
+
+
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatReq):
-    system_msg = _chat_context()
+    system_msg = _chat_prompt(req.messages)
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
     try:
         response = await chat(messages, model=req.model or get_default_model(), system=system_msg)
@@ -2072,7 +2194,7 @@ async def chat_endpoint(req: ChatReq):
 
 @app.post("/api/chat/stream")
 async def chat_stream_endpoint(req: ChatReq):
-    system_msg = _chat_context()
+    system_msg = _chat_prompt(req.messages)
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
     model = req.model or get_default_model()
 
@@ -2129,6 +2251,7 @@ class LLMSettingsIn(BaseModel):
     model:        Optional[str] = None
     timeout:      Optional[int] = None
     long_timeout: Optional[int] = None
+    num_ctx:      Optional[int] = None   # Ollama context window; 0 = Ollama's default
 
 
 _MASKED = "••••••••"
@@ -2261,6 +2384,7 @@ def _apply_llm(cfg: dict, data: LLMSettingsIn):
     if data.model        is not None: llm["model"]        = data.model.strip()
     if data.timeout      is not None: llm["timeout"]      = data.timeout
     if data.long_timeout is not None: llm["long_timeout"] = data.long_timeout
+    if data.num_ctx      is not None: llm["num_ctx"]      = max(0, min(262144, data.num_ctx))
     # Only update api_key if it's not the masked placeholder
     if data.api_key is not None and data.api_key != _MASKED:
         llm["api_key"] = data.api_key

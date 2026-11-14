@@ -581,6 +581,7 @@
         <span class="chat-title">Network Assistant</span>
         <div style="display:flex;gap:4px;align-items:center;min-width:0">
           <select id="chatModel" style="font-size:11px;padding:4px 7px;max-width:120px;min-width:0;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
+          <button class="btn-ghost chat-hbtn" id="chatNew" title="New chat (clears this conversation)">＋</button>
           <button class="btn-ghost chat-hbtn" id="chatCopyAll" title="Copy the whole conversation">⧉</button>
           <button class="btn-ghost chat-hbtn" id="chatDownload" title="Download the conversation (.md)">⤓</button>
           <button class="btn-ghost chat-hbtn chat-wide-btn" id="chatWide" title="Wider chat">⤢</button>
@@ -1428,6 +1429,11 @@
         <input id="setTimeout" type="number" style="width:70px" min="10" value="120">
         <label style="margin-left:12px">Long timeout&nbsp;(s)</label>
         <input id="setLongTimeout" type="number" style="width:80px" min="30" value="600">
+      </div>
+      <div id="setCtxRow" class="form-row" style="flex-wrap:wrap;gap:8px">
+        <label>Context&nbsp;(tokens)</label>
+        <input id="setNumCtx" type="number" style="width:90px" min="0" step="1024" value="8192">
+        <span class="text-3" style="font-size:11px">How much the model may read at once. Too small cuts off the chat's network notes; bigger uses more GPU memory. 0 = Ollama's default.</span>
       </div>
       <div id="setTestResult" class="settings-test-result" style="display:none"></div>
       <button class="btn" style="font-size:12px;align-self:flex-start" data-click="testLLMConnection">⚡ Test AI</button>

@@ -19,6 +19,15 @@ def _cfg() -> dict:
     return get_llm_config()
 
 
+def _ollama_opts(cfg: dict) -> dict:
+    """Ollama's context window (num_ctx); its own default often cuts long prompts off silently."""
+    try:
+        n = int(cfg.get("num_ctx") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return {"options": {"num_ctx": n}} if n > 0 else {}
+
+
 def is_configured() -> bool:
     return _cfg().get("provider", "none") != "none"
 
@@ -70,7 +79,7 @@ async def generate(prompt: str, model: str = "", system: str = "",
 
     try:
         if provider == "ollama":
-            payload: dict = {"model": model, "prompt": prompt, "stream": False}
+            payload: dict = {"model": model, "prompt": prompt, "stream": False, **_ollama_opts(cfg)}
             if system:
                 payload["system"] = system
             async with httpx.AsyncClient(timeout=timeout) as c:
@@ -131,7 +140,7 @@ async def chat(messages: list[dict], model: str = "", system: str = "") -> str:
             async with httpx.AsyncClient(timeout=timeout) as c:
                 r = await c.post(
                     f"{cfg['base_url'].rstrip('/')}/api/chat",
-                    json={"model": model, "messages": full, "stream": False},
+                    json={"model": model, "messages": full, "stream": False, **_ollama_opts(cfg)},
                 )
                 r.raise_for_status()
                 return r.json().get("message", {}).get("content", "")
@@ -187,7 +196,8 @@ async def chat_stream(messages: list[dict], model: str = "", system: str = ""):
             full = ([{"role": "system", "content": system}] if system else []) + messages
             async with httpx.AsyncClient(timeout=timeout) as c:
                 async with c.stream("POST", f"{base}/api/chat",
-                                    json={"model": model, "messages": full, "stream": True}) as r:
+                                    json={"model": model, "messages": full, "stream": True,
+                                          **_ollama_opts(cfg)}) as r:
                     r.raise_for_status()
                     async for line in r.aiter_lines():
                         if not line.strip():

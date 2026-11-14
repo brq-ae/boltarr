@@ -845,6 +845,7 @@ tbody td {
 .chat-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .chat-hbtn { font-size: 13px; padding: 2px 5px; color: var(--text-3); flex-shrink: 0; }
 .chat-hbtn:hover { color: var(--text); }
+.chat-hbtn.armed { color: var(--red); font-size: 11px; font-weight: 600; }
 
 .chat-header {
   height: var(--topbar-h);

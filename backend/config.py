@@ -26,6 +26,10 @@ _DEFAULTS: dict = {
         "model": "",
         "timeout": 120,
         "long_timeout": 600,
+        # Ollama only: how much text (tokens) the model may read at once. Ollama's own
+        # default is small (often 4096), which silently cuts off the chat's network
+        # notes on bigger networks. 0 = leave it to Ollama.
+        "num_ctx": 8192,
     },
     # ntfy push notifications. Real values live in data/config.yaml (gitignored),
     # never here — keep these generic so nothing private is committed.
@@ -217,11 +221,12 @@ def _load_config() -> dict:
         "LLM_MODEL":        "model",
         "LLM_TIMEOUT":      "timeout",
         "LLM_LONG_TIMEOUT": "long_timeout",
+        "LLM_NUM_CTX":      "num_ctx",
     }
     for env_key, cfg_key in env_map.items():
         val = os.environ.get(env_key)
         if val:
-            cfg["llm"][cfg_key] = int(val) if cfg_key in ("timeout", "long_timeout") else val
+            cfg["llm"][cfg_key] = int(val) if cfg_key in ("timeout", "long_timeout", "num_ctx") else val
 
     # ntfy env overrides
     ntfy_env = {

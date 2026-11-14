@@ -2,6 +2,7 @@
 
 const chatHistory = [];
 let chatAbort = null;   // AbortController while a reply is streaming
+let chatEpoch = 0;      // bumped by New chat, so a reply that was cut off doesn't land in the new chat
 
 // While a reply streams, Send becomes Stop. Stopping closes the request; the
 // server then drops its connection to the AI, which stops generating.
@@ -53,6 +54,32 @@ function chatDownload() {
   flashBtn(b, "✓");
 }
 
+// New chat: the first click arms the button ("Clear?") for a few seconds, the
+// second clears the screen and what the AI is sent, so nothing is wiped by accident.
+const CHAT_GREETING = "Hi. I have full context on your network. Ask me about devices, services, topology, or security posture.";
+
+function chatNew() {
+  const b = document.getElementById("chatNew");
+  if (!chatHistory.length && !chatAbort) return flashBtn(b, "–");
+  if (!b.classList.contains("armed")) {
+    b.classList.add("armed");
+    b.textContent = "Clear?";
+    clearTimeout(b._t);
+    b._t = setTimeout(() => { b.classList.remove("armed"); b.textContent = "＋"; }, 3000);
+    return;
+  }
+  clearTimeout(b._t);
+  b.classList.remove("armed");
+  b.textContent = "＋";
+  chatEpoch++;
+  stopChat();
+  chatHistory.length = 0;
+  const msgs = document.getElementById("chatMessages");
+  msgs.innerHTML = "";
+  appendMsg("assistant", CHAT_GREETING);
+  document.getElementById("chatInput").focus();
+}
+
 function toggleChat() {
   document.getElementById("chatPanel").classList.toggle("open");
 }
@@ -84,6 +111,7 @@ async function sendChat() {
   appendMsg("user", text);
 
   const thinking = appendMsg("thinking", "thinking…");
+  const epoch = chatEpoch;
   chatAbort = new AbortController();
   setChatBusy(true);
   let div = null, full = "";
@@ -122,6 +150,7 @@ async function sendChat() {
     attachActionCards(div, full, chatHistory.length - 1);
   } catch (e) {
     thinking.remove();
+    if (epoch !== chatEpoch) return;       // New chat was clicked: drop this reply
     if (e.name === "AbortError") {
       if (full) {
         // Keep what was written so far, so the conversation still makes sense.
@@ -154,6 +183,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
   document.getElementById("chatSendBtn")?.addEventListener("click", () => chatAbort ? stopChat() : sendChat());
+  document.getElementById("chatNew")?.addEventListener("click", chatNew);
   document.getElementById("chatCopyAll")?.addEventListener("click", chatCopyAll);
   document.getElementById("chatDownload")?.addEventListener("click", chatDownload);
   document.getElementById("chatWide")?.addEventListener("click", () =>

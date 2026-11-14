@@ -66,6 +66,7 @@ async function openSettings() {
     loadAiHistory();
     document.getElementById("setTimeout").value      = llm.timeout      || 120;
     document.getElementById("setLongTimeout").value  = llm.long_timeout || 600;
+    document.getElementById("setNumCtx").value       = llm.num_ctx ?? 8192;
     onSettingsProviderChange();
     document.getElementById("setTestResult").style.display = "none";
 
@@ -185,6 +186,11 @@ function onQuietToggle() {
   document.getElementById("setQuietRange").style.display = on ? "inline-flex" : "none";
 }
 
+function _numCtxValue() {
+  const n = parseInt(document.getElementById("setNumCtx").value);
+  return Number.isNaN(n) ? 8192 : Math.max(0, n);
+}
+
 function onSettingsProviderChange() {
   const p = document.getElementById("setProvider").value;
   const urlRow = document.getElementById("setUrlRow");
@@ -194,6 +200,7 @@ function onSettingsProviderChange() {
 
   urlRow.style.display = (p === "ollama" || p === "openai") ? "" : "none";
   keyRow.style.display = (p === "openai" || p === "anthropic") ? "" : "none";
+  document.getElementById("setCtxRow").style.display = p === "ollama" ? "" : "none";
 
   if (urlInput.value === "" || Object.values(PROVIDER_URLS).includes(urlInput.value)) {
     urlInput.value = PROVIDER_URLS[p] || "";
@@ -260,6 +267,7 @@ async function saveSettings(keepOpen = false) {
     model:        document.getElementById("setModel").value.trim(),
     timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
     long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
+    num_ctx:      _numCtxValue(),
   };
   const ntfyPayload = {
     enabled: document.getElementById("setNtfyEnabled").checked,
@@ -514,6 +522,7 @@ async function testLLMConnection() {
       model:        document.getElementById("setModel").value.trim(),
       timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
       long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
+      num_ctx:      _numCtxValue(),
     };
     await api("PUT", "/api/settings", payload);
     const result = await api("POST", "/api/settings/test");
