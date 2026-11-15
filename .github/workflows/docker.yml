@@ -16,6 +16,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install nmap (as in the image; some tests need its port lists)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq nmap
+
       - name: Run tests
         run: |
           pip install -r requirements-dev.txt

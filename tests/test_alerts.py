@@ -329,7 +329,7 @@ _EMPTY_XML = (b'<?xml version="1.0"?><nmaprun scanner="nmap" args="nmap -sn" sta
               b'<hosts up="0" down="256" total="256"/></runstats></nmaprun>')
 
 
-def test_failed_subnet_sweep_is_left_out(monkeypatch):
+def test_failed_subnet_sweep_is_left_out(client, monkeypatch):
     calls = []
 
     def fake_run(args, **kw):
