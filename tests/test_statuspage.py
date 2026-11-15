@@ -156,3 +156,37 @@ def test_rate_limit_uses_the_address_the_proxy_saw(sp, monkeypatch):
     for i in range(20):
         m._record_fail(f"10.9.0.{i}")
     assert len(m._ATTEMPTS) <= 5
+
+
+# ── F-27: "may be out of date" + bigger pushes ────────────────────────────────
+def test_stale_banner_after_boltarr_goes_quiet(sp):
+    assert _push(sp, {"services": [], "stale_after_minutes": 10}).status_code == 200
+    assert "stale" not in sp.get("/data").json()
+    pushed = datetime.fromisoformat(sp.mod.STATE["_pushed_at"])
+    assert sp.mod._staleness(pushed + timedelta(minutes=9)) is None
+    assert sp.mod._staleness(pushed + timedelta(minutes=12))["minutes"] == 12
+    sp.mod.STATE["_pushed_at"] = _ts(30)
+    assert sp.get("/data").json()["stale"]["minutes"] == 30
+
+
+def test_stale_default_for_older_boltarr(sp):
+    _push(sp, {"services": []})                     # no stale_after_minutes: 5 min
+    pushed = datetime.fromisoformat(sp.mod.STATE["_pushed_at"])
+    assert sp.mod._staleness(pushed + timedelta(minutes=4)) is None
+    assert sp.mod._staleness(pushed + timedelta(minutes=6))
+    sp.mod.STATE["stale_after_minutes"] = "junk"
+    assert sp.mod._staleness(pushed + timedelta(minutes=6))
+
+
+def test_push_limit_is_4_mb(sp):
+    big = {"services": [], "pad": "x" * (3 * 1024 * 1024)}
+    assert _push(sp, big).status_code == 200
+    assert _push(sp, {"pad": "x" * (4 * 1024 * 1024 + 10)}).status_code == 413
+
+
+def test_paused_and_maintenance_items_pass_through(sp):
+    items = [{"key": "svc-1", "name": "Demo A", "status": "maintenance", "note": "Demo: updating"},
+             {"key": "svc-2", "name": "Demo B", "status": "paused"}]
+    _push(sp, {"services": items})
+    got = sp.get("/data").json()["services"]
+    assert [(i["status"], i.get("note")) for i in got] == [("maintenance", "Demo: updating"), ("paused", None)]

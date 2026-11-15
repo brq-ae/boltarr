@@ -11,6 +11,7 @@ kind "open"   → only shows something on screen; one click, nothing changes.
 kind "change" → changes data or starts a scan; needs "Do it".
 """
 import json
+import threading
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -25,6 +26,7 @@ DEVICE_TYPES = ["router", "gateway", "switch", "unmanaged-switch", "firewall", "
                 "workstation", "pc", "laptop", "iot", "camera", "printer", "phone", "tablet", "tv",
                 "container", "vm", "ap", "unknown"]
 NOTE_MAX = 500
+NOTE_ADD_MAX = 2000      # a note after "Add to note"
 NAME_MAX = 100
 PAUSE_MAX_DAYS = 30
 
@@ -158,12 +160,100 @@ def _until(v) -> str | None:
     return t.isoformat(timespec="seconds")
 
 
+# ── Pinned targets (F-31) ─────────────────────────────────────────────────────
+# Checking a suggestion pins what the card shows: the exact host / service /
+# subnet (by id), the end time (UTC) and the profile's options. Do it uses only
+# those, so it does exactly what the card said — and refuses if that's no
+# longer possible (deleted, time passed) instead of doing something else.
+
+def _pin_id(p: dict, key: str):
+    v = p.get(key)
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise ActionError("Boltarr couldn't read this suggestion.")
+
+
+def _host_p(conn, p: dict) -> dict:
+    hid = _pin_id(p, "host_id")
+    if hid is not None:
+        r = conn.execute("SELECT * FROM hosts WHERE id=?", (hid,)).fetchone()
+        if not r:
+            raise ActionError("That host is no longer in Boltarr, so nothing was done.")
+        return dict(r)
+    h = _host(conn, p.get("host"))
+    p["host_id"] = h["id"]
+    return h
+
+
+def _service_p(conn, p: dict) -> dict:
+    sid = _pin_id(p, "service_id")
+    if sid is not None:
+        r = conn.execute("SELECT s.*, h.ip AS host_ip, h.hostname AS host_name FROM services s "
+                         "LEFT JOIN hosts h ON h.id = s.host_id WHERE s.id=?", (sid,)).fetchone()
+        if not r:
+            raise ActionError("That service is no longer in Boltarr, so nothing was done.")
+        return dict(r)
+    s = _service(conn, p.get("service"), p.get("host"))
+    p["service_id"] = s["id"]
+    return s
+
+
+def _subnet_p(conn, p: dict) -> dict:
+    nid = _pin_id(p, "subnet_id")
+    if nid is not None:
+        r = conn.execute("SELECT * FROM subnets WHERE id=?", (nid,)).fetchone()
+        if not r:
+            raise ActionError("That subnet is no longer in Boltarr, so nothing was done.")
+        return dict(r)
+    sn = _subnet(conn, p.get("subnet"))
+    p["subnet_id"] = sn["id"]
+    return sn
+
+
+def _profile_p(conn, p: dict) -> dict:
+    """The profile's options as they were when the card was shown (an edited
+    profile can't change what Do it runs)."""
+    if isinstance(p.get("profile_options"), dict):
+        from .scanner import check_opts, ScanOptionError
+        try:
+            check_opts(p["profile_options"])
+        except ScanOptionError as e:
+            raise ActionError(f"This scan has a setting Boltarr won't run: {e}")
+        return {"name": str(p.get("profile_name") or p.get("profile") or "Standard")[:100],
+                "options": p["profile_options"]}
+    pr = _profile(conn, p.get("profile"))
+    p["profile_options"], p["profile_name"] = pr["options"], pr["name"]
+    return pr
+
+
+def _until_p(p: dict):
+    """The pause end as UTC: worked out once, when the card is shown ("until
+    23:00" clicked at 23:01 doesn't become tomorrow's 23:00)."""
+    if "until_utc" not in p:
+        p["until_utc"] = _until(p.get("until"))
+        return p["until_utc"]
+    v = p["until_utc"]
+    if v in (None, ""):
+        return None
+    try:
+        t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        t = t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise ActionError("Boltarr couldn't read this suggestion.")
+    now = datetime.now(timezone.utc)
+    if t <= now:
+        raise ActionError(f"The end time ({local_str(t.isoformat())}) has already passed, so nothing was done — ask again.")
+    if t - now > timedelta(days=PAUSE_MAX_DAYS):
+        raise ActionError(f"A pause can last at most {PAUSE_MAX_DAYS} days.")
+    return t.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def _probe_running(ip) -> bool:
-    from .scanner import scan_jobs
-    with get_conn() as conn:
-        ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM scan_runs WHERE type='probe' AND host_ip=? AND status='running'", (ip,))]
-    return any(scan_jobs.get(i, {}).get("status") not in (None, "completed", "error", "cancelled") for i in ids)
+    from .scanner import probe_running
+    return probe_running(ip)
 
 
 # ── The actions ──────────────────────────────────────────────────────────────
@@ -171,23 +261,23 @@ def _probe_running(ip) -> bool:
 # ActionError. Each run(conn, p) does it and returns a short "done" message.
 
 def _check_open_host(conn, p):
-    h = _host(conn, p.get("host"))
+    h = _host_p(conn, p)
     return {"kind": "open", "title": f"Open {_label(h)}", "target": {"type": "host", "ip": h["ip"]}}
 
 
 def _check_open_service(conn, p):
-    s = _service(conn, p.get("service"), p.get("host"))
+    s = _service_p(conn, p)
     return {"kind": "open", "title": f"Open {_svc_label(s)}", "target": {"type": "service", "id": s["id"]}}
 
 
 def _check_explain(conn, p):
     from . import monitor
     if p.get("service"):
-        s = _service(conn, p.get("service"), p.get("host"))
+        s = _service_p(conn, p)
         outs = monitor.outages(s["id"], 30 * 86400, 1)
         what, target = _svc_label(s), {"type": "service", "id": s["id"]}
     else:
-        h = _host(conn, p.get("host"))
+        h = _host_p(conn, p)
         outs = monitor.host_outages(h["id"], 30 * 86400, 1)
         what, target = _label(h), {"type": "host", "ip": h["ip"]}
     if not outs:
@@ -196,24 +286,44 @@ def _check_explain(conn, p):
     return {"kind": "open", "title": f"Explain the latest outage of {what}", "target": target}
 
 
+def _added(old: str, note: str) -> str:
+    return f"{old.rstrip()}\n{note}" if old.strip() else note
+
+
 def _check_set_note(conn, p):
-    h = _host(conn, p.get("host"))
+    """F-33: when the host already has a note the card offers Add to note and
+    Replace note, each with the full note it would leave."""
+    h = _host_p(conn, p)
     note = _text(p, "note", NOTE_MAX)
     old = h.get("notes") or ""
     if note == old:
         raise ActionError(f"{_label(h)} already has that note.")
-    return {"kind": "change", "item": f"host:{h['id']}", "title": f"Change the note on {_label(h)}",
-            "detail": [["From", old or "(no note)"], ["To", note or "(no note)"]]}
+    card = {"kind": "change", "item": f"host:{h['id']}", "title": f"Change the note on {_label(h)}"}
+    if not old.strip() or not note:
+        card["detail"] = [["From", old or "(no note)"], ["To", note or "(no note)"]]
+        return card
+    added = _added(old, note)
+    card["detail"] = [["Now", old], ["Add to note →", added], ["Replace note →", note]]
+    card["choices"] = ([{"mode": "add", "label": "Add to note"}] if len(added) <= NOTE_ADD_MAX else []) + \
+                      [{"mode": "replace", "label": "Replace note"}]
+    if len(added) > NOTE_ADD_MAX:
+        card["detail"][1] = ["Add to note →", f"(too long: a note can hold {NOTE_ADD_MAX} characters)"]
+    return card
 
 
 def _run_set_note(conn, p):
-    h = _host(conn, p.get("host"))
-    conn.execute("UPDATE hosts SET notes=? WHERE id=?", (_text(p, "note", NOTE_MAX) or None, h["id"]))
-    return f"Note on {_label(h)} changed."
+    h = _host_p(conn, p)
+    note = _text(p, "note", NOTE_MAX)
+    if p.get("mode") == "add":          # onto the note as it is now (a changed "Now" doesn't refuse it)
+        note = _added(h.get("notes") or "", note)
+        if len(note) > NOTE_ADD_MAX:
+            raise ActionError(f"Added together the note would be longer than {NOTE_ADD_MAX} characters.")
+    conn.execute("UPDATE hosts SET notes=? WHERE id=?", (note or None, h["id"]))
+    return f"Note on {_label(h)} {'added to' if p.get('mode') == 'add' else 'changed'}."
 
 
 def _check_set_host(conn, p):
-    h = _host(conn, p.get("host"))
+    h = _host_p(conn, p)
     rows, new = [], _host_fields(p)
     if "hostname" in new and (h.get("hostname") or "") != new["hostname"]:          # only what changes
         rows.append(["Name", f"{h.get('hostname') or '(none)'} → {new['hostname'] or '(none)'}"])
@@ -239,37 +349,46 @@ def _host_fields(p) -> dict:
 
 
 def _run_set_host(conn, p):
-    h = _host(conn, p.get("host"))
+    h = _host_p(conn, p)
     new = _host_fields(p)
-    if "hostname" in new:
-        new["hostname"] = new["hostname"] or None
-    cols = ", ".join(f"{k}=?" for k in new)
-    conn.execute(f"UPDATE hosts SET {cols} WHERE id=?", (*new.values(), h["id"]))
+    if "hostname" in new:                 # a name from a card stays like one typed by hand (F-20)
+        from .host_fields import set_by_user
+        set_by_user(conn, h["id"], "hostname", new.pop("hostname"))
+    if new:
+        cols = ", ".join(f"{k}=?" for k in new)
+        conn.execute(f"UPDATE hosts SET {cols} WHERE id=?", (*new.values(), h["id"]))
     return f"{_label(h)} changed."
 
 
 def _check_scan(conn, p):
-    from .scanner import build_command, is_subnet_scanning
-    sn, pr = _subnet(conn, p.get("subnet")), _profile(conn, p.get("profile"))
+    from .scanner import build_command, is_subnet_scanning, scan_busy
+    sn, pr = _subnet_p(conn, p), _profile_p(conn, p)
     if is_subnet_scanning(sn["id"]):
         raise ActionError(f"A scan of {sn['cidr']} is already running.")
+    if scan_busy():                                    # one scan at a time (F-34)
+        raise ActionError("Another scan is running — wait for it to finish, then ask again.")
     return {"kind": "change", "item": f"subnet:{sn['id']}", "title": f"Scan {sn['name']} ({sn['cidr']}) with {pr['name']}",
             "detail": [["Profile", pr["name"]], ["Command", build_command(pr["options"], sn["cidr"])]],
             "then": {"type": "scans"}}
 
 
 def _run_scan(conn, p):
-    from .scanner import start_scan
-    sn, pr = _subnet(conn, p.get("subnet")), _profile(conn, p.get("profile"))
+    from .scanner import start_scan, ScanBusy
+    sn, pr = _subnet_p(conn, p), _profile_p(conn, p)
     run_id = conn.execute("INSERT INTO scan_runs (subnet_id) VALUES (?)", (sn["id"],)).lastrowid
     conn.commit()
-    start_scan(run_id, sn["cidr"], pr["options"])
+    try:
+        start_scan(run_id, sn["cidr"], pr["options"])
+    except ScanBusy as e:
+        conn.execute("DELETE FROM scan_runs WHERE id=?", (run_id,))
+        conn.commit()
+        raise ActionError(str(e))
     return {"message": f"Scan of {sn['cidr']} with {pr['name']} started.", "run_id": run_id, "subnet_id": sn["id"]}
 
 
 def _check_probe(conn, p):
     from .scanner import build_command
-    h, pr = _host(conn, p.get("host")), _profile(conn, p.get("profile"))
+    h, pr = _host_p(conn, p), _profile_p(conn, p)
     if (pr["options"] or {}).get("ports") == "none":
         raise ActionError(f"{pr['name']} only finds hosts, it doesn't look at ports; probe with Standard or Full.")
     if _probe_running(h["ip"]):
@@ -280,35 +399,40 @@ def _check_probe(conn, p):
 
 
 def _run_probe(conn, p):
-    from .scanner import start_probe
-    h, pr = _host(conn, p.get("host")), _profile(conn, p.get("profile"))
+    from .scanner import start_probe, ScanBusy
+    h, pr = _host_p(conn, p), _profile_p(conn, p)
     run_id = conn.execute("INSERT INTO scan_runs (type, host_ip, status) VALUES ('probe', ?, 'running')",
                           (h["ip"],)).lastrowid
     conn.commit()
-    start_probe(run_id, h["ip"], pr["options"])
+    try:
+        start_probe(run_id, h["ip"], pr["options"])
+    except ScanBusy as e:
+        conn.execute("DELETE FROM scan_runs WHERE id=?", (run_id,))
+        conn.commit()
+        raise ActionError(str(e))
     return {"message": f"Probe of {_label(h)} with {pr['name']} started.", "run_id": run_id, "ip": h["ip"]}
 
 
 def _check_pause(conn, p):
-    s = _service(conn, p.get("service"), p.get("host"))
+    s = _service_p(conn, p)
     if not s.get("monitored"):
         raise ActionError(f"{_svc_label(s)} isn't being monitored, so there's nothing to pause.")
-    until = _until(p.get("until"))
+    until = _until_p(p)
     return {"kind": "change", "item": f"service:{s['id']}", "title": f"Pause monitoring of {_svc_label(s)}",
             "detail": [["Until", local_str(until) if until else "you turn it back on"]]}
 
 
 def _run_pause(conn, p):
     from . import monitor
-    s = _service(conn, p.get("service"), p.get("host"))
-    until = _until(p.get("until"))
-    monitor.set_monitored(conn, s["id"], False, until)
+    s = _service_p(conn, p)
+    until = _until_p(p)
+    monitor.set_monitored(conn, s["id"], False, until, pause=True)
     return {"message": f"Monitoring of {_svc_label(s)} paused" +
                        (f" until {local_str(until)}." if until else "."), "service_id": s["id"]}
 
 
 def _check_resume(conn, p):
-    s = _service(conn, p.get("service"), p.get("host"))
+    s = _service_p(conn, p)
     if s.get("monitored"):
         raise ActionError(f"{_svc_label(s)} is already being monitored.")
     was = s.get("monitor_resume_at")
@@ -318,7 +442,7 @@ def _check_resume(conn, p):
 
 def _run_resume(conn, p):
     from . import monitor
-    s = _service(conn, p.get("service"), p.get("host"))
+    s = _service_p(conn, p)
     monitor.set_monitored(conn, s["id"], True)
     return {"message": f"Monitoring of {_svc_label(s)} is back on.", "service_id": s["id"], "resumed": True}
 
@@ -343,8 +467,8 @@ ACTIONS = {
                      "help": 'explain the latest outage of a service {"do":"explain","service":"<name>","host":"<IP>"} '
                              'or of a whole host {"do":"explain","host":"<IP>"}'},
     "set_note":     {"check": _check_set_note, "run": _run_set_note,
-                     "help": 'replace a host\'s note (keep any old text you want to keep): '
-                             '{"do":"set_note","host":"<IP>","note":"<text>"}'},
+                     "help": 'write a host\'s note: {"do":"set_note","host":"<IP>","note":"<text>"} — give only the '
+                             'new text; when there is a note already, the user picks "Add to note" or "Replace note"'},
     "set_host":     {"check": _check_set_host, "run": _run_set_host,
                      "help": 'change a host\'s name and/or device type: '
                              '{"do":"set_host","host":"<IP>","hostname":"<name>","device_type":"<type>"}'},
@@ -393,7 +517,7 @@ def _parse(raw) -> dict:
             p = {"do": word, **p}
     if isinstance(p, dict) and isinstance(p.get("do"), str):
         p = {**p, "do": p["do"].strip().lower()}
-    if not isinstance(p, dict) or p.get("do") not in ACTIONS:
+    if not isinstance(p, dict) or not isinstance(p.get("do"), str) or p["do"] not in ACTIONS:
         raise ActionError("Boltarr can't do this: it isn't one of the actions the AI may suggest.")
     return p
 
@@ -407,6 +531,12 @@ def check(raw) -> dict:
         return {"ok": True, "action": p, **card}
     except ActionError as e:
         return {"ok": False, "error": str(e)}
+    except Exception as e:       # F-42: an odd suggestion fails only its own card, never the others
+        print(f"[ai-actions] couldn't check a suggestion: {type(e).__name__}: {e}")
+        return {"ok": False, "error": "Boltarr couldn't read this suggestion."}
+
+
+_run_lock = threading.Lock()
 
 
 def run(raw, model: str = "", asked: str = "") -> dict:
@@ -419,7 +549,7 @@ def run(raw, model: str = "", asked: str = "") -> dict:
         a = ACTIONS[p["do"]]
         if "run" not in a:
             raise ActionError("This action only opens something on screen.")
-        with get_conn() as conn:
+        with _run_lock, get_conn() as conn:    # one card at a time: a double click can't do it twice
             card = a["check"](conn, p)
             res = a["run"](conn, p)
             conn.commit()
@@ -431,6 +561,11 @@ def run(raw, model: str = "", asked: str = "") -> dict:
     except ActionError as e:
         _record(raw, card, "failed", str(e), model, asked)
         return {"ok": False, "error": str(e)}
+    except Exception as e:
+        print(f"[ai-actions] couldn't do a suggestion: {type(e).__name__}: {e}")
+        msg = "Boltarr couldn't do this suggestion — nothing was changed."
+        _record(raw, card, "failed", msg, model, asked)
+        return {"ok": False, "error": msg}
 
 
 def cancel(raw, model: str = "", asked: str = "") -> dict:

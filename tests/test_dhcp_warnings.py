@@ -4,6 +4,7 @@ import pytest
 
 from backend import changes
 from backend.database import get_conn
+from conftest import fake_ntfy
 
 NET = "10.77.0"
 
@@ -66,7 +67,7 @@ def test_pool_full(client, lab):
 
 def test_digest_reports_each_warning_once(client, lab, monkeypatch):
     sent = []
-    monkeypatch.setattr(changes.notify, "send", lambda **kw: sent.append(kw))
+    fake_ntfy(monkeypatch, sent)
     monkeypatch.setattr(changes, "_worthy_events", lambda conn, where, params: [])
     changes.send_digest()
     assert len(sent) == 1 and "DHCP warning" in sent[0]["title"]

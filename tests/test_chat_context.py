@@ -41,7 +41,7 @@ def test_every_host_is_listed_even_past_the_cap(big_lab, monkeypatch):
     assert "more hosts not shown" not in c and "Ask about a specific IP" not in c
     assert f"{NET}.x:" in c
     assert "    .42 demo-phone-42.lan phone Acme" in c            # roll-call line
-    assert "    .69 demo-phone-69.lan phone Acme [off]" in c
+    assert "    .69 demo-phone-69.lan phone Acme [offline 1 min]" in c           # says why (F-33)
     assert "demo note 42" not in c                                 # notes only in full detail
 
 

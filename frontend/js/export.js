@@ -48,7 +48,7 @@
   }
 
   const yesNo = v => v ? "yes" : "no";
-  const openPorts = h => (h.ports || []).filter(p => p.state === "open");
+  const openPorts = h => typeof hostOpenPorts === "function" ? hostOpenPorts(h) : (h.ports || []).filter(p => p.state === "open");
 
   const TABLES = {
     hosts: {
@@ -58,7 +58,7 @@
         ["IP", h => h.ip], ["Hostname", h => h.hostname], ["MAC", h => h.mac], ["Vendor", h => h.vendor],
         ["Type", h => h.device_type], ["OS", h => h.os_guess], ["IP type", h => h.classification],
         ["Online", h => h.online == null ? "" : yesNo(h.online)],
-        ["Open ports", h => openPorts(h).map(p => `${p.port}/${p.protocol || "tcp"}${p.service ? " " + p.service : ""}`).join(", ")],
+        ["Open ports", h => openPorts(h).map(p => `${p.port}/${p.protocol || "tcp"}${p.service ? " " + p.service : ""}${p.addr ? " @" + p.addr : ""}`).join(", ")],
         ["Aliases", h => (h.aliases || []).join(", ")], ["Notes", h => h.notes], ["Source", h => h.source],
         ["First seen", h => csvTime(h.first_seen)], ["Last seen", h => csvTime(h.last_seen)],
       ],
@@ -66,7 +66,8 @@
         ip: h.ip, hostname: h.hostname, mac: h.mac, vendor: h.vendor, type: h.device_type, os: h.os_guess,
         ip_type: h.classification, online: h.online == null ? null : !!h.online,
         open_ports: openPorts(h).map(p => ({ port: p.port, protocol: p.protocol || "tcp",
-                                              service: p.service || null, version: p.version || null })),
+                                              service: p.service || null, version: p.version || null,
+                                              ...(p.addr ? { address: p.addr } : {}) })),
         aliases: h.aliases || [], notes: h.notes, source: h.source,
         first_seen: h.first_seen, last_seen: h.last_seen,
       }),

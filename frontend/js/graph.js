@@ -147,6 +147,13 @@ function initGraph() {
     else                     window.showHostDetail(evt.target.data("ip"));
   });
 
+  // F-20: hovering a device shows the name the network reports, when it differs
+  cy.on("mouseover", "node", (evt) => {
+    const n = evt.target.data("net_hostname") || "";
+    cy.container().title = n && n !== (evt.target.data("label") || "") ? `Network name: ${n}` : "";
+  });
+  cy.on("mouseout", "node", () => { cy.container().title = ""; });
+
   cy.on("cxttap", "node", (evt) => {
     if (connectMode || multiConnectMode) return;
     const node = evt.target;
@@ -622,25 +629,48 @@ function restoreViewport() {
 
 function restoreLayout(dbNodes) {
   try {
-    const local = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}");
-    if (Object.keys(local).length > 0) {
-      cy.nodes().forEach(n => { if (local[n.id()]) n.position(local[n.id()]); });
-      restoreViewport();
-      return true;
-    }
-    // Fall back to DB positions
+    // This browser's layout first, the saved (Save Layout) one for anything it lacks
+    let local = {};
+    try { local = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {}; } catch {}
     const dbPos = {};
     (dbNodes || []).forEach(n => {
       if (n.data.pos_x != null && n.data.pos_y != null)
         dbPos[n.data.id] = { x: n.data.pos_x, y: n.data.pos_y };
     });
-    if (Object.keys(dbPos).length > 0) {
-      cy.nodes().forEach(n => { if (dbPos[n.id()]) n.position(dbPos[n.id()]); });
-      restoreViewport();
-      return true;
-    }
-    return false;
+    if (!Object.keys(local).length && !Object.keys(dbPos).length) return false;
+    const unplaced = [];
+    cy.nodes().forEach(n => {
+      const p = local[n.id()] || dbPos[n.id()];
+      if (p) n.position(p); else unplaced.push(n);
+    });
+    placeUnpositioned(unplaced);
+    restoreViewport();
+    return true;
   } catch { return false; }
+}
+
+// F-42: devices with no saved spot (new since the layout was saved) used to pile
+// up at one point. Put each next to a connected device that has a spot, else in
+// a tidy row under the map.
+function placeUnpositioned(nodes) {
+  if (!nodes || !nodes.length) return;
+  const todo = new Set(nodes.map(n => n.id()));
+  const placedIds = new Set(cy.nodes().map(n => n.id()).filter(id => !todo.has(id)));
+  const bb = placedIds.size ? cy.nodes().filter(n => placedIds.has(n.id())).boundingBox()
+                            : { x1: 0, y1: 0, x2: 0, y2: 0 };
+  const around = {};                       // per anchor: how many were put next to it
+  const rest = [];
+  nodes.forEach(n => {
+    const anchor = n.neighborhood("node").filter(m => placedIds.has(m.id()))[0];
+    if (anchor) {
+      const k = around[anchor.id()] = (around[anchor.id()] || 0) + 1;
+      const angle = k * 2.4, r = 90 + 25 * Math.floor(k / 6);
+      const a = anchor.position();
+      n.position({ x: a.x + r * Math.cos(angle), y: a.y + r * Math.sin(angle) });
+    } else rest.push(n);
+  });
+  const cols = Math.max(4, Math.ceil(Math.sqrt(rest.length)));
+  rest.forEach((n, i) => n.position({ x: bb.x1 + (i % cols) * 110, y: bb.y2 + 110 + Math.floor(i / cols) * 100 }));
 }
 
 async function saveLayoutToDb() {
@@ -650,11 +680,12 @@ async function saveLayoutToDb() {
   try {
     btn.disabled = true;
     btn.textContent = "Saving…";
-    await fetch("/api/layout", {
+    const r = await fetch("/api/layout", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ positions }),
     });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);       // F-42: a refused save isn't "Saved"
     localStorage.setItem(LAYOUT_KEY, JSON.stringify(positions));
     saveViewportLocally();
     btn.textContent = "✓ Saved";
@@ -680,11 +711,12 @@ function renderGraph(nodes, edges) {
   cy.edges().forEach(e => { if (!incomingEdges.has(e.id())) cy.remove(e); });
 
   const wasEmpty = cy.nodes().length === 0 && nodes.length > 0;
+  const added = [];
 
   nodes.forEach(n => {
     const ex = cy.getElementById(n.data.id);
     if (ex.length) ex.data(n.data);
-    else cy.add({ group: "nodes", data: n.data });
+    else added.push(cy.add({ group: "nodes", data: n.data }));
   });
 
   (edges||[]).forEach(e => {
@@ -697,6 +729,16 @@ function renderGraph(nodes, edges) {
       applyEdgeVlanStyle(cy.getElementById(e.data.id));
     }
   });
+
+  if (!wasEmpty && added.length) {
+    // found by a scan while the map was open: give them a spot, not the corner
+    const saved = (() => { try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {}; } catch { return {}; } })();
+    placeUnpositioned(added.filter(n => {
+      const p = saved[n.id()] || (n.data("pos_x") != null && n.data("pos_y") != null ? { x: n.data("pos_x"), y: n.data("pos_y") } : null);
+      if (p) n.position(p);
+      return !p;
+    }));
+  }
 
   if (wasEmpty) {
     const hadSaved = restoreLayout(nodes);

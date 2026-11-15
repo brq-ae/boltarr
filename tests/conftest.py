@@ -30,3 +30,13 @@ def client():
 @pytest.fixture(scope="session")
 def data_dir():
     return Path(_DATA)
+
+
+def fake_ntfy(monkeypatch, out=None, ok=True):
+    """Pretend ntfy is set up and record what Boltarr sends (ok=False = it fails)."""
+    from backend import notify
+    out = [] if out is None else out
+    monkeypatch.setattr(notify, "is_on", lambda: True)
+    monkeypatch.setattr(notify, "_fail_mono", 0.0)
+    monkeypatch.setattr(notify, "send", lambda **kw: (out.append(kw), (ok, "" if ok else "demo: connection refused"))[1])
+    return out

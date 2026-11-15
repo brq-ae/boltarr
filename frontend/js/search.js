@@ -37,13 +37,15 @@
 
   // The field that matched, shown under the name ("MAC aa:bb…", "alias 10.0.0.5").
   function hostWhy(h, q) {
+    if (netNameHint(h) && h.net_hostname.toLowerCase().includes(q) && !(h.hostname || "").toLowerCase().includes(q))
+      return `network name ${mark(h.net_hostname, q)}`;
     const alias = (h.aliases || []).find(a => a.includes(q));
     if (alias && !(h.ip || "").includes(q)) return `alias ${mark(alias, q)}`;
     for (const [k, label] of [["mac", "MAC"], ["vendor", ""], ["device_type", ""], ["os_guess", "OS"], ["notes", "note"]]) {
       if ((h[k] || "").toLowerCase().includes(q)) return (label ? label + " " : "") + mark(h[k], q);
     }
-    const p = (h.ports || []).find(p => p.state === "open" && (p.service || "").toLowerCase().includes(q));
-    if (p) return `port ${escHtml(p.port)} ${mark(p.service, q)}`;
+    const p = hostOpenPorts(h).find(p => (p.service || "").toLowerCase().includes(q));
+    if (p) return `port ${escHtml(p.port)} ${mark(p.service, q)}${p.addr ? " on " + escHtml(p.addr) : ""}`;
     if (h.mac && typeof _hexOnly === "function" && _hexOnly(h.mac).includes(_hexOnly(q))) return `MAC ${escHtml(h.mac)}`;
     return [h.vendor, h.device_type].filter(Boolean).map(escHtml).join(" · ");
   }
@@ -60,7 +62,7 @@
   function hostRow(h, q, i, page) {
     const synthetic = String(h.ip).startsWith("node-");
     const title = synthetic ? `${mark(h.hostname || "(no IP)", q)} <span class="gs-dim">no IP</span>`
-      : `<span class="mono">${mark(h.ip, q)}</span>${h.hostname ? ` · ${mark(h.hostname, q)}` : ""}`;
+      : `<span class="mono">${mark(h.ip, q)}</span>${h.hostname ? ` · <span${netNameAttr(h)}>${mark(h.hostname, q)}</span>` : ""}`;
     const meta = page && h.device_type ? `<span class="tag tag-${escHtml(h.device_type)}">${escHtml(h.device_type)}</span>` : "";
     return `<div class="gs-item" role="option" data-i="${i}">${synthetic ? "" : livenessDot(h.online)}
       <div class="gs-text"><div class="gs-title">${title}</div><div class="gs-why">${hostWhy(h, q)}</div></div>${meta}</div>`;

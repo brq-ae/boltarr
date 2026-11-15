@@ -5,6 +5,7 @@ which known hosts are online. A host is marked offline after `offline_after`
 consecutive missed sweeps, and back online on the first response. Static-host
 transitions record a change event and fire an immediate ntfy alert.
 """
+import ipaddress
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -27,23 +28,40 @@ _thread: threading.Thread | None = None
 _stop = threading.Event()
 
 
-def _sweep_live_ips() -> set[str]:
-    """Live IPs across all defined subnets via nmap -sn (ARP/ping)."""
+def _sweep_live_ips() -> tuple[set[str], list]:
+    """(live IPs, the subnets whose sweep worked) via nmap -sn (ARP/ping).
+    F-19: a sweep that fails or times out is left out of the second list, so its
+    hosts don't count as missed — nothing in that subnet changes that round."""
     with get_conn() as conn:
         cidrs = [r["cidr"] for r in conn.execute("SELECT cidr FROM subnets")]
     live: set[str] = set()
+    swept = []
     for cidr in cidrs:
         try:
             check_target(cidr)            # never pass anything nmap could read as an option
             proc = subprocess.run(
                 ["nmap", "-sn", "-T4", "--min-parallelism", "10", "-oX", "-", cidr],
                 capture_output=True, timeout=120)
+            if proc.returncode != 0:
+                raise RuntimeError((proc.stderr or b"").decode("utf-8", "replace").strip()[:200]
+                                   or f"nmap exit code {proc.returncode}")
             nm = nmap.PortScanner()
             nm.analyse_nmap_xml_scan(proc.stdout.decode("utf-8", "replace"))
             live.update(nm.all_hosts())
-        except Exception:
-            pass
-    return live
+            swept.append(ipaddress.ip_network(cidr, strict=False))
+        except Exception as e:
+            print(f"[liveness] sweep of {cidr} failed, its hosts are left as they were: "
+                  f"{str(e) or type(e).__name__}")
+    return live, swept
+
+
+def _covered(ip: str, swept: list) -> bool:
+    """Was this IP inside a subnet that was really swept this round?"""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr.version == n.version and addr in n for n in swept)
 
 
 def sweep_once() -> None:
@@ -51,7 +69,7 @@ def sweep_once() -> None:
     if not cfg.get("enabled"):
         return
     offline_after = max(1, int(cfg.get("offline_after", 3)))
-    live = _sweep_live_ips()
+    live, swept = _sweep_live_ips()
     with get_conn() as conn:
         # Seed a starting uptime event for hosts that have a state but no history
         # yet — so an always-up host (which never transitions) still accrues uptime.
@@ -67,13 +85,16 @@ def sweep_once() -> None:
         for h in hosts:
             ip, was = h["ip"], h["online"]
             if ip in live:
-                conn.execute("UPDATE hosts SET online=1, miss_count=0, last_seen=datetime('now') WHERE id=?", (h["id"],))
+                conn.execute("UPDATE hosts SET online=1, miss_count=0, offline_alerted=0, "
+                             "last_seen=datetime('now') WHERE id=?", (h["id"],))
                 if was != 1:                      # None/0 -> up: record uptime event
                     _host_event(conn, h["id"], "up")
                 if was == 0:                      # offline -> back online
                     changes.record(conn, ip, "host_online")
                     conn.commit()
                     changes.alert_transition(conn, ip, "host_online")
+            elif not _covered(ip, swept):         # outside every swept subnet: leave it (F-19)
+                continue
             else:
                 miss = (h["miss_count"] or 0) + 1
                 if miss >= offline_after and was == 1:     # online -> offline
@@ -81,17 +102,20 @@ def sweep_once() -> None:
                     _host_event(conn, h["id"], "down")
                     changes.record(conn, ip, "host_offline")
                     conn.commit()
-                    changes.alert_transition(conn, ip, "host_offline")
+                    res = changes.alert_transition(conn, ip, "host_offline")
+                    # F-17: its services' down-alerts are held only if this one went out
+                    conn.execute("UPDATE hosts SET offline_alerted=? WHERE id=?",
+                                 (1 if res in ("sent", "queued") else 0, h["id"]))
                 elif miss >= offline_after and was is None:  # never seen up -> mark offline (seed)
                     conn.execute("UPDATE hosts SET online=0, miss_count=? WHERE id=?", (miss, h["id"]))
                     _host_event(conn, h["id"], "down")
                 else:
                     conn.execute("UPDATE hosts SET miss_count=? WHERE id=?", (miss, h["id"]))
-        _sweep_aliases(conn, live, offline_after)
+        _sweep_aliases(conn, live, offline_after, swept)
         conn.commit()
 
 
-def _sweep_aliases(conn, live: set[str], offline_after: int) -> None:
+def _sweep_aliases(conn, live: set[str], offline_after: int, swept: list | None = None) -> None:
     """Alias IPs keep their own online/last-seen, from the same sweep results.
     Offline/online transitions are logged and alerted like a host's (the
     'Include alias IPs' Change-alerts switch can silence the alerts)."""
@@ -104,6 +128,8 @@ def _sweep_aliases(conn, live: set[str], offline_after: int) -> None:
                 changes.record(conn, ip, "host_online")
                 conn.commit()
                 changes.alert_transition(conn, ip, "host_online")
+        elif swept is not None and not _covered(ip, swept):
+            continue
         else:
             miss = (a["miss_count"] or 0) + 1
             online = 0 if miss >= offline_after else was

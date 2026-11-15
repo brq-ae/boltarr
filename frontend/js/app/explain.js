@@ -10,7 +10,7 @@ function outageListHtml(kind, id, outages) {
   if (!outages || !outages.length)
     return `<span style="font-size:10px;color:var(--text-3)">No outages recorded yet.</span>`;
   return `<div class="outage-list">${outages.map((o, i) => {
-    const start = new Date(o.start).toLocaleString();
+    const start = fmtLocal(o.start);
     const line = o.end
       ? `<span class="outage-item">▾ ${start} — down ${_fmtDur(o.seconds)}</span>`
       : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;

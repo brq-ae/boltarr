@@ -78,41 +78,142 @@ async function cycleServiceStatus(id, current, hostIp) {
   await saveSvcField(id, "status", next);
 }
 
+// A pause (F-28) vs. monitoring off: a pause has monitor_paused_at (or an end time
+// from an older AI pause), may carry a reason, and keeps a public service listed.
+function svcPaused(s) { return !s.monitored && !!(s.monitor_paused_at || s.monitor_resume_at); }
+function svcPauseText(s) {
+  const bits = [];
+  if (s.monitor_pause_reason) bits.push(s.monitor_pause_reason);
+  bits.push(s.monitor_resume_at ? `until ${fmtLocal(s.monitor_resume_at)}` : "until you turn it back on");
+  return (s.monitor_pause_reason ? "maintenance: " : "paused ") + bits.join(" · ");
+}
+function _svcResumedFields(on) {
+  return { monitored: on ? 1 : 0, monitor_resume_at: null, monitor_paused_at: null, monitor_pause_reason: null };
+}
 function svcMonToggle(s) {
-  const on = !!s.monitored, paused = !on && s.monitor_resume_at;
-  const title = on ? 'Monitoring on — status is set automatically'
-    : paused ? `Monitoring paused until ${fmtLocal(s.monitor_resume_at)}` : 'Monitoring off — status is manual';
-  return `<button class="svc-toggle ${on ? 'on' : ''}" data-click="svcRowToggleMonitor" data-args="[${s.id}]" title="${escHtml(title)}">${on ? 'On' : paused ? 'Paused' : 'Off'}</button>`;
+  const on = !!s.monitored, paused = svcPaused(s);
+  const title = on ? 'Monitoring on — click to pause or turn off'
+    : paused ? `Monitoring ${svcPauseText(s)} — click to turn it back on` : 'Monitoring off — click to turn it on';
+  const label = on ? 'On' : paused ? (s.monitor_pause_reason ? 'Maint' : 'Paused') : 'Off';
+  // A real switch: the knob shows the state, sliding it does the obvious thing
+  // (on → the pause/off dialog; off, paused or maint → monitoring back on).
+  const cls = (on ? ' on' : '') + (paused ? ' paused' : '') + (s.monitor_pause_reason ? ' maint' : '');
+  return svcSwitch(on, cls, "svcRowToggleMonitor", s.id, title, label);
+}
+// The table's on/off switch (Monitor + Public columns)
+function svcSwitch(on, cls, action, id, title, label) {
+  return `<button class="mon-switch${cls}" role="switch" aria-checked="${on}" data-click="${action}" data-args="[${id}]" title="${escHtml(title)}"><span class="mon-switch-track"><span class="mon-switch-knob"></span></span><span class="mon-switch-label">${label}</span></button>`;
 }
 async function svcRowToggleMonitor(id) {
   const s = allServices.find(x => x.id === id);
   if (!s) return;
-  const on = !s.monitored;
-  s.monitored = on ? 1 : 0;
-  s.monitor_resume_at = null;      // by hand: ends any timed pause
-  renderServicesTable();
+  if (s.monitored) return openPauseModal(id);     // On -> ask: pause (reason/until) or off
+  return svcMonitorOn(id);
+}
+// Monitoring back on (table or panel switch). Both views flip at once; the first
+// check can take a few seconds (a dead address), so its result fills in after.
+async function svcMonitorOn(id) {
+  const s = allServices.find(x => x.id === id);
+  if (!s) return;
+  Object.assign(s, _svcResumedFields(true), { monitor_status: "unknown" });   // by hand: ends any pause
+  _afterMonitorChange(id);
   try {
-    const r = await api("POST", `/api/services/${id}/monitor`, { enabled: on });
-    if (r && r.monitor_status !== undefined) s.monitor_status = r.monitor_status;
-    renderServicesTable();
-  } catch (e) { await loadServicesData(); renderServicesTable(); }
+    const r = await api("POST", `/api/services/${id}/monitor`, { enabled: true });
+    const cur = allServices.find(x => x.id === id);   // the 20 s refresh may have replaced the list meanwhile
+    if (cur && r && r.monitor_status !== undefined) Object.assign(cur, _svcResumedFields(true), { monitor_status: r.monitor_status });
+  } catch (e) { showToast(e.message); await loadServicesData(); }
+  _afterMonitorChange(id);
+}
+
+// ── Pause dialog (F-28) ───────────────────────────────────────────────────────
+function openPauseModal(id) {
+  const s = allServices.find(x => x.id === id);
+  if (!s) return;
+  document.getElementById("pauseSvcId").value = id;
+  document.getElementById("pauseTitle").textContent = `Pause monitoring — ${s.name}`;
+  document.getElementById("pauseReason").value = "";
+  const until = document.getElementById("pauseUntil");
+  until.value = "";
+  const pad = n => String(n).padStart(2, "0"), d = new Date();
+  until.min = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  document.getElementById("pauseModal").classList.add("open");
+  document.getElementById("pauseReason").focus();
+}
+function closePauseModal() {
+  document.getElementById("pauseModal").classList.remove("open");
+}
+// Every monitoring change ends here: refresh the table and, if open, the panel's
+// monitor row + uptime only (re-filling the whole panel would wipe unsaved edits).
+function _afterMonitorChange(id) {
+  renderServicesTable();
+  const s = allServices.find(x => x.id === id);
+  if (s && svcDetailId === id && document.getElementById("svcDetailPanel").classList.contains("open")) {
+    setSvcDetailMonState(s);
+    loadSvcUptime(id, s.monitored || svcPaused(s));
+  }
+}
+async function pauseSubmit() {
+  const id = parseInt(document.getElementById("pauseSvcId").value);
+  const reason = document.getElementById("pauseReason").value.trim();
+  const untilVal = document.getElementById("pauseUntil").value;
+  const body = { reason: reason || null, until: untilVal ? new Date(untilVal).toISOString() : null };
+  try {
+    const r = await api("POST", `/api/services/${id}/pause`, body);
+    const s = allServices.find(x => x.id === id);
+    if (s) Object.assign(s, r);
+    closePauseModal();
+    showToast(reason ? "Paused — the status page shows Maintenance" : "Monitoring paused");
+    _afterMonitorChange(id);
+  } catch (e) { showToast(e.message); }
+}
+async function pauseTurnOff() {
+  const id = parseInt(document.getElementById("pauseSvcId").value);
+  try {
+    const r = await api("POST", `/api/services/${id}/monitor`, { enabled: false });
+    const s = allServices.find(x => x.id === id);
+    if (s) Object.assign(s, _svcResumedFields(false), { monitor_status: r.monitor_status });
+    closePauseModal();
+    _afterMonitorChange(id);
+  } catch (e) { showToast(e.message); }
+}
+
+// Accepted replies "hints" popup (opens over the edit dialog too)
+function openCodesHelp() {
+  document.getElementById("codesHelpModal").classList.add("open");
+}
+function closeCodesHelp() {
+  document.getElementById("codesHelpModal").classList.remove("open");
 }
 
 function svcPubToggle(s) {
   const on = !!s.public;
-  return `<button class="svc-toggle ${on ? 'on' : ''}" data-click="svcRowTogglePublic" data-args="[${s.id}]" title="${on ? 'Shown on the public status page' : 'Not public'}">${on ? 'On' : 'Off'}</button>`;
+  return svcSwitch(on, on ? " on" : "", "svcRowTogglePublic", s.id,
+    on ? "Shown on the public status page — click to hide it" : "Not public — click to show it on the status page", on ? "On" : "Off");
 }
 async function svcRowTogglePublic(id) {
   const s = allServices.find(x => x.id === id);
+  if (s) return svcSetPublic(id, !s.public);
+}
+// Public on/off (table or panel switch): saved at once, both views follow.
+async function svcSetPublic(id, on) {
+  const s = allServices.find(x => x.id === id);
   if (!s) return;
-  const on = !s.public;
   const name = s.public_name || s.name;
   s.public = on ? 1 : 0;
   if (on && !s.public_name) s.public_name = name;
-  renderServicesTable();
+  _afterPublicChange(id);
   try {
     await api("POST", `/api/services/${id}/public`, { enabled: on, name });
-  } catch (e) { await loadServicesData(); renderServicesTable(); }
+  } catch (e) { showToast(e.message); await loadServicesData(); _afterPublicChange(id); }
+}
+function _afterPublicChange(id) {
+  renderServicesTable();
+  const s = allServices.find(x => x.id === id);
+  if (!s || svcDetailId !== id || !document.getElementById("svcDetailPanel").classList.contains("open")) return;
+  document.getElementById("svcDetailPublic").checked = !!s.public;
+  document.getElementById("svcDetailPublicNameRow").style.display = s.public ? "" : "none";
+  const nameEl = document.getElementById("svcDetailPublicName");
+  if (!nameEl.value.trim()) nameEl.value = s.public_name || "";   // never over typing that isn't saved yet
 }
 
 function svcPortProtoPencil(id) {
@@ -225,10 +326,10 @@ function populateSvcHostSelect(selectedIp) { _fillHostSelect(document.getElement
 // fields visible. HTTP → uses URL; TCP → target IP + port; ICMP → target IP only.
 function _applyCheckGrey(ct, ids) {
   const use = {
-    http: { url: true,  target: false, port: true  },   // port stays usable: it fills in the URL
-    tcp:  { url: false, target: true,  port: true  },
-    icmp: { url: false, target: true,  port: false },
-  }[ct] || { url: true, target: true, port: true };
+    http: { url: true,  target: false, port: true,  codes: true  },   // port stays usable: it fills in the URL
+    tcp:  { url: false, target: true,  port: true,  codes: false },
+    icmp: { url: false, target: true,  port: false, codes: false },
+  }[ct] || { url: true, target: true, port: true, codes: true };
   const set = (id, active) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -239,6 +340,7 @@ function _applyCheckGrey(ct, ids) {
   set(ids.url,    use.url);
   set(ids.target, use.target);
   set(ids.port,   use.port);
+  if (ids.codes) set(ids.codes, use.codes);
 }
 
 // Modal: grey the unused fields when the check type changes.
@@ -252,13 +354,13 @@ function svcModalMonitorToggled() {
 
 function svcCheckTypeChanged() {
   const ct = document.getElementById("svcCheckType").value;
-  _applyCheckGrey(ct, { url: "svcUrl", target: "svcContainerIp", port: "svcPort" });
+  _applyCheckGrey(ct, { url: "svcUrl", target: "svcContainerIp", port: "svcPort", codes: "svcCodes" });
 }
 
 // Detail panel: same grey-out for the panel's own fields.
 function svcDetailCheckChanged() {
   const ct = document.getElementById("svcDetailCheckType").value;
-  _applyCheckGrey(ct, { url: "svcDetailUrl", target: "svcDetailContainerIp", port: "svcDetailPort" });
+  _applyCheckGrey(ct, { url: "svcDetailUrl", target: "svcDetailContainerIp", port: "svcDetailPort", codes: "svcDetailCodes" });
 }
 
 function svcModalPublicToggled() {
@@ -281,6 +383,7 @@ function openEditService(id) {
   urlEl.dataset.auto = svcAutoUrlIp(s.url, [s.container_ip, s.ip], s.port) ? s.url : "";
   document.getElementById("svcContainerIp").value = s.container_ip || "";
   document.getElementById("svcCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
+  document.getElementById("svcCodes").value       = s.accepted_codes || "";
   svcCheckTypeChanged();
   document.getElementById("svcModalMonitored").checked = !!s.monitored;
   svcModalMonitorToggled();
@@ -290,7 +393,7 @@ function openEditService(id) {
   populateSvcHostSelect(s.ip);                                 // let the host be changed on edit too
   document.getElementById("svcHostRow").style.display        = "";
   document.getElementById("containerPickRow").style.display  = "none";
-  document.getElementById("svcDeleteBtn").style.display      = "";
+  document.getElementById("svcModalDeleteBtn").style.display = "";
   document.getElementById("serviceModal").classList.add("open");
 }
 
@@ -313,7 +416,7 @@ function openAddService(presetIp) {
   document.getElementById("svcModalPublic").checked    = false;
   document.getElementById("svcModalPublicName").value  = "";
   svcModalPublicToggled();
-  document.getElementById("svcDeleteBtn").style.display = "none";
+  document.getElementById("svcModalDeleteBtn").style.display = "none";
 
   pickedContainerIp = null;
   // Container quick-pick
@@ -389,6 +492,7 @@ async function saveServiceModal() {
   const url     = document.getElementById("svcUrl").value.trim() || null;
   const checkType   = document.getElementById("svcCheckType").value;
   const containerIp = document.getElementById("svcContainerIp").value.trim();
+  const codes       = document.getElementById("svcCodes").value.trim();
   const monitored   = document.getElementById("svcModalMonitored").checked;
   const isPublic    = document.getElementById("svcModalPublic").checked;
   const publicName  = document.getElementById("svcModalPublicName").value.trim();
@@ -400,6 +504,7 @@ async function saveServiceModal() {
       const svc = await api("PUT", `/api/services/${editId}`, {
         name, description: desc, port, protocol: proto, status, url,
         check_type: checkType, container_ip: containerIp,   // "" clears the override
+        accepted_codes: codes || null,
         host_ip: document.getElementById("svcHostIp").value // allow moving to another host
       });
       svcId = parseInt(editId);
@@ -408,7 +513,7 @@ async function saveServiceModal() {
       const hostIp = document.getElementById("svcHostIp").value;
       const svc = await api("POST", `/api/hosts/${hostIp}/services`, {
         name, description: desc, port, protocol: proto, status, url,
-        check_type: checkType, container_ip: containerIp || null
+        check_type: checkType, container_ip: containerIp || null, accepted_codes: codes || null
       });
       svcId = svc.id;
       allServices.push(svc);
@@ -419,7 +524,7 @@ async function saveServiceModal() {
     const cur = allServices.find(s => s.id === svcId) || {};
     if (!!cur.monitored !== monitored) {
       const r = await api("POST", `/api/services/${svcId}/monitor`, { enabled: monitored });
-      cur.monitored = monitored ? 1 : 0; cur.monitor_status = r.monitor_status; cur.monitor_resume_at = null;
+      Object.assign(cur, _svcResumedFields(monitored), { monitor_status: r.monitor_status });
     }
     if (!!cur.public !== isPublic || (isPublic && (cur.public_name || "") !== publicName)) {
       await api("POST", `/api/services/${svcId}/public`, { enabled: isPublic, name: publicName });
@@ -665,7 +770,10 @@ async function svcDeleteSelected() {
 
 // Small up/down dot shown in the services table for monitored services.
 function monDotHTML(s) {
+  if (svcPaused(s)) return `<span class="mon-dot mon-paused${s.monitor_pause_reason ? " maint" : ""}" title="${escHtml("Monitoring " + svcPauseText(s))}"></span>`;
   if (!s.monitored) return "";
+  if (s.monitor_not_set_up)
+    return `<span class="mon-dot mon-unknown" title="Not set up — add a web address or port"></span>`;
   const st  = s.monitor_status || "unknown";
   const cls = st === "up" ? "mon-up" : st === "down" ? "mon-down" : "mon-unknown";
   const title = st === "up" ? "Monitored — up" : st === "down" ? "Monitored — down" : "Monitored — checking…";
@@ -688,23 +796,29 @@ async function deleteSvcFromTable(id) {
 
 // Periodically refresh live monitor status while viewing the Services tab.
 let _monPollTimer = null;
+// F-30: the whole row is refreshed (label, host-offline chip, pause end), not only the dot.
+const _SVC_LIVE_KEYS = ["monitored", "monitor_status", "status", "host_online", "monitor_resume_at",
+  "monitor_paused_at", "monitor_pause_reason", "monitor_not_set_up"];
 async function refreshMonitorStatus() {
-  if (!allServices.some(s => s.monitored)) return;
+  if (!allServices.some(s => s.monitored || svcPaused(s))) return;
   try {
     const fresh = await api("GET", "/api/services");
     const byId = new Map(fresh.map(s => [s.id, s]));
-    let changed = false;
+    let changed = false, openChanged = false;
     allServices = allServices.map(s => {
       const f = byId.get(s.id);
-      if (f && (f.monitor_status !== s.monitor_status || f.monitored !== s.monitored)) changed = true;
-      return f ? { ...s, monitored: f.monitored, monitor_status: f.monitor_status, monitor_last_check: f.monitor_last_check } : s;
+      if (!f) return s;
+      if (_SVC_LIVE_KEYS.some(k => (f[k] ?? null) !== (s[k] ?? null))) {
+        changed = true;
+        if (s.id === svcDetailId) openChanged = true;
+      }
+      return { ...s, ...f };
     });
     if (changed) {
       renderServicesTable();
-      if (svcDetailId) {
-        const cur = allServices.find(s => s.id === svcDetailId);
-        if (cur) setSvcDetailMonDot(cur.monitored ? (cur.monitor_status || "unknown") : "off");
-      }
+      scheduleSvcResumeRefresh();
+      const cur = openChanged && allServices.find(s => s.id === svcDetailId);
+      if (cur) setSvcDetailMonState(cur);
     }
   } catch {}
 }
@@ -768,7 +882,8 @@ registerActions({
   setSvcTab, sortServices, svcDeleteSelected, openAddService, svcUpdateBulkBtn,
   autoFillSvcUrlModal, svcCheckTypeChanged, svcModalMonitorToggled, svcModalPublicToggled, toggleContainerPick, pickContainer,
   deleteServiceFromModal, closeServiceModal, saveServiceModal, svcDetailCheckChanged,
-  cycleServiceStatus, toggleSvcMenu, svcRowToggleMonitor, svcRowTogglePublic,
+  openPauseModal, closePauseModal, pauseSubmit, pauseTurnOff,
+  cycleServiceStatus, toggleSvcMenu, svcRowToggleMonitor, openCodesHelp, closeCodesHelp, svcRowTogglePublic,
   svcToggleAllBox:     function () { svcToggleAll(this.checked); },
   svcUrlTyped:         function () { if (this.value !== this.dataset.auto) this.dataset.auto = ""; },
   svcDetailUrlTyped:   function () { ACTIONS.svcUrlTyped.call(this); updateSvcDetailUrlBtn(); },

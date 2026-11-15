@@ -115,18 +115,27 @@ function card(x, section){
     const base = dayClass(pct);
     // Amber only replaces an actual dip inside the window — an up/no-data slot
     // stays as-is (maintenance didn't cause a problem that slot).
-    const maint = obj && d.maint && base === "down";
+    const maint = obj && ((d.maint && base === "down") || d.pause === "maint");
     const cl = maint ? "maint" : base;
-    const t = obj ? `${esc(d.date)}: ${d.pct == null ? "no data" : Number(d.pct).toFixed(1) + "%"}${maint ? " · maintenance" : ""}` : "";
+    const what = d && d.pause === "maint" ? "maintenance" : d && d.pause === "paused" ? "paused"
+      : d.pct == null ? "no data" : Number(d.pct).toFixed(1) + "%";
+    const t = obj ? `${esc(d.date)}: ${what}${maint && d.pause !== "maint" ? " · maintenance" : ""}` : "";
     return `<div class="day ${cl}" title="${t}"></div>`;
   }).join("")}</div>`;
-  const dot = x.maintenance ? "maint" : cls(x.status);
+  const dot = (x.maintenance || x.status === "maintenance") ? "maint" : cls(x.status);
   const open = OPEN.has(x.key);
+  // F-28: a paused service stays listed — Paused, or Maintenance with its note
+  const tag = x.status === "maintenance" ? `<span class="svc-tag maint">Maintenance</span>`
+    : x.status === "paused" ? `<span class="svc-tag">Paused</span>` : "";
+  const until = x.until ? ` · until ${esc(new Date(x.until).toLocaleString(undefined, { timeZone: TZONE,
+    month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }))}` : "";
+  const note = (x.note || until) && (x.status === "maintenance" || x.status === "paused")
+    ? `<div class="svc-note${x.status === "paused" ? " paused" : ""}">${esc(x.note || "")}${until.replace(/^ · /, x.note ? " · " : "")}</div>` : "";
   return `<div class="svc${open ? " open" : ""}"><div class="svc-head" role="button" tabindex="0" data-key="${esc(x.key)}"
     aria-expanded="${open}" title="Show this item's outages"><span class="dot ${dot}"></span>
-    <span class="svc-name">${esc(x.name)}</span>
+    <span class="svc-name">${esc(x.name)}${tag}</span>
     <span class="uptime">${pcts}</span><span class="chev">▾</span></div>
-    ${bars}${open ? itemHistory(x, section) : ""}</div>`;
+    ${note}${bars}${open ? itemHistory(x, section) : ""}</div>`;
 }
 let LAST = {};
 function renderList(d){
@@ -188,8 +197,18 @@ function renderHealth(d){
   const b = $("banner");
   if(!all.length){ b.className = "hidden"; b.textContent = ""; return; }
   const down = all.some(x => x.status === "down");
-  b.className = "banner " + (down ? "bad" : "ok");
-  b.textContent = down ? "Some systems are down" : "All systems operational";
+  const maint = all.some(x => x.status === "maintenance");
+  b.className = "banner " + (down ? "bad" : maint ? "maint" : "ok");
+  b.textContent = down ? "Some systems are down" : maint ? "Maintenance in progress" : "All systems operational";
+}
+// F-27: Boltarr hasn't sent an update for a while, so what's shown may be old.
+function renderStale(d){
+  const el = $("stale");
+  if(!d.stale){ el.className = "hidden"; el.textContent = ""; return; }
+  const m = Number(d.stale.minutes) || 0;
+  const ago = m < 120 ? `${m} min ago` : m < 2880 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} days ago`;
+  el.className = "banner stale";
+  el.textContent = `Status may be out of date — last update ${ago}`;
 }
 
 // ── maintenance (public agenda + month grid) ─────────────────────────────────
@@ -683,6 +702,7 @@ async function load(skipAdmin){
   // rebuild the admin forms and wipe whatever the admin is editing.
   if(!skipAdmin) renderAdmin(d);
   renderAnnouncements(d);
+  renderStale(d);
   renderHealth(d);
   renderList(d);
   renderMaintenance(d);

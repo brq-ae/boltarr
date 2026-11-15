@@ -98,6 +98,8 @@ function removeThinking() {
   document.querySelectorAll(".msg-thinking").forEach((el) => el.remove());
 }
 
+const AI_ERROR_MARK = "\n\n[AI error: ";   // the server's end-of-reply error marker (main.py)
+
 async function sendChat() {
   if (chatAbort) return;   // one reply at a time
   const input = document.getElementById("chatInput");
@@ -145,16 +147,30 @@ async function sendChat() {
       div.innerHTML = chatReplyHtml(full);    // markdown (escapes first) + action slots, see app/ai-actions.js
       msgs.scrollTop = msgs.scrollHeight;
     }
-    if (!full) div.textContent = "(no response)";
-    chatHistory.push({ role: "assistant", content: full });
-    attachActionCards(div, full, chatHistory.length - 1);
+    // F-32: an error (sent at the end, after any text) or an empty reply is shown
+    // but never kept in the conversation — a saved empty/error reply made
+    // Anthropic refuse every later message until New chat.
+    const cut = full.lastIndexOf(AI_ERROR_MARK);
+    const reply = (cut >= 0 ? full.slice(0, cut) : full).trim();
+    const err = cut >= 0 ? full.slice(cut + AI_ERROR_MARK.length).replace(/\]\s*$/, "") : "";
+    if (!reply) {
+      div.classList.remove("md");
+      div.classList.add("msg-error");
+      div.textContent = err ? `AI error: ${err}` : "The AI sent back an empty reply — nothing was kept; try again.";
+      chatHistory.pop();                     // forget the question too, so a retry starts clean
+      return;
+    }
+    div.innerHTML = chatReplyHtml(reply);
+    if (err) div.insertAdjacentHTML("beforeend", `<div class="msg-error-line">AI error: ${escHtml(err)} — the reply above may be cut off.</div>`);
+    chatHistory.push({ role: "assistant", content: reply });
+    attachActionCards(div, reply, chatHistory.length - 1);
   } catch (e) {
     thinking.remove();
     if (epoch !== chatEpoch) return;       // New chat was clicked: drop this reply
     if (e.name === "AbortError") {
-      if (full) {
+      if (full.trim()) {
         // Keep what was written so far, so the conversation still makes sense.
-        chatHistory.push({ role: "assistant", content: full });
+        chatHistory.push({ role: "assistant", content: full.trim() });
         attachActionCards(div, full, chatHistory.length - 1);
         div.insertAdjacentHTML("beforeend", '<div class="msg-stopped">■ Stopped</div>');
       } else {
@@ -165,6 +181,7 @@ async function sendChat() {
       }
     } else {
       appendMsg("assistant", "Error: " + e.message);
+      if (chatHistory.length && chatHistory[chatHistory.length - 1].role === "user") chatHistory.pop();
     }
   } finally {
     chatAbort = null;

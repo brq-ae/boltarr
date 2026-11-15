@@ -69,6 +69,7 @@ async function openSettings() {
     document.getElementById("setTimeout").value      = llm.timeout      || 120;
     document.getElementById("setLongTimeout").value  = llm.long_timeout || 600;
     document.getElementById("setNumCtx").value       = llm.num_ctx ?? 8192;
+    loadCtxInfo();
     onSettingsProviderChange();
     document.getElementById("setTestResult").style.display = "none";
 
@@ -91,6 +92,8 @@ async function openSettings() {
     document.getElementById("setSpEnabled").checked = !!sp.enabled;
     document.getElementById("setSpUrl").value   = sp.url   || "";
     document.getElementById("setSpToken").value = sp.token || "";
+    document.getElementById("setSpStale").value = sp.stale_minutes || 5;
+    loadMonitorHealth();
     _SECRET_ORIG.sp = (sp.url || "").trim(); _SECRET_ORIG.spKey = sp.token || "";
     secretMoveCheck();
     document.getElementById("setSpTestResult").style.display = "none";
@@ -167,7 +170,7 @@ async function previewDigest() {
   box.hidden = false;
   box.innerHTML = `<div class="text-3">${ai ? "Asking the AI for a summary… (up to 60 seconds)" : "Building the preview…"}</div>`;
   try {
-    const d = await api("GET", `/api/digest/preview?ai=${ai ? 1 : 0}&services=${services ? 1 : 0}&model=${encodeURIComponent(model)}`);
+    const d = await api("POST", "/api/digest/preview", { ai, services, model });
     if (!d.title) {
       box.innerHTML = `<div class="text-3">Nothing to report from the last 24 hours, so no digest would be sent right now.</div>`;
       return;
@@ -258,6 +261,50 @@ function _numCtxValue() {
   return Number.isNaN(n) ? 8192 : Math.max(0, n);
 }
 
+// What the model can read at most and how it's loaded now (Ollama only)
+let _ctxInfo = null;
+async function loadCtxInfo() {
+  _ctxInfo = null;
+  if (document.getElementById("setProvider").value === "ollama") {
+    try { _ctxInfo = await api("GET", `/api/ai/context?model=${encodeURIComponent(document.getElementById("setModel").value.trim())}`); }
+    catch (e) { _ctxInfo = { error: e.message }; }
+  }
+  showCtxInfo();
+}
+
+function _gb(bytes) { return (bytes / 1e9).toFixed(1) + " GB"; }
+
+function showCtxInfo() {
+  const el = document.getElementById("setCtxInfo");
+  const i = _ctxInfo;
+  if (!el) return;
+  if (!i || !i.model || document.getElementById("setProvider").value !== "ollama") { el.hidden = true; return; }
+  el.hidden = false;
+  el.classList.remove("ctx-warn");
+  if (i.error) { el.textContent = i.error; return; }
+  const n = _numCtxValue(), fmt = x => Number(x).toLocaleString("en-US");
+  const parts = [];
+  if (i.max) parts.push(`This model can read up to <b>${fmt(i.max)}</b> tokens.`);
+  if (n && i.max && n > i.max) {
+    parts.push(`${fmt(n)} is more than that, so Ollama will use ${fmt(i.max)} at most.`);
+    el.classList.add("ctx-warn");
+  }
+  const L = i.loaded;
+  if (L && L.size) {
+    const gpu = Math.round(100 * L.vram / L.size);
+    let line = `Loaded now with ${fmt(L.context || 0)} tokens, using ${_gb(L.size)}`;
+    line += gpu >= 100 ? ", all on the GPU." : gpu <= 0 ? ", all on the CPU (slow)." :
+      `: ${gpu}% on the GPU, the rest on the CPU (slower). A smaller Context would fit the GPU.`;
+    if (gpu < 100) el.classList.add("ctx-warn");
+    if (L.context && n && L.context !== n) line += " A new size takes effect with the next question.";
+    parts.push(line);
+  } else {
+    parts.push("It isn't loaded right now; Ollama loads it with the next question.");
+  }
+  parts.push("The real limit is the memory on the Ollama machine: try a bigger size, then check it stays all on the GPU.");
+  el.innerHTML = parts.join(" ");
+}
+
 function onSettingsProviderChange() {
   const p = document.getElementById("setProvider").value;
   const urlRow = document.getElementById("setUrlRow");
@@ -268,6 +315,7 @@ function onSettingsProviderChange() {
   urlRow.style.display = (p === "ollama" || p === "openai") ? "" : "none";
   keyRow.style.display = (p === "openai" || p === "anthropic") ? "" : "none";
   document.getElementById("setCtxRow").style.display = p === "ollama" ? "" : "none";
+  showCtxInfo();
 
   if (urlInput.value === "" || Object.values(PROVIDER_URLS).includes(urlInput.value)) {
     urlInput.value = PROVIDER_URLS[p] || "";
@@ -355,6 +403,7 @@ async function saveSettings(keepOpen = false) {
     enabled: document.getElementById("setSpEnabled").checked,
     url:     document.getElementById("setSpUrl").value.trim(),
     token:   document.getElementById("setSpToken").value,
+    stale_minutes: _staleMinutes(),
     move_secret: _moveSecret("sp"),
   };
   const ctPayload = {
@@ -448,6 +497,7 @@ async function testStatusPush() {
       enabled: document.getElementById("setSpEnabled").checked,
       url:     document.getElementById("setSpUrl").value.trim(),
       token:   document.getElementById("setSpToken").value,
+      stale_minutes: _staleMinutes(),
       move_secret: _moveSecret("sp"),
     });
     _rememberSecrets(saved);
@@ -463,6 +513,7 @@ async function testStatusPush() {
     resultEl.className = "settings-test-result err";
     resultEl.textContent = "✗ " + e.message;
   }
+  loadMonitorHealth();
 }
 
 async function testNotification() {
@@ -488,6 +539,7 @@ async function testNotification() {
     resultEl.className = "settings-test-result err";
     resultEl.textContent = "✗ " + e.message;
   }
+  loadMonitorHealth();
 }
 
 // ── AI history (Settings → AI) ───────────────────────────────────────────────
@@ -608,6 +660,7 @@ async function testLLMConnection() {
       resultEl.textContent = `✓ Connected. Models: ${mList}`;
       await loadModels();
       fillModelSuggestions(result.models || []);
+      loadCtxInfo();
       updateAiStatusDot(true);
     } else {
       resultEl.classList.add("test-fail");
@@ -623,6 +676,35 @@ function updateAiStatusDot(configured) {
   const dot = document.getElementById("aiStatusDot");
   if (!dot) return;
   dot.className = "ai-status-dot " + (configured ? "ai-status-ok" : "ai-status-none");
+}
+
+// F-27: the "may be out of date" minutes (1–1440; empty or bad -> 5).
+function _staleMinutes() {
+  const n = parseInt(document.getElementById("setSpStale").value, 10);
+  return Number.isFinite(n) ? Math.min(1440, Math.max(1, n)) : 5;
+}
+
+// F-27: the last ntfy send and status-page push, so a failure isn't silent.
+function _healthText(h, okWord) {
+  if (!h) return null;
+  const failed = h.last_error && (!h.last_ok || h.last_error_at > h.last_ok);
+  if (failed) return { bad: true, text: `Last ${okWord} failed ${fmtLocal(h.last_error_at)}: ${h.last_error}` };
+  if (h.last_ok) return { bad: false, text: `Last ${okWord} OK ${fmtLocal(h.last_ok)}` };
+  return null;
+}
+async function loadMonitorHealth() {
+  let d;
+  try { d = await api("GET", "/api/monitor/health"); } catch { return; }
+  const show = (id, r, extra) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.hidden = !r && !extra;
+    el.classList.toggle("bad", !!(r && r.bad));
+    el.textContent = [r && r.text, extra].filter(Boolean).join(" · ");
+  };
+  const held = d.held_alerts ? `${d.held_alerts} alert${d.held_alerts > 1 ? "s" : ""} waiting to be sent` : "";
+  show("setNtfyHealth", _healthText(d.notify, "send"), held);
+  show("setSpHealth", _healthText(d.push, "push"));
 }
 
 function showToast(msg) {
@@ -887,7 +969,7 @@ registerActions({
   applySettings: () => saveSettings(true),
   closeSettings, saveSettings, updateTzPreview, toggleCspList, clearCspReports,
   aiHistoryChanged, askCleanAiHistory, cancelCleanAiHistory, cleanAiHistory,
-  onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification,
+  onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification, showCtxInfo,
   generateStatusToken, testStatusPush, secretMoveCheck, downloadBackup, openFactoryReset,
   onResetConfirmInput, closeFactoryReset, doFactoryReset, openBackupModal, closeBackupModal,
   onBackupProtectChange, cancelRestore, applyRestore, closeRestoreOverlay,

@@ -618,6 +618,11 @@ def _startup() -> None:
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
+# Biggest update Boltarr may push (F-27: was 512 KB, which ~75 public items outgrew).
+# Only reachable on the LAN and with the token.
+PUSH_MAX = 4 * 1024 * 1024
+
+
 @app.post("/push")
 async def push(request: Request, authorization: str = Header(default="")):
     if not PUSH_VIA_PROXY and any(h in request.headers for h in _PROXY_HEADERS):
@@ -625,7 +630,7 @@ async def push(request: Request, authorization: str = Header(default="")):
     if not TOKEN or not hmac.compare_digest(authorization, f"Bearer {TOKEN}"):
         raise HTTPException(status_code=401, detail="unauthorized")
     body = await request.body()
-    if len(body) > 512 * 1024:
+    if len(body) > PUSH_MAX:
         raise HTTPException(status_code=413, detail="payload too large")
     global STATE
     try:
@@ -724,6 +729,25 @@ def _parse_ts(s):
         return None
 
 
+STALE_DEFAULT = 5    # minutes, when Boltarr didn't say (older Boltarr)
+
+
+def _staleness(now: datetime | None = None) -> dict | None:
+    """F-27: {"minutes": N} when Boltarr's last update is older than its
+    stale_after_minutes — the page then warns that it may be out of date."""
+    pushed = _parse_ts(STATE.get("_pushed_at"))
+    if not pushed:
+        return None
+    try:
+        limit = min(1440, max(1, int(STATE.get("stale_after_minutes") or STALE_DEFAULT)))
+    except Exception:
+        limit = STALE_DEFAULT
+    age = ((now or datetime.now(timezone.utc)) - pushed).total_seconds()
+    if age < limit * 60:
+        return None
+    return {"minutes": int(age // 60), "since": STATE.get("_pushed_at")}
+
+
 @app.get("/data")
 def data(request: Request):
     admin = is_admin(request)
@@ -739,6 +763,9 @@ def data(request: Request):
         "timezone": tzname,   # so the page renders incident times in the page's zone
         "admin": admin,
     }
+    stale = _staleness()
+    if stale:
+        out["stale"] = stale
     # A private section is simply absent from an anonymous response.
     for s in SECTIONS:
         out[s] = STATE.get(s, []) if (admin or vis[s] == "public") else []

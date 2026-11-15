@@ -42,9 +42,9 @@ async function showHostDetail(ip) {
     <div class="detail-header">
       <div>
         <div class="detail-ip">${escHtml(host.ip.startsWith("node-") ? (host.hostname || "(no IP)") : host.ip)}</div>
-        ${host.hostname && !host.ip.startsWith("node-") ? `<div class="detail-hostname">${escHtml(host.hostname)}</div>` : ""}
+        <div id="detailNameBox">${_detailNameHtml(host)}</div>
       </div>
-      <span class="tag tag-${escHtml(dt)}" style="font-size:11px">${escHtml(dt)}</span>
+      <span class="tag tag-${escHtml(dt)}" id="detailTypeTag" style="font-size:11px">${escHtml(dt)}</span>
       <div class="detail-header-right">
         <select id="analyzeModel" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
         <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" data-click="analyzeHost" data-args="${dargs(ip)}">Analyze</button>
@@ -60,7 +60,7 @@ async function showHostDetail(ip) {
     <div class="detail-tabs">
       <button class="detail-tab active" data-tab="info" data-click="switchDetailTab" data-args='["info"]'>Info</button>
       <button class="detail-tab" data-tab="links" data-click="switchDetailTab" data-args='["links"]'>Links (${countLinks(ip)})</button>
-      <button class="detail-tab" data-tab="ports" data-click="switchDetailTab" data-args='["ports"]'>Ports (${(host.ports||[]).length})</button>
+      <button class="detail-tab" data-tab="ports" data-click="switchDetailTab" data-args='["ports"]'>Ports (${(host.ports||[]).length + (host.alias_ports||[]).length})</button>
       <button class="detail-tab" data-tab="services" data-click="switchDetailTab" data-args='["services"]'>Services (${(host.services||[]).length})</button>
       <button class="detail-tab" data-tab="analysis" data-click="switchDetailTab" data-args='["analysis"]'>Analysis</button>
       <button class="detail-tab" data-tab="ssh" data-click="detailTabSsh" data-args="${dargs(ip)}">SSH</button>
@@ -75,11 +75,11 @@ async function showHostDetail(ip) {
           <div class="info-field"><label>IP Address</label><span class="mono">${escHtml(host.ip)}</span></div>
           <div class="info-field"><label>MAC Address</label><span class="mono">${escHtml(host.mac||"—")}</span></div>
           <div class="info-field"><label>Vendor</label><span>${escHtml(host.vendor||"—")}</span></div>
-          <div class="info-field"><label>Hostname</label><span>${escHtml(host.hostname||"—")}</span></div>
+          <div class="info-field"><label>Hostname</label><span id="detailNameField"${netNameAttr(host)}>${escHtml(host.hostname||"—")}</span></div>
           <div class="info-field"><label>OS / Firmware</label><span>${escHtml(host.os_guess||"—")}</span></div>
-          <div class="info-field"><label>Device Type</label><span>${escHtml(host.device_type||"unknown")}</span></div>
-          <div class="info-field"><label>First Seen</label><span class="mono">${escHtml((host.first_seen||"—").substring(0,16))}</span></div>
-          <div class="info-field"><label>Last Seen</label><span class="mono">${escHtml((host.last_seen||"—").substring(0,16))}</span></div>
+          <div class="info-field"><label>Device Type</label><span id="detailTypeField">${escHtml(host.device_type||"unknown")}</span></div>
+          <div class="info-field"><label>First Seen</label><span class="mono">${escHtml(fmtLocalStamp(host.first_seen) || "—")}</span></div>
+          <div class="info-field"><label>Last Seen</label><span class="mono">${escHtml(fmtLocalStamp(host.last_seen) || "—")}</span></div>
         </div>
         ${host.ip.startsWith("node-") ? "" : `
         <div class="host-uptime-section">
@@ -111,17 +111,7 @@ async function showHostDetail(ip) {
       <!-- Ports tab -->
       <div class="detail-tab-panel" id="dtab-ports">
         <div class="ports-list">
-          ${(host.ports||[]).length
-            ? (host.ports||[]).map(p => `
-              <div class="port-row">
-                <span class="port-num">${escHtml(p.port)}/${escHtml(p.protocol)}</span>
-                <span class="port-svc">${escHtml(p.service||"unknown")}</span>
-                <span class="port-ver">${escHtml(p.version||"")}</span>
-                ${p.manual ? '<span class="port-manual-tag">manual</span>' : '<span></span>'}
-                <button class="btn-ghost btn-danger" data-click="deletePort" data-args="${dargs(p.id, ip)}" style="font-size:12px;padding:2px 6px">✕</button>
-              </div>`).join("")
-            : `<div style="padding:16px 10px;font-size:12px;color:var(--text-3)">No ports detected.</div>`
-          }
+          ${_portsByAddress(host, ip)}
         </div>
         <div class="add-port-form">
           <div class="field"><label>Port</label><input type="number" id="newPort" placeholder="8080" class="mono"></div>
@@ -175,6 +165,7 @@ async function showHostDetail(ip) {
 
   fillModelSelect(document.getElementById("analyzeModel"));
 
+  panel.dataset.ip = ip;
   panel.classList.add("open");
   initSheetDrag();
   makeDesktopResizable(panel, "host");
@@ -199,10 +190,34 @@ async function loadHostUptime(ip) {
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     const outages = outageListHtml("host", d.host_id, d.outages);
     el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetHostUptime" data-args="${dargs(ip)}">↺ Reset uptime</button></div>`;
-    maybeAutoExplain("host", el);
+    maybeAutoExplain("host", el, ip);
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
+    maybeAutoExplain("host", null);
   }
+}
+
+// Ports tab (F-24): a host with a second address shows each address's ports
+// under its own heading; the second address's come from scans only.
+function _portsByAddress(host, ip) {
+  const main = host.ports || [], second = host.alias_ports || [];
+  const row = (p, removable) => `
+    <div class="port-row">
+      <span class="port-num">${escHtml(p.port)}/${escHtml(p.protocol)}</span>
+      <span class="port-svc">${escHtml(p.service||"unknown")}</span>
+      <span class="port-ver">${escHtml(p.version||"")}</span>
+      ${p.manual ? '<span class="port-manual-tag">manual</span>' : p.state && p.state !== "open" ? `<span class="port-manual-tag">${escHtml(p.state)}</span>` : '<span></span>'}
+      ${removable ? `<button class="btn-ghost btn-danger" data-click="deletePort" data-args="${dargs(p.id, ip)}" style="font-size:12px;padding:2px 6px">✕</button>` : "<span></span>"}
+    </div>`;
+  const none = `<div style="padding:16px 10px;font-size:12px;color:var(--text-3)">No ports detected.</div>`;
+  if (!second.length && !(host.aliases || []).length) return main.length ? main.map(p => row(p, true)).join("") : none;
+  const head = (label, addr) => `<div class="ports-addr-head">${label} <span class="mono">${escHtml(addr)}</span></div>`;
+  const byAddr = {};
+  second.forEach(p => (byAddr[p.addr] = byAddr[p.addr] || []).push(p));
+  return head("Main address", ip) + (main.length ? main.map(p => row(p, true)).join("") : none) +
+    (host.aliases || []).map(a => head("Second address", a) +
+      ((byAddr[a] || []).length ? byAddr[a].map(p => row(p, false)).join("")
+        : `<div style="padding:10px;font-size:12px;color:var(--text-3)">No ports detected yet — it's scanned on its own from now on.</div>`)).join("");
 }
 
 function switchDetailTab(name) {
@@ -390,6 +405,20 @@ async function openEditHost(ip) {
   document.getElementById("editMac").value        = host.mac || "";
   document.getElementById("editVendor").value     = host.vendor || "";
   document.getElementById("editOs").value         = host.os_guess || "";
+  // F-20: name / vendor / OS are only sent when changed — sending one makes it
+  // "yours" (scans stop changing it), so an untouched field must stay the network's
+  for (const id of ["editHostname", "editVendor", "editOs"]) {
+    const el = document.getElementById(id);
+    el.dataset.orig = el.value;
+  }
+  document.getElementById("editHostname").placeholder = host.net_hostname
+    ? `empty = the network's name (${host.net_hostname})` : "e.g. main-router";
+  const why = "This is what the device calls itself. A name you type here replaces it on screen, and a dotted "
+            + "underline marks a name that differs from it. Leave the box empty to use the network name.";
+  document.getElementById("editNetName").innerHTML = host.net_hostname
+    ? `Network name: <b>${escHtml(host.net_hostname)}</b> <button type="button" class="hint-q" title="${escHtml(why)}"
+         aria-label="${escHtml(why)}" data-click="toggleNetNameWhy">?</button><span class="net-name-why" hidden>${escHtml(why)}</span>`
+    : "The network hasn't reported a name for this device.";
   document.getElementById("editNotes").value      = host.notes || "";
   document.getElementById("editTierL1").checked   = host.tier === 1;
   document.getElementById("editPortCount").value  = host.port_count || 1;
@@ -482,11 +511,8 @@ async function saveHostEdit() {
   }
   const ip = (newIp && newIp !== originalIp) ? newIp : originalIp;
   const payload = {
-    hostname:    document.getElementById("editHostname").value.trim() || null,
     mac:         document.getElementById("editMac").value.trim() || null,
     device_type: document.getElementById("editDeviceType").value,
-    vendor:      document.getElementById("editVendor").value.trim() || null,
-    os_guess:    document.getElementById("editOs").value.trim() || null,
     notes:       document.getElementById("editNotes").value.trim() || null,
     set_tier:    true,
     tier:        document.getElementById("editTierL1").checked ? 1 : null,
@@ -505,6 +531,10 @@ async function saveHostEdit() {
     public:              document.getElementById("editPublic").checked,
     public_name:         document.getElementById("editPublicName").value.trim() || null,
   };
+  for (const [id, key] of [["editHostname", "hostname"], ["editVendor", "vendor"], ["editOs", "os_guess"]]) {
+    const el = document.getElementById(id), v = el.value.trim();
+    if (v !== (el.dataset.orig || "").trim()) payload[key] = v || null;     // F-20: only what you changed
+  }
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);
     closeEditHost();
@@ -548,6 +578,30 @@ function _analysisHtml(a, earlier) {
     ${aiEarlierHtml(earlier, x => `<div class="analysis-box md">${renderMarkdown(x.analysis)}</div>`)}`;
 }
 
+function _detailNameHtml(host) {
+  if (host.ip.startsWith("node-")) return "";
+  return (host.hostname ? `<div class="detail-hostname"><span${netNameAttr(host)}>${escHtml(host.hostname)}</span></div>` : "")
+    + (netNameHint(host) ? `<div class="net-name-line">Network name: ${escHtml(netNameHint(host))}</div>` : "");
+}
+
+// A name changed somewhere else (the Hosts table pen): update the open panel in place
+function refreshDetailName(host) {
+  const panel = document.getElementById("hostDetail");
+  if (!host || !panel.classList.contains("open") || panel.dataset.ip !== host.ip) return;
+  const box = document.getElementById("detailNameBox");
+  if (box) box.innerHTML = _detailNameHtml(host);
+  const old = document.getElementById("detailNameField");
+  if (old) old.outerHTML = `<span id="detailNameField"${netNameAttr(host)}>${escHtml(host.hostname || "—")}</span>`;
+}
+
+function _showDetailType(dt) {
+  if (!dt) return;
+  const tag = document.getElementById("detailTypeTag");
+  if (tag) { tag.className = `tag tag-${dt}`; tag.textContent = dt; }
+  const field = document.getElementById("detailTypeField");
+  if (field) field.textContent = dt;
+}
+
 async function analyzeHost(ip) {
   const model = document.getElementById("analyzeModel")?.value
              || AI_DEFAULT_MODEL;
@@ -557,6 +611,7 @@ async function analyzeHost(ip) {
   try {
     const data = await api("POST", `/api/hosts/${ip}/analyze`, { model });
     resultDiv.innerHTML = _analysisHtml({ ...data, created_at: new Date().toISOString() }, data.earlier);
+    _showDetailType(data.device_type);     // F-21: Analyze may have filled in an unknown type
     await loadHosts(); renderHostsTable(); await loadGraph();
   } catch (e) {
     resultDiv.innerHTML = `<div class="analysis-box" style="color:var(--red)">Error: ${escHtml(e.message)}</div>`;
@@ -615,6 +670,7 @@ function editDhcpToggled() {
 }
 
 registerActions({
+  toggleNetNameWhy: function () { const w = this.nextElementSibling; if (w) w.hidden = !w.hidden; },   // phones: tap for the explainer
   openNetworkAnalysis, runNetworkAnalysis, closeNetworkAnalysis,
   showHostDetail, hideHostDetail, analyzeHost, openEditHost, openMergeHost, probeHost, deleteHost,
   switchDetailTab, removeAlias, deletePort, addPort,

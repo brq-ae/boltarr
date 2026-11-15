@@ -127,3 +127,26 @@ def test_no_inline_code_anywhere():
     reg = "".join(re.findall(r"registerActions\((.*?)\);\n", js, re.S))
     for name in set(re.findall(r'data-(?:click|change|input)="([A-Za-z]+)"', html + js)):
         assert re.search(rf"\b{name}\b", reg), name
+
+
+def test_every_element_id_is_unique():
+    """F-26: two elements shared id="svcDeleteBtn", so the Edit Service dialog's
+    Delete button never showed. Every id in each page must be used once."""
+    import collections
+    import re
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    for page in [*(root / "frontend").glob("*.html"), root / "statuspage" / "index.html"]:
+        ids = re.findall(r'\bid="([^"]+)"', page.read_text(encoding="utf-8"))
+        dup = sorted(k for k, n in collections.Counter(ids).items() if n > 1)
+        assert not dup, f"{page.name}: ids used more than once: {dup}"
+
+
+def test_service_dialog_and_toolbar_delete_buttons_are_separate():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "frontend"
+    html = (root / "index.html").read_text(encoding="utf-8")
+    js = (root / "js" / "app" / "services.js").read_text(encoding="utf-8")
+    assert 'id="svcModalDeleteBtn" data-click="deleteServiceFromModal"' in html
+    assert 'id="svcDeleteBtn"' in html and 'data-click="svcDeleteSelected"' in html
+    assert js.count('getElementById("svcModalDeleteBtn")') == 2      # shown on Edit, hidden on Add

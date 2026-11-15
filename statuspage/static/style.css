@@ -34,6 +34,8 @@ h1{font-size:22px;margin:0 0 4px}
 .banner{padding:12px 16px;border-radius:10px;font-weight:600;margin-bottom:20px}
 .banner.ok{background:color-mix(in srgb, var(--up) 14%, transparent);color:var(--up)}
 .banner.bad{background:color-mix(in srgb, var(--down) 14%, transparent);color:var(--down)}
+.banner.maint{background:color-mix(in srgb, var(--maint) 14%, transparent);color:var(--maint)}
+.banner.stale{background:color-mix(in srgb, var(--maint) 14%, transparent);color:var(--maint);border:1px solid color-mix(in srgb, var(--maint) 45%, transparent)}
 
 /* service/host cards */
 .svc{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px}
@@ -44,6 +46,10 @@ h1{font-size:22px;margin:0 0 4px}
 .dot.unknown{background:var(--unknown)}
 .dot.maint{background:var(--maint);box-shadow:0 0 6px var(--maint)}
 .svc-name{font-weight:600;flex:1}
+.svc-tag{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--unknown);border:1px solid var(--unknown);border-radius:10px;padding:1px 7px;margin-left:8px;vertical-align:middle}
+.svc-tag.maint{color:var(--maint);border-color:var(--maint)}
+.svc-note{font-size:12px;color:var(--maint);margin:-2px 0 6px 20px;overflow-wrap:anywhere}
+.svc-note.paused{color:var(--unknown)}
 .svc-head[data-key]{cursor:pointer;border-radius:6px}
 .svc-head[data-key]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .chev{color:var(--muted);font-size:12px;transition:transform .15s}

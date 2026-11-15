@@ -29,7 +29,8 @@ function setScanTab(tab) {
 // ── Change-tracking feed ──────────────────────────────────────────────────────
 
 const _CHANGE_META = {
-  host_new:         { icon: "✦", cls: "chg-new",    text: () => "New host discovered" },
+  host_new:         { icon: "✦", cls: "chg-new",    text: e => "New host discovered" +
+    (e.new_value ? ` — open ports ${escHtml(String(e.new_value).split(",").join(", "))}` : "") },
   port_opened:      { icon: "▲", cls: "chg-open",   text: e => `Port ${escHtml(e.port)} opened` },
   port_closed:      { icon: "▼", cls: "chg-closed", text: e => `Port ${escHtml(e.port)} closed` },
   mac_changed:      { icon: "⇄", cls: "chg-id",     text: e => `MAC changed: ${escHtml(e.old_value||"?")} → ${escHtml(e.new_value||"?")}` },
@@ -117,7 +118,13 @@ function _scanOptsFromFields() {
     pn:         document.getElementById("scanPn").checked,
     udp:        document.getElementById("scanUdp").checked,
     scripts:    document.getElementById("scanScripts").value.trim(),
+    host_timeout: _hostTimeoutField(),
   };
+}
+function _hostTimeoutField() {
+  const v = document.getElementById("scanHostTimeout").value.trim();
+  const n = parseInt(v, 10);
+  return v === "" || isNaN(n) ? 15 : Math.max(0, Math.min(1440, n));
 }
 
 function _scanTargetCidr() {
@@ -149,7 +156,7 @@ function applyScanProfile() {
   const p = scanProfiles.find(x => String(x.id) === sel.value);
   document.getElementById("scanProfileDelete").style.display = (p && !p.builtin) ? "" : "none";
   if (!p) { updateScanPreview(); return; }
-  const d = { ports:"top1000", top_n:100, port_range:"", sv:true, os:true, timing:"T4", pn:false, udp:false, scripts:"" };
+  const d = { ports:"top1000", top_n:100, port_range:"", sv:true, os:true, timing:"T4", pn:false, udp:false, scripts:"", host_timeout:15 };
   const o = { ...d, ...(p.options || {}) };
   document.getElementById("scanPorts").value     = o.ports;
   document.getElementById("scanTopN").value      = o.top_n;
@@ -160,6 +167,7 @@ function applyScanProfile() {
   document.getElementById("scanPn").checked      = !!o.pn;
   document.getElementById("scanUdp").checked     = !!o.udp;
   document.getElementById("scanScripts").value   = o.scripts || "";
+  document.getElementById("scanHostTimeout").value = o.host_timeout ?? 15;
   syncScanConditional();
   updateScanPreview();
 }
@@ -223,21 +231,34 @@ async function loadScans() {
         : `${escHtml(s.subnet_name || "?")} <span class="mono" style="color:var(--text-3);font-weight:400">${escHtml(s.cidr || "")}</span>`;
       const started = fmtLocal(s.started_at);
       const running = s.status === "running";
+      const waiting = s.status === "queued";            // a scheduled scan waiting its turn (F-34)
+      const probs = s.problems || [];
       const live = s.live_status || (running ? "starting" : s.status);
       const pct = s.progress || 0;
       const runLabel = live === "discovering" ? "discovering…"
         : live === "scanning" ? `scanning ${pct}%`
         : live === "starting" ? "starting…" : "running…";
-      const bits = s.status === "skipped"
+      const bits = waiting
+        ? [started, `<span style="color:var(--text-2)">waiting for the scan before it to finish</span>`]
+        : s.status === "skipped"
         ? [started, `<span style="color:var(--yellow)">skipped${s.note ? ": " + escHtml(s.note) : ""}</span>`]
         : s.status === "error" && s.note
         ? [started, `<span style="color:var(--red)">error: ${escHtml(s.note)}</span>`]
         : running
         ? [started, `${runLabel} · <span class="scan-elapsed" data-started="${_ts(s.started_at)}">${fmtDur((Date.now() - _ts(s.started_at)) / 1000)}</span>`]
-        : [started, `${s.hosts_found || 0} hosts`, scanDurationHTML(s)].filter(Boolean);
+        : [started, `${s.hosts_found || 0} hosts`, scanDurationHTML(s),
+           s.status === "cancelled" && s.note ? escHtml(s.note) : ""].filter(Boolean);
       const detail = (isProbe ? "probe · " : "") + bits.join(" · ");
       const progressBar = running
         ? `<div class="scan-progress"><div class="scan-progress-fill" style="width:${pct}%"></div></div>`
+        : "";
+      // "completed with problems": which hosts nmap couldn't finish, and why (F-34)
+      const problemList = probs.length
+        ? `<details class="scan-problems"><summary>⚠ ${probs.length} host${probs.length > 1 ? "s" : ""} couldn't be scanned</summary>
+             ${probs.map(p => `<div><span class="mono">${escHtml(p.ip || "?")}</span> — ${escHtml(p.error || "")}</div>`).join("")}
+           </details>`
+        : running && s.problem_count
+        ? `<div class="scan-problems-live">⚠ ${s.problem_count} host${s.problem_count > 1 ? "s" : ""} couldn't be scanned so far</div>`
         : "";
       const typeBadge = isProbe
         ? `<span class="tag" style="background:oklch(40% 0.1 280);color:oklch(80% 0.1 280);font-size:10px">probe</span>`
@@ -246,28 +267,37 @@ async function loadScans() {
         : `<span class="tag" style="background:var(--surface2);color:var(--text-3);font-size:10px">scan</span>`;
       const statusTag = running
         ? `<span class="tag tag-running" style="font-size:10px">${live === "scanning" ? "scanning" : "running"}</span>`
+        : waiting
+        ? `<span class="tag tag-queued" style="font-size:10px">waiting</span>`
+        : probs.length && s.status === "completed"
+        ? `<span class="tag tag-problems" style="font-size:10px" title="${escHtml(s.note || "")}">completed with problems</span>`
         : `<span class="tag tag-${escHtml(s.status)}" style="font-size:10px">${escHtml(s.status)}</span>`;
-      const cancelBtn = running
-        ? `<button class="btn-ghost" style="font-size:11px;padding:2px 7px;flex-shrink:0;color:var(--yellow)" data-click="cancelScanRun" data-args="[${s.id}]" title="Stop">■</button>`
+      const cancelBtn = running || waiting
+        ? `<button class="btn-ghost" style="font-size:11px;padding:2px 7px;flex-shrink:0;color:var(--yellow)" data-click="cancelScanRun" data-args="[${s.id}]" title="${waiting ? "Don't run it" : "Stop"}">■</button>`
         : "";
+      // A running scan can't be deleted (it would carry on unseen) — stop it first (F-34)
+      const deleteBtn = running || waiting
+        ? `<button class="btn-ghost" style="font-size:12px;padding:2px 7px;flex-shrink:0;opacity:.35;cursor:not-allowed" disabled title="Stop it first, then delete it">✕</button>`
+        : `<button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="deleteScanRun" data-args="[${s.id}]" title="Delete">✕</button>`;
       return `
         <div class="scan-card" id="scan-card-${s.id}">
           <input type="checkbox" class="scan-checkbox" data-id="${s.id}" style="accent-color:var(--accent);flex-shrink:0" data-change="scansUpdateBulkBtn">
-          <div class="scan-indicator ${live}"></div>
+          <div class="scan-indicator ${waiting ? "queued" : probs.length && s.status === "completed" ? "problems" : live}"></div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:500;font-size:12px">${target}</div>
             <div class="mono" style="font-size:10px;color:var(--text-3);margin-top:2px">${detail}</div>
             ${progressBar}
+            ${problemList}
           </div>
           ${typeBadge}
           ${statusTag}
           ${cancelBtn}
-          <button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="deleteScanRun" data-args="[${s.id}]" title="Delete">✕</button>
+          ${deleteBtn}
         </div>`;
     }).join("")}`;
 
   // Auto-refresh while any scan is still running so progress stays live.
-  _scheduleScansPoll(scans.some(s => s.status === "running"));
+  _scheduleScansPoll(scans.some(s => s.status === "running" || s.status === "queued"));
 }
 
 let _scansPollTimer = null;
@@ -312,6 +342,16 @@ function fmtLocal(ts) {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
     timeZone: APP_TZ || undefined,
   });
+}
+
+// Full stamp "2026-11-14 18:05" in the same timezone (sortable look, for Last/First seen)
+function fmtLocalStamp(ts) {
+  const d = _toDate(ts);
+  if (!d || isNaN(d)) return "";
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23", timeZone: APP_TZ || undefined }).formatToParts(d).map(x => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
 }
 
 function fmtDur(secs) {
@@ -359,7 +399,8 @@ function scansUpdateBulkBtn() {
 
 async function deleteScanRun(id) {
   if (!confirm("Delete this scan/probe record?")) return;
-  await api("DELETE", `/api/scans/${id}`);
+  try { await api("DELETE", `/api/scans/${id}`); }
+  catch (e) { showToast(e.message); return loadScans(); }
   document.getElementById(`scan-card-${id}`)?.remove();
   if (!document.querySelector(".scan-card")) await loadScans();
 }
@@ -368,7 +409,8 @@ async function scansDeleteSelected() {
   const ids = Array.from(document.querySelectorAll(".scan-checkbox:checked")).map(cb => parseInt(cb.dataset.id));
   if (!ids.length) return showToast("Nothing selected");
   if (!confirm(`Delete ${ids.length} record${ids.length > 1 ? "s" : ""}?`)) return;
-  await api("DELETE", "/api/scans", { ids });
+  const r = await api("DELETE", "/api/scans", { ids });
+  if (r && r.kept_running) showToast(`${r.kept_running} running scan${r.kept_running > 1 ? "s were" : " was"} kept — stop ${r.kept_running > 1 ? "them" : "it"} first`);
   await loadScans();
 }
 

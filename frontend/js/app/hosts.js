@@ -85,7 +85,12 @@ async function saveField(ip, field, value) {
   renderHostsTable();
   const payload = { [field]: value };   // the server changes only the fields sent
   try {
-    await api("PUT", `/api/hosts/${ip}`, payload);
+    const saved = await api("PUT", `/api/hosts/${ip}`, payload);
+    if (h && saved) {                  // what was really kept: an empty name goes back to the network's (F-20)
+      for (const k of [field, "net_hostname", "net_vendor", "net_os"]) if (k in saved) h[k] = saved[k];
+      renderHostsTable();
+      if (field === "hostname") refreshDetailName(h);   // the open panel shows the same name
+    }
   } catch (e) {
     if (h) h[field] = prev;            // revert on failure
     await loadHosts(); renderHostsTable();
@@ -212,9 +217,9 @@ function hostMatches(h, q) {
   const qHex = _hexOnly(q);
   return (h.ip || "").includes(q) ||
     (h.aliases || []).some(a => a.includes(q)) ||
-    ["hostname", "vendor", "device_type", "os_guess", "notes", "mac"].some(k => (h[k] || "").toLowerCase().includes(q)) ||
+    ["hostname", "net_hostname", "vendor", "device_type", "os_guess", "notes", "mac"].some(k => (h[k] || "").toLowerCase().includes(q)) ||
     (qHex.length >= 4 && /^[0-9a-f:.\-\s]+$/.test(q) && _hexOnly(h.mac).includes(qHex)) ||
-    (h.ports || []).some(p => p.state === "open" && (p.service || "").toLowerCase().includes(q));
+    hostOpenPorts(h).some(p => (p.service || "").toLowerCase().includes(q));
 }
 function svcMatches(s, q) {
   q = q.toLowerCase();
@@ -244,8 +249,8 @@ function hostsVisibleRows() {
     let va = a[sortCol] ?? "", vb = b[sortCol] ?? "";
     if (sortCol === "ip") { va = ipToNum(va); vb = ipToNum(vb); }
     if (sortCol === "open_ports") {
-      va = (a.ports||[]).filter(p => p.state === "open").length;
-      vb = (b.ports||[]).filter(p => p.state === "open").length;
+      va = hostOpenPorts(a).length;
+      vb = hostOpenPorts(b).length;
     }
     return va < vb ? -sortDir : va > vb ? sortDir : 0;
   });
@@ -271,9 +276,9 @@ function renderHostsTable() {
   }
 
   sorted.forEach(h => {
-    const openPorts = (h.ports||[]).filter(p => p.state === "open");
+    const openPorts = hostOpenPorts(h);
     const portHtml = openPorts.slice(0,5).map(p =>
-      `<span class="port-badge${p.manual ? ' manual' : ''}">${escHtml(p.port)}/${escHtml(p.service||"?")}</span>`
+      `<span class="port-badge${p.manual ? ' manual' : ''}${p.addr ? ' alias' : ''}"${p.addr ? ` title="On its second address ${escHtml(p.addr)}"` : ""}>${escHtml(p.port)}/${escHtml(p.service||"?")}</span>`
     ).join("");
     const more = openPorts.length > 5 ? `<span class="port-badge">+${openPorts.length-5}</span>` : "";
     const dt = h.device_type || "unknown";
@@ -299,13 +304,13 @@ function renderHostsTable() {
     tr.innerHTML = `
       <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${escHtml(h.ip)}" style="accent-color:var(--accent)" data-stop data-change="hostsUpdateBulkBtn"></td>
       <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
-      <td class="td-host col-host">${textCell(h, 'hostname', h.hostname)}</td>
+      <td class="td-host col-host"><span${netNameAttr(h)}>${textCell(h, 'hostname', h.hostname)}</span></td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac ? escHtml(h.mac) : '<span style="color:var(--text-3)">—</span>'}${macPencil(h.ip)}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${textCell(h, 'vendor', h.vendor)}</td>
       <td class="td-type col-type"><span class="tag tag-${escHtml(dt)}">${escHtml(dt)}</span>${manualBadge}${clsBadge}${dhcpWarn}${typePencil(h.ip)}</td>
       <td class="col-os" style="font-size:11px;color:var(--text-3)">${textCell(h, 'os_guess', (h.os_guess||"").substring(0,34))}</td>
       <td class="col-ports"><div class="port-list">${portHtml}${more}</div></td>
-      <td class="td-seen col-seen mono" style="color:var(--text-3)">${escHtml((h.last_seen||"—").substring(0,16))}</td>
+      <td class="td-seen col-seen mono" style="color:var(--text-3)">${escHtml(fmtLocalStamp(h.last_seen) || "—")}</td>
       <td class="col-notes">${renderNoteCell(h)}</td>
     `;
     tr.dataset.click = "showHostDetail";   // the ✎ buttons, checkbox and links inside run only their own

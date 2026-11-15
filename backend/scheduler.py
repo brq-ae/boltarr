@@ -3,8 +3,9 @@
 A background loop wakes every minute and runs any schedule that's due through
 the normal scan engine — so change-tracking and alerts fire automatically. A
 schedule = target (subnet all/one × host filter) + timing (interval hours OR
-weekly days+time) + a scan profile. Overlapping runs of the same subnet are
-skipped (and the skip is logged in history) so scans never stack.
+weekly days+time) + a scan profile. One scan runs at a time: a due scan waits
+in line behind a running one; a second run of a subnet that's already running
+or waiting is skipped (and the skip is logged in history).
 """
 import json
 import ipaddress
@@ -46,14 +47,36 @@ def _at_time(s: str | None) -> _time | None:
         return None
 
 
+# ── Wall-clock helpers (F-23) ─────────────────────────────────────────────────
+# Fixed-time schedules are worked out on the local wall clock only: "03:00" means
+# once at 03:00 local, also on the days the clocks change. All maths happens on
+# naive local datetimes; only the final answer is turned back into UTC.
+
+def _wall(dt_utc: datetime) -> datetime:
+    """A UTC moment as a naive local wall-clock time (configured zone, else the server's)."""
+    tz = get_timezone()
+    return (dt_utc.astimezone(tz) if tz else dt_utc.astimezone()).replace(tzinfo=None)
+
+
+def _wall_to_utc(wall: datetime) -> datetime:
+    """A local wall-clock time back to UTC. A time the clocks skip (spring forward)
+    becomes the first real minute after it — when the scan will actually run."""
+    tz = get_timezone()
+    for minute in range(0, 181):
+        w = wall + timedelta(minutes=minute)
+        aware = w.replace(tzinfo=tz) if tz else w.astimezone()
+        utc = aware.astimezone(timezone.utc)
+        if _wall(utc) == w:
+            return utc
+    return (wall.replace(tzinfo=tz) if tz else wall.astimezone()).astimezone(timezone.utc)
+
+
 def _interval_anchor(sched: dict, now_utc: datetime, anchor: _time, hours: float):
     """For an anchored interval: the first fire (the anchor clock time on/after the
-    created date, in the local zone) and the step size."""
-    tz = get_timezone()
-    created = _parse_utc(sched.get("created_at")) or now_utc
-    created_local = created.astimezone(tz) if tz else created.astimezone()
-    ff = created_local.replace(hour=anchor.hour, minute=anchor.minute, second=0, microsecond=0)
-    if ff < created_local:
+    created date, as local wall time) and the step size."""
+    created = _wall(_parse_utc(sched.get("created_at")) or now_utc)
+    ff = created.replace(hour=anchor.hour, minute=anchor.minute, second=0, microsecond=0)
+    if ff < created:
         ff += timedelta(days=1)
     return ff, timedelta(hours=hours)
 
@@ -71,21 +94,29 @@ def _within_window(sched: dict, dt_local: datetime) -> bool:
     we = _at_time(sched.get("window_end"))
     if ws is None or we is None:
         return True
-    return _in_window(dt_local.time(), ws, we)
+    return _in_window(dt_local.time().replace(second=0, microsecond=0), ws, we)
+
+
+CATCH_UP_GRACE = timedelta(minutes=5)
+
+
+def _may_fire_now(sched: dict, slot_wall: datetime, now_wall: datetime) -> bool:
+    """A due slot fires now only if now is still inside the active window, or the
+    slot was moments ago (the loop wakes once a minute). So a run missed while
+    Boltarr was off isn't caught up outside the window (F-42)."""
+    return _within_window(sched, now_wall) or now_wall - slot_wall <= CATCH_UP_GRACE
 
 
 def is_due(sched: dict, now_utc: datetime | None = None) -> bool:
-    """Due check. Interval math is done in UTC; weekly wall-clock (day + HH:MM)
-    is evaluated in the configured timezone so '03:00' means 3am *local*."""
+    """Due check. Interval-without-a-time is plain elapsed time; fixed times
+    (an interval's start time, weekly day + HH:MM) are local wall-clock (F-23)."""
     if not sched.get("enabled"):
         return False
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
-    tz = get_timezone()
-    now_local = now_utc.astimezone(tz) if tz else now_utc.astimezone()
-
-    def slot_in_window(dt: datetime) -> bool:     # is a fire time inside the active window
-        return _within_window(sched, dt.astimezone(tz) if tz else dt.astimezone())
+    now_wall = _wall(now_utc)
+    last = _parse_utc(sched.get("last_run"))
+    last_wall = _wall(last) if last else None
 
     if sched["timing_type"] == "interval":
         hours = sched.get("interval_hours")
@@ -93,33 +124,35 @@ def is_due(sched: dict, now_utc: datetime | None = None) -> bool:
             return False
         anchor = _at_time(sched.get("at_time"))
         if anchor is None:                        # no fixed phase → gate on the current time
-            if not _within_window(sched, now_local):
+            if not _within_window(sched, now_wall):
                 return False
-            base = _parse_utc(sched.get("last_run")) or _parse_utc(sched.get("created_at")) or now_utc
+            base = last or _parse_utc(sched.get("created_at")) or now_utc
             return (now_utc - base).total_seconds() >= hours * 3600
         ff, step = _interval_anchor(sched, now_utc, anchor, hours)
-        if now_utc < ff:
+        if now_wall < ff:
             return False
-        most_recent = ff + ((now_utc - ff) // step) * step
-        if not slot_in_window(most_recent):       # the anchored slot itself must be in-window
+        most_recent = ff + ((now_wall - ff) // step) * step
+        if not _within_window(sched, most_recent):   # the anchored slot itself must be in-window
             return False
-        last = _parse_utc(sched.get("last_run"))
-        return last is None or last < most_recent
+        if not _may_fire_now(sched, most_recent, now_wall):
+            return False
+        return last_wall is None or last_wall < most_recent
 
     # weekly: fire once per matching local day, at/after the local at_time
     at = _at_time(sched.get("at_time"))
     if at is None:
         return False
     days = {int(d) for d in (sched.get("days_of_week") or "").split(",") if d.strip().isdigit()}
-    if now_local.weekday() not in days:
+    if now_wall.weekday() not in days:
         return False
-    target = now_local.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
-    if now_local < target:
+    target = now_wall.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
+    if now_wall < target:
         return False
     if not _within_window(sched, target):         # the fire time must be in-window
         return False
-    last = _parse_utc(sched.get("last_run"))
-    return last is None or last < target
+    if not _may_fire_now(sched, target, now_wall):
+        return False
+    return last_wall is None or last_wall < target
 
 
 def next_run_utc(sched: dict, now_utc: datetime | None = None) -> str | None:
@@ -130,10 +163,7 @@ def next_run_utc(sched: dict, now_utc: datetime | None = None) -> str | None:
         return None
     if now_utc is None:
         now_utc = datetime.now(timezone.utc)
-    tz = get_timezone()
-
-    def in_win(dt: datetime) -> bool:
-        return _within_window(sched, dt.astimezone(tz) if tz else dt.astimezone())
+    iso = lambda d: d.astimezone(timezone.utc).isoformat(timespec="seconds")
 
     if sched["timing_type"] == "interval":
         hours = sched.get("interval_hours")
@@ -141,17 +171,22 @@ def next_run_utc(sched: dict, now_utc: datetime | None = None) -> str | None:
             return None
         step = timedelta(hours=hours)
         anchor = _at_time(sched.get("at_time"))
-        if anchor is None:
+        if anchor is None:                      # elapsed time: real clock
             base = _parse_utc(sched.get("last_run")) or _parse_utc(sched.get("created_at")) or now_utc
             nxt = base + step
             while nxt <= now_utc:               # advance to the first future slot
                 nxt += step
-        else:
-            ff, step = _interval_anchor(sched, now_utc, anchor, hours)
-            nxt = ff if now_utc < ff else ff + (((now_utc - ff) // step) + 1) * step
-        for _ in range(2000):                   # advance to the first slot inside the window
-            if in_win(nxt):
-                return nxt.astimezone(timezone.utc).isoformat(timespec="seconds")
+            for _ in range(2000):               # advance to the first slot inside the window
+                if _within_window(sched, _wall(nxt)):
+                    return iso(nxt)
+                nxt += step
+            return None
+        now_wall = _wall(now_utc)
+        ff, step = _interval_anchor(sched, now_utc, anchor, hours)
+        nxt = ff if now_wall < ff else ff + (((now_wall - ff) // step) + 1) * step
+        for _ in range(2000):
+            if _within_window(sched, nxt):
+                return iso(_wall_to_utc(nxt))
             nxt += step
         return None                             # window excludes every run time
 
@@ -161,13 +196,13 @@ def next_run_utc(sched: dict, now_utc: datetime | None = None) -> str | None:
     days = {int(d) for d in (sched.get("days_of_week") or "").split(",") if d.strip().isdigit()}
     if not days:
         return None
-    now_local = now_utc.astimezone(tz) if tz else now_utc.astimezone()
+    now_wall = _wall(now_utc)
     for d in range(0, 8):
-        cand = now_local + timedelta(days=d)
+        cand = now_wall + timedelta(days=d)
         if cand.weekday() in days:
             target = cand.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
-            if target > now_local and _within_window(sched, target):
-                return target.astimezone(timezone.utc).isoformat(timespec="seconds")
+            if target > now_wall and _within_window(sched, target):
+                return iso(_wall_to_utc(target))
     return None
 
 
@@ -214,8 +249,9 @@ def _profile_opts(conn, profile_id) -> dict:
 # ── Running a schedule ─────────────────────────────────────────────────────────
 
 def run_schedule(schedule_id: int, mark_last_run: bool = True) -> dict:
-    """Kick off a schedule's scans now. Returns {started:[...], skipped:[...]}."""
-    started, skipped = [], []
+    """Kick off a schedule's scans now (or line them up behind a running scan).
+    Returns {started:[...], skipped:[...], queued:[...]}."""
+    started, skipped, queued = [], [], []
     with get_conn() as conn:
         sched = conn.execute("SELECT * FROM scan_schedules WHERE id=?", (schedule_id,)).fetchone()
         if not sched:
@@ -227,7 +263,7 @@ def run_schedule(schedule_id: int, mark_last_run: bool = True) -> dict:
         hf = sched.get("host_filter") or "all"
 
         for sn in subnets:
-            if scanner.is_subnet_scanning(sn["id"]):
+            if scanner.is_subnet_scanning(sn["id"]):   # this subnet is already running or waiting
                 conn.execute(
                     "INSERT INTO scan_runs (subnet_id, schedule_id, status, note, completed_at) "
                     "VALUES (?, ?, 'skipped', 'scan already running', datetime('now'))",
@@ -248,19 +284,23 @@ def run_schedule(schedule_id: int, mark_last_run: bool = True) -> dict:
                     skipped.append(sn["id"]);  continue
                 target = " ".join(ips)
 
+            # One scan at a time (F-34): it waits in line ('queued') if another scan
+            # is running, and starts by itself when that one finishes.
             cur = conn.execute(
-                "INSERT INTO scan_runs (subnet_id, schedule_id, status) VALUES (?, ?, 'running')",
+                "INSERT INTO scan_runs (subnet_id, schedule_id, status) VALUES (?, ?, 'queued')",
                 (sn["id"], schedule_id))
             conn.commit()
             run_id = cur.lastrowid
-            scanner.start_scan(run_id, target, opts)
-            started.append(run_id)
+            if scanner.queue_scan(run_id, target, opts):
+                started.append(run_id)
+            else:
+                queued.append(run_id)
 
         if mark_last_run:
             conn.execute("UPDATE scan_schedules SET last_run=? WHERE id=?",
                          (datetime.now(timezone.utc).isoformat(timespec="seconds"), schedule_id))
             conn.commit()
-    return {"started": started, "skipped": skipped}
+    return {"started": started, "skipped": skipped, "queued": queued}
 
 
 def tick() -> None:

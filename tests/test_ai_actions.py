@@ -52,7 +52,7 @@ def _note():
 def test_note_card_shows_the_change_and_changes_nothing(client, lab):
     [c] = _check(client, {"do": "set_note", "host": f"{NET}.2", "note": "Backup NAS"})
     assert c["ok"] and c["kind"] == "change" and c["title"] == f"Change the note on demo-nas ({NET}.2)"
-    assert c["detail"] == [["From", "old note"], ["To", "Backup NAS"]]
+    assert c["detail"] == [["Now", "old note"], ["Add to note →", "old note\nBackup NAS"], ["Replace note →", "Backup NAS"]]
     assert _note() == "old note"                                   # checking does nothing
     r = _run(client, {"do": "set_note", "host": "DEMO-NAS", "note": "Backup NAS"})   # hostname, any case
     assert r == {"ok": True, "message": f"Note on demo-nas ({NET}.2) changed."} and _note() == "Backup NAS"
@@ -261,7 +261,7 @@ def test_do_it_and_cancel_are_recorded(client, lab):
     client.post("/api/ai-actions/cancel", json={"action": {"do": "open_host", "host": f"{NET}.2"}})   # opens aren't recorded
     failed, done, cancelled = _log(client)
     assert cancelled["result"] == "cancelled" and cancelled["item"] == f"host:{lab['nas']}"
-    assert cancelled["detail"] == [["From", "old note"], ["To", "Backup NAS"]] and cancelled["model"] == "demo-model"
+    assert cancelled["detail"] == [["Now", "old note"], ["Add to note →", "old note\nBackup NAS"], ["Replace note →", "Backup NAS"]] and cancelled["model"] == "demo-model"
     assert len(cancelled["asked"]) == 300 and cancelled["asked"].endswith("…")
     assert done["result"] == "done" and done["title"] == f"Change the note on demo-nas ({NET}.2)"
     assert done["message"] == f"Note on demo-nas ({NET}.2) changed." and done["asked"] == "set the note"
@@ -285,3 +285,127 @@ def test_record_follows_the_ai_history_rules(client, lab):
         assert _log(client) == []
     finally:
         _settings(client)
+
+
+# ── F-42: one odd suggestion fails only its own card ────────────────────────────
+
+def test_an_odd_suggestion_fails_only_its_card(client, lab, monkeypatch):
+    cards = _check(client, {"do": ["set_note"]}, {"do": "open_host", "host": "demo-nas"}, {"do": {"x": 1}},
+                   '{"do": "set_note", "host": {"bad": 1}, "note": 5}')
+    assert [c["ok"] for c in cards] == [False, True, False, False]
+    assert all(c["error"] for c in cards if not c["ok"])
+    # an unexpected error inside one action's check is caught the same way
+    real = ai_actions.ACTIONS["open_host"]["check"]
+    monkeypatch.setitem(ai_actions.ACTIONS["open_host"], "check",
+                        lambda conn, p: (_ for _ in ()).throw(KeyError("boom")) if p.get("host") == "demo-twin" else real(conn, p))
+    cards = _check(client, {"do": "open_host", "host": "demo-twin"}, {"do": "open_host", "host": "demo-nas"})
+    assert cards[0] == {"ok": False, "error": "Boltarr couldn't read this suggestion."} and cards[1]["ok"]
+
+
+def test_an_odd_suggestion_on_do_it_is_a_failed_card_not_a_crash(client, lab, monkeypatch):
+    monkeypatch.setitem(ai_actions.ACTIONS["set_note"], "run", lambda conn, p: 1 / 0)
+    r = _run(client, {"do": "set_note", "host": "demo-nas", "note": "x"})
+    assert r == {"ok": False, "error": "Boltarr couldn't do this suggestion — nothing was changed."}
+
+
+def test_analyze_network_uses_the_long_timeout_setting(client, monkeypatch):
+    import backend.main as m
+    from backend import config
+    seen = {}
+
+    async def fake_generate(prompt, model=None, timeout=0):
+        seen["timeout"] = timeout
+        return "Demo network answer."
+    monkeypatch.setattr(m, "generate", fake_generate)
+    cfg = config.get_config()
+    cfg["llm"]["long_timeout"] = 1234
+    config.save_config(cfg)
+    try:
+        assert client.post("/api/analyze/network", json={}).status_code == 200
+        assert seen["timeout"] == 1234
+    finally:
+        cfg["llm"]["long_timeout"] = 600
+        config.save_config(cfg)
+        with get_conn() as conn:                     # the tests share one database
+            conn.execute("DELETE FROM llm_analyses WHERE analysis='Demo network answer.'")
+            conn.commit()
+
+
+# ── F-31: Do it does exactly what the card showed ───────────────────────────────
+
+def test_card_pins_what_it_shows(client, lab, demo_subnet, no_side_effects):
+    later = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+    [c] = _check(client, {"do": "pause_monitor", "service": "Demo SMB", "until": later})
+    a = c["action"]
+    assert a["service_id"] == lab["smb"] and a["until_utc"].startswith(later.replace(" ", "T"))
+    [sc] = _check(client, {"do": "scan", "subnet": "demo lan", "profile": "full"})
+    assert sc["action"]["subnet_id"] == demo_subnet and sc["action"]["profile_options"] == {"ports": "all"}
+    [n] = _check(client, {"do": "set_note", "host": "demo-nas", "note": "Demo pinned"})
+    assert n["action"]["host_id"] == lab["nas"]
+
+
+def test_a_pause_end_that_passed_is_refused_not_moved_to_tomorrow(client, lab, no_side_effects):
+    [c] = _check(client, {"do": "pause_monitor", "service": "Demo SMB", "until": "23:59"})
+    action = dict(c["action"], until_utc=(datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(timespec="seconds"))
+    r = _run(client, action)                                     # clicked after the time it showed
+    assert not r["ok"] and "has already passed" in r["error"]
+    assert _svc()["monitored"] == 1                              # nothing was done
+
+
+def test_do_it_uses_the_exact_end_time_shown(client, lab, no_side_effects):
+    [c] = _check(client, {"do": "pause_monitor", "service": "Demo SMB", "until": "23:59"})
+    assert _run(client, c["action"])["ok"]
+    assert _svc()["monitor_resume_at"] == c["action"]["until_utc"]
+
+
+def test_a_renamed_host_doesnt_send_the_change_to_another(client, lab, no_side_effects):
+    [c] = _check(client, {"do": "set_note", "host": "demo-nas", "note": "Demo for the first one"})
+    with get_conn() as conn:                    # after the card: names swap around
+        conn.execute("UPDATE hosts SET hostname='demo-old-nas' WHERE id=?", (lab["nas"],))
+        conn.execute("UPDATE hosts SET hostname='demo-nas' WHERE ip=?", (f"{NET}.3",))
+        conn.commit()
+    assert _run(client, c["action"])["ok"]
+    with get_conn() as conn:
+        notes = dict(conn.execute("SELECT id, notes FROM hosts WHERE ip IN (?, ?)", (f"{NET}.2", f"{NET}.3")).fetchall())
+    assert notes[lab["nas"]] == "Demo for the first one" and None in notes.values()
+
+
+def test_a_deleted_host_is_refused(client, lab, no_side_effects):
+    [c] = _check(client, {"do": "set_host", "host": f"{NET}.4", "device_type": "camera"})
+    with get_conn() as conn:
+        conn.execute("DELETE FROM services WHERE host_id=(SELECT id FROM hosts WHERE ip=?)", (f"{NET}.4",))
+        conn.execute("DELETE FROM hosts WHERE ip=?", (f"{NET}.4",))
+        conn.commit()
+    r = _run(client, c["action"])
+    assert not r["ok"] and "no longer in Boltarr" in r["error"]
+
+
+def test_an_edited_profile_doesnt_change_what_runs(client, lab, demo_subnet, no_side_effects):
+    with get_conn() as conn:
+        conn.execute("INSERT INTO scan_profiles (name, options) VALUES ('Demo pinned', ?)", (json.dumps({"ports": "top1000"}),))
+        conn.commit()
+    try:
+        [c] = _check(client, {"do": "scan", "subnet": "demo lan", "profile": "Demo pinned"})
+        with get_conn() as conn:
+            conn.execute("UPDATE scan_profiles SET options=? WHERE name='Demo pinned'", (json.dumps({"ports": "all"}),))
+            conn.commit()
+        assert _run(client, c["action"])["ok"]
+        assert no_side_effects[-1] == ("scan", f"{NET}.0/24", {"ports": "top1000"})     # what the card showed
+    finally:
+        with get_conn() as conn:
+            conn.execute("DELETE FROM scan_profiles WHERE name='Demo pinned'")
+            conn.commit()
+
+
+def test_a_pinned_profile_is_still_checked(client, lab, demo_subnet, no_side_effects):
+    r = _run(client, {"do": "scan", "subnet_id": demo_subnet, "profile_options": {"scripts": "/etc/demo.nse"}})
+    assert not r["ok"] and "won't run" in r["error"] and no_side_effects == []
+
+
+def test_note_card_still_applies_when_the_old_note_changed(client, lab, no_side_effects):
+    """v0.26.0 rule kept: a note card doesn't refuse because "From" changed."""
+    [c] = _check(client, {"do": "set_note", "host": "demo-nas", "note": "Demo new note"})
+    with get_conn() as conn:
+        conn.execute("UPDATE hosts SET notes='changed meanwhile' WHERE id=?", (lab["nas"],))
+        conn.commit()
+    assert _run(client, c["action"])["ok"]

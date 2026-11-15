@@ -214,12 +214,22 @@
           </div>
         </div>
 
-        <div class="scan-progress-overlay" id="scanProgress">
-          <div class="progress-bar-wrap">
-            <div class="progress-bar" id="progressBar" style="width:0%"></div>
+        <div class="scan-progress-stack">
+          <div class="scan-progress-overlay" id="scanProgress">
+            <div class="progress-bar-wrap">
+              <div class="progress-bar" id="progressBar" style="width:0%"></div>
+            </div>
+            <span id="progressLabel" style="color:var(--text-2);font-size:11px">Starting…</span>
+            <button class="btn btn-danger" id="stopScanBtn" style="font-size:11px;padding:3px 10px;margin-left:8px" data-click="stopScan">Stop</button>
           </div>
-          <span id="progressLabel" style="color:var(--text-2);font-size:11px">Starting…</span>
-          <button class="btn btn-danger" id="stopScanBtn" style="font-size:11px;padding:3px 10px;margin-left:8px" data-click="stopScan">Stop</button>
+          <!-- A probe has its own bar and Stop, so it never takes over a scan's (F-34) -->
+          <div class="scan-progress-overlay" id="probeProgress">
+            <div class="progress-bar-wrap">
+              <div class="progress-bar" id="probeBar" style="width:0%"></div>
+            </div>
+            <span id="probeLabel" style="color:var(--text-2);font-size:11px">Probing…</span>
+            <button class="btn btn-danger" id="stopProbeBtn" style="font-size:11px;padding:3px 10px;margin-left:8px" data-click="stopProbe">Stop</button>
+          </div>
         </div>
       </div>
 
@@ -393,7 +403,7 @@
               <div class="scan-checks">
                 <label><input type="checkbox" id="scanSv" data-change="onScanFieldChange"> Service+version (-sV)</label>
                 <label><input type="checkbox" id="scanOs" data-change="onScanFieldChange"> OS detection (-O)</label>
-                <label><input type="checkbox" id="scanPn" data-change="updateScanPreview"> Skip discovery (-Pn)</label>
+                <label title="Don't ping first: every address gets the port scan (slower). For devices that ignore ping."><input type="checkbox" id="scanPn" data-change="updateScanPreview"> Skip discovery (-Pn)</label>
                 <label><input type="checkbox" id="scanUdp" data-change="updateScanPreview"> UDP (-sU)</label>
               </div>
             </div>
@@ -407,6 +417,11 @@
                 <option value="T4">T4 — aggressive (default)</option>
                 <option value="T5">T5 — insane (fastest)</option>
               </select>
+            </div>
+            <div class="form-row">
+              <label>Time limit per host <span style="color:var(--text-3);font-weight:400;text-transform:none">(minutes; 0 = no limit)</span></label>
+              <input type="number" id="scanHostTimeout" value="15" min="0" max="1440" style="width:80px" data-input="updateScanPreview"
+                     title="A host that takes longer is skipped (its ports are left as they were) and the scan carries on">
             </div>
             <div class="form-row" id="scanScriptsRow">
               <label>NSE scripts <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
@@ -847,6 +862,7 @@
       <div class="form-row">
         <label>Hostname / Label</label>
         <input type="text" id="editHostname" placeholder="e.g. main-router">
+        <p class="settings-hint net-name-hint" id="editNetName"></p>
       </div>
     </div>
     <div class="form-2col">
@@ -1073,6 +1089,10 @@
       <label>URL <span style="color:var(--text-3);font-weight:400;text-transform:none">(used by HTTP check)</span></label>
       <input type="text" id="svcUrl" placeholder="http://192.168.1.10:8080" data-input="svcUrlTyped">
     </div>
+    <div class="form-row" id="svcCodesRow">
+      <label>Accepted replies <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional; empty = any reply below 500 is up)</span> <button type="button" class="hint-link" data-click="openCodesHelp">hints</button></label>
+      <input type="text" id="svcCodes" class="mono" maxlength="100" placeholder="e.g. 200-299 or 200,404">
+    </div>
     <div class="form-row">
       <label>Description <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
       <input type="text" id="svcDesc" placeholder="Brief description">
@@ -1096,9 +1116,32 @@
       <input type="text" id="svcModalPublicName" placeholder="Defaults to the service name">
     </div>
     <div class="modal-actions">
-      <button class="btn btn-danger" id="svcDeleteBtn" data-click="deleteServiceFromModal" style="display:none">Delete</button>
+      <button class="btn btn-danger" id="svcModalDeleteBtn" data-click="deleteServiceFromModal" style="display:none">Delete</button>
       <button class="btn" data-click="closeServiceModal">Cancel</button>
       <button class="btn btn-primary" data-click="saveServiceModal">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pause monitoring (F-28) -->
+<div class="modal-overlay" id="pauseModal">
+  <div class="modal" style="width:420px">
+    <div class="modal-title" id="pauseTitle">Pause monitoring</div>
+    <input type="hidden" id="pauseSvcId">
+    <div class="form-row">
+      <label>Reason <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional, shown on the status page)</span></label>
+      <input type="text" id="pauseReason" maxlength="200" placeholder="e.g. Updating to the new version">
+    </div>
+    <div class="form-row">
+      <label>Until <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional, at most 30 days)</span></label>
+      <input type="datetime-local" id="pauseUntil">
+    </div>
+    <p class="settings-hint" style="margin:2px 0 12px">No alerts while paused, and the time isn't counted in uptime.
+      With a reason, a public service shows <b>Maintenance</b> and your note on the status page; without one, <b>Paused</b>.</p>
+    <div class="modal-actions">
+      <button class="btn-ghost" data-click="pauseTurnOff" style="margin-right:auto" title="Stop monitoring for good: it leaves the status page">Turn monitoring off</button>
+      <button class="btn" data-click="closePauseModal">Cancel</button>
+      <button class="btn btn-primary" data-click="pauseSubmit"><span class="pause-ico"></span>Pause</button>
     </div>
   </div>
 </div>
@@ -1441,8 +1484,9 @@
       </div>
       <div id="setCtxRow" class="form-row" style="flex-wrap:wrap;gap:8px">
         <label>Context&nbsp;(tokens)</label>
-        <input id="setNumCtx" type="number" style="width:90px" min="0" step="1024" value="8192">
+        <input id="setNumCtx" type="number" style="width:90px" min="0" step="1024" value="8192" data-input="showCtxInfo">
         <span class="text-3" style="font-size:11px">How much the model may read at once. Too small cuts off the chat's network notes; bigger uses more GPU memory. 0 = Ollama's default.</span>
+        <p class="settings-hint ctx-info" id="setCtxInfo" hidden></p>
       </div>
       <div id="setTestResult" class="settings-test-result" style="display:none"></div>
       <button class="btn" style="font-size:12px;align-self:flex-start" data-click="testLLMConnection">⚡ Test AI</button>
@@ -1531,12 +1575,14 @@
         </span>
       </div>
       <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
-        During quiet hours (your local time) alerts are held. Anything still down when the window ends alerts you then.
+        During quiet hours (your local time) alerts are held. Anything still down when the window ends alerts you then;
+        devices going offline or online and services coming back are sent together in one summary.
       </p>
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn" data-click="testNotification">📲 Send test</button>
         <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
+      <p id="setNtfyHealth" class="health-line" hidden></p>
 
       </div></details>
       <details class="settings-section">
@@ -1564,10 +1610,17 @@
       <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
         The same token must be set in the status app's <code>.env</code> (<code>STATUS_TOKEN</code>).
       </p>
+      <div class="form-row">
+        <label>Show "may be out of date" after</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input id="setSpStale" type="number" min="1" max="1440" style="width:80px"> <span class="text-3" style="font-size:11px">minutes without an update from Boltarr</span>
+        </div>
+      </div>
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn" data-click="testStatusPush">🌐 Push now</button>
         <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
       </div>
+      <p id="setSpHealth" class="health-line" hidden></p>
 
       </div></details>
       <details class="settings-section">
@@ -1738,19 +1791,26 @@
       <label>Monitor target IP</label>
       <input type="text" id="svcDetailContainerIp" class="mono" placeholder="defaults to host" style="width:130px">
     </div>
+    <div class="svc-detail-field" id="svcDetailCodesField" title="Empty = any reply below 500 counts as up">
+      <label>Accepted replies <button type="button" class="hint-link" data-click="openCodesHelp">hints</button></label>
+      <input type="text" id="svcDetailCodes" class="mono" maxlength="100" placeholder="below 500" style="width:110px">
+    </div>
     <div class="svc-detail-field">
       <label>Monitor</label>
-      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:26px">
-        <input type="checkbox" id="svcDetailMonitored" data-change="toggleSvcMonitor">
+      <div style="display:flex;align-items:center;gap:7px;height:26px">
+        <label class="mon-switch" id="svcDetailMonSwitch" title="Slide off to pause or turn off monitoring">
+          <input type="checkbox" class="switch-input" id="svcDetailMonitored" data-change="toggleSvcMonitor"><span class="mon-switch-track"><span class="mon-switch-knob"></span></span>
+        </label>
         <span id="svcDetailMonitorDot" class="mon-dot mon-unknown"></span>
-        <span id="svcDetailMonitorText" style="font-size:11px;color:var(--text-3)">off</span>
-      </label>
+        <span id="svcDetailMonitorText" style="font-size:11px;color:var(--text-3)">monitoring off</span>
+      </div>
+      <button class="btn-ghost btn-pause" id="svcDetailPauseBtn" data-click="svcDetailPause" hidden><span class="pause-ico"></span>Pause…</button>
     </div>
     <div class="svc-detail-field">
       <label>Public status page</label>
-      <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:26px" title="Show this service on the public status page (requires Monitor on)">
-        <input type="checkbox" id="svcDetailPublic" data-change="toggleSvcPublicName">
-        <span style="font-size:11px;color:var(--text-3)">show publicly</span>
+      <label class="mon-switch" style="height:26px;text-transform:none;font-weight:400;font-size:11px;letter-spacing:0" title="Show this service on the public status page (requires Monitor on)">
+        <input type="checkbox" class="switch-input" id="svcDetailPublic" data-change="toggleSvcPublicName"><span class="mon-switch-track"><span class="mon-switch-knob"></span></span>
+        <span>show publicly</span>
       </label>
     </div>
     <div class="svc-detail-field svc-detail-field-wide" id="svcDetailPublicNameRow" style="display:none">
@@ -1813,6 +1873,32 @@
     </div>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn" data-click="closeDepsModal">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Accepted replies: hints -->
+<div class="modal-overlay" id="codesHelpModal" data-click="closeCodesHelp" data-self>
+  <div class="modal codes-help" style="width:480px">
+    <div class="modal-title">Accepted replies — hints</div>
+    <p>When Boltarr checks a web address, the page answers with a <b>reply number</b>.
+      This box decides which numbers count as <b>up</b>.</p>
+    <p><b>Leave it empty</b> and any reply below 500 counts as up — right for most services.</p>
+    <table class="codes-table">
+      <tr><td class="mono">200</td><td>OK — the page loaded</td></tr>
+      <tr><td class="mono">301, 302</td><td>Redirect — sends you to another page (e.g. the login page)</td></tr>
+      <tr><td class="mono">401, 403</td><td>Login needed / not allowed — the app is running but wants a sign-in</td></tr>
+      <tr><td class="mono">404</td><td>Not found — the app answered, but that page doesn't exist</td></tr>
+      <tr><td class="mono">500</td><td>The app itself has an error</td></tr>
+      <tr><td class="mono">502, 503</td><td>The proxy is up but the app behind it isn't answering</td></tr>
+    </table>
+    <p><b>How to type it:</b> a range <span class="mono">200-299</span>, a list
+      <span class="mono">200,301,302</span>, or both <span class="mono">200-299,401</span>. Numbers 100–599.</p>
+    <p><b>When to use it:</b> to be stricter, e.g. <span class="mono">200-299</span> so a login page or
+      redirect counts as down — or to allow a number that is normal for your app.</p>
+    <p class="settings-hint">Only used by the HTTP(S) check — TCP and Ping checks ignore it.</p>
+    <div class="modal-actions">
+      <button class="btn btn-primary" data-click="closeCodesHelp">Got it</button>
     </div>
   </div>
 </div>

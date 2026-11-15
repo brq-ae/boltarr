@@ -8,9 +8,11 @@ let allServices     = [];
 let allDependencies = [];
 let allVlans        = [];
 let hiddenSubnets   = new Set();
-let activeRunId     = null;
+let activeRunId     = null;   // the scan started here (its bar + Stop)
 let activeScanSubnet = null;   // subnet whose scan was started here (Subnets page shows Stop)
 let pollTimer       = null;
+let activeProbeRunId = null;   // a probe has its own bar, Stop and timer (F-34)
+let probePollTimer  = null;
 let sortCol         = "ip";
 let sortDir         = 1;
 let filterText      = "";
@@ -40,6 +42,23 @@ let expandedAliases   = new Set();
 const ACTIONS = Object.create(null);
 function registerActions(map) { Object.assign(ACTIONS, map); }
 function dargs(...a) { return escHtml(JSON.stringify(a)); }   // for data-args="…"
+
+// F-20: the name the network reports for a host, when it differs from the name
+// it was given (shown as a hover hint; "" when there's nothing different to show)
+function netNameHint(h) {
+  const n = (h && h.net_hostname) || "";
+  return n && n !== (h.hostname || "") ? n : "";
+}
+function netNameAttr(h) {
+  const n = netNameHint(h);
+  return n ? ` title="Network name: ${escHtml(n)}" class="has-net-name"` : "";
+}
+
+// A host's open ports on all its addresses; a second address's carry `addr` (F-24)
+function hostOpenPorts(h) {
+  return [...(h.ports || []).filter(p => p.state === "open"),
+          ...(h.alias_ports || []).filter(p => p.state === "open")];
+}
 for (const [type, attr] of [["click", "data-click"], ["change", "data-change"], ["input", "data-input"]]) {
   document.addEventListener(type, e => {
     const el = e.target.closest && e.target.closest(`[${attr}],[data-stop]`);
@@ -233,6 +252,13 @@ async function stopScan() {
   } catch (_) {}
 }
 
+async function stopProbe() {
+  if (!activeProbeRunId) return;
+  try {
+    await api("POST", `/api/scan/${activeProbeRunId}/cancel`);
+  } catch (_) {}
+}
+
 // Options for the per-host probe profile picker (excludes discovery-only "Quick").
 function _probeProfileOptions() {
   const usable = scanProfiles.filter(p => (p.options || {}).ports !== "none");
@@ -247,7 +273,6 @@ async function probeHost(ip) {
     const p = scanProfiles.find(x => String(x.id) === (sel ? sel.value : ""));
     const opts = p ? (p.options || {}) : {};
     const { run_id } = await api("POST", `/api/hosts/${ip}/probe`, opts);
-    activeRunId = run_id;
     showToast(`Probing ${ip}…`);
     startProbePolling(run_id, ip);
     loadScans();   // show the probe in Scan Log live (like a scan), not only when done
@@ -257,12 +282,24 @@ async function probeHost(ip) {
 }
 
 function startProbePolling(run_id, ip) {
-  clearInterval(pollTimer);
-  pollTimer = setInterval(async () => {
-    const job = await api("GET", `/api/scan/${run_id}/status`);
+  activeProbeRunId = run_id;
+  const overlay = document.getElementById("probeProgress");
+  document.getElementById("probeBar").style.width = "0%";
+  document.getElementById("probeLabel").textContent = `Probing ${ip}…`;
+  overlay.classList.add("visible");
+  clearInterval(probePollTimer);
+  probePollTimer = setInterval(async () => {
+    let job;
+    try { job = await api("GET", `/api/scan/${run_id}/status`); } catch { return; }
+    document.getElementById("probeBar").style.width = (job.status === "completed" ? 100 : 50) + "%";
+    document.getElementById("probeLabel").textContent =
+      job.status === "completed" ? `Probe of ${ip} done` :
+      job.status === "cancelled" ? "Probe stopped" :
+      job.status === "error"     ? "Probe failed: " + (job.error || job.note || "?") : `Probing ${ip}…`;
     if (["completed", "error", "cancelled"].includes(job.status)) {
-      clearInterval(pollTimer);
-      activeRunId = null;
+      clearInterval(probePollTimer);
+      if (activeProbeRunId === run_id) activeProbeRunId = null;
+      setTimeout(() => { if (!activeProbeRunId) overlay.classList.remove("visible"); }, 3000);
       if (job.status === "completed") {
         showToast(`Probe of ${ip} complete`);
         await loadHosts();
@@ -272,7 +309,8 @@ function startProbePolling(run_id, ip) {
         if (detail.classList.contains("open")) await showHostDetail(ip);
         await loadScans();
       } else if (job.status === "error") {
-        showToast("Probe failed: " + (job.error || "unknown error"));
+        showToast("Probe failed: " + (job.error || job.note || "unknown error"));
+        await loadScans();
       }
     }
   }, 1500);
@@ -283,15 +321,19 @@ function startPolling(subnetId) {
   overlay.classList.add("visible");
   clearInterval(pollTimer);
   pollTimer = setInterval(async () => {
-    const job = await api("GET", `/api/scan/${activeRunId}/status`);
+    const runId = activeRunId;
+    if (!runId) return;
+    let job;
+    try { job = await api("GET", `/api/scan/${runId}/status`); } catch { return; }
     const pct = job.progress || 0;
+    const probs = job.problems ? ` — ${job.problems} with problems` : "";
     document.getElementById("progressBar").style.width = pct + "%";
     document.getElementById("progressLabel").textContent =
       job.status === "discovering" ? "Discovering…" :
-      job.status === "scanning"    ? `Scanning ${pct}%` :
-      job.status === "completed"   ? `Done — ${job.total || 0} hosts` :
+      job.status === "scanning"    ? `Scanning ${pct}%${probs}` :
+      job.status === "completed"   ? `Done — ${job.total || 0} hosts${probs}` :
       job.status === "cancelled"   ? "Scan stopped" :
-      job.status === "error"       ? "Error: " + (job.error || "?") : job.status;
+      job.status === "error"       ? "Error: " + (job.error || job.note || "?") : job.status;
     const prog = document.getElementById(`subnet-prog-${subnetId}`);
     if (prog) prog.textContent = job.status === "scanning" ? `${pct}%` : "";
 
@@ -413,7 +455,7 @@ function toggleLegend() {
 
 
 registerActions({
-  openTopology, setTab, toggleSidebar, closeSidebar, toggleChat, toggleLegend, stopScan,
+  openTopology, setTab, toggleSidebar, closeSidebar, toggleChat, toggleLegend, stopScan, stopProbe,
   openAddSubnet, closeAddSubnet, saveSubnet, toggleSubnetVisibility,
   openEditSubnet, triggerScan, deleteSubnet,
   printPage: () => window.print(),

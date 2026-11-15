@@ -6,6 +6,7 @@ import pytest
 
 from backend import changes, llm, notify
 from backend.database import get_conn
+from conftest import fake_ntfy
 
 NET = "10.78.0"
 
@@ -29,8 +30,7 @@ def lab(client):
 @pytest.fixture
 def sent(monkeypatch):
     out = []
-    monkeypatch.setattr(notify, "send", lambda **kw: out.append(kw))
-    return out
+    return fake_ntfy(monkeypatch, out)
 
 
 def _ai(monkeypatch, reply=None, error=None):
@@ -111,7 +111,7 @@ def test_preview_sends_nothing_and_marks_nothing(client, lab, sent, monkeypatch)
     _reset_dhcp_flags()
     _ai(monkeypatch, reply="Demo summary.")
     for _ in range(2):   # twice: a real digest would report the warning only once
-        d = client.get("/api/digest/preview", params={"ai": 1, "model": "demo-model"}).json()
+        d = client.post("/api/digest/preview", json={"ai": True, "model": "demo-model"}).json()
         assert d["body"].startswith("🤖 AI summary\nDemo summary.") and "demo-nas" in d["body"]
         assert d["ai_error"] is None
     assert not sent
@@ -122,23 +122,23 @@ def test_preview_sends_nothing_and_marks_nothing(client, lab, sent, monkeypatch)
 def test_preview_reports_why_the_ai_was_left_out(client, lab, monkeypatch):
     _reset_dhcp_flags()
     _ai(monkeypatch, error=llm.LLMError("AI request failed (ollama): refused"))
-    d = client.get("/api/digest/preview", params={"ai": 1}).json()
+    d = client.post("/api/digest/preview", json={"ai": True}).json()
     assert "AI summary" not in d["body"] and "refused" in d["ai_error"]
 
 
 def test_default_model_used_and_clear_message_without_one(client, lab, monkeypatch):
     _reset_dhcp_flags()
     calls = _ai(monkeypatch, reply="Demo summary.")
-    client.get("/api/digest/preview", params={"ai": 1, "model": ""})
+    client.post("/api/digest/preview", json={"ai": True, "model": ""})
     assert calls[-1]["model"] == "demo-default"
     monkeypatch.setattr(llm, "get_default_model", lambda: "")
-    d = client.get("/api/digest/preview", params={"ai": 1, "model": ""}).json()
+    d = client.post("/api/digest/preview", json={"ai": True, "model": ""}).json()
     assert d["ai_error"].startswith("No AI model chosen")
 
 
 def test_preview_with_nothing_to_report(client, monkeypatch):
     monkeypatch.setattr(changes, "build_digest", lambda mark=True, services=None: None)
-    assert client.get("/api/digest/preview").json() == {"title": None, "body": None, "ai_error": None}
+    assert client.post("/api/digest/preview", json={}).json() == {"title": None, "body": None, "ai_error": None}
 
 
 @pytest.fixture
@@ -185,7 +185,21 @@ def test_services_tick_off_leaves_them_out(client, svc_outages, sent, monkeypatc
 
 
 def test_preview_follows_the_on_screen_services_tick(client, svc_outages):
-    on = client.get("/api/digest/preview", params={"services": 1}).json()
-    off = client.get("/api/digest/preview", params={"services": 0}).json()
+    on = client.post("/api/digest/preview", json={"services": True}).json()
+    off = client.post("/api/digest/preview", json={"services": False}).json()
     assert "Services\n" in on["body"]
     assert off["body"] is None or "Services\n" not in off["body"]
+
+
+def test_preview_with_ai_needs_boltarrs_own_request(client, monkeypatch):
+    """F-42: a link or image on another site (a plain GET, no X-Boltarr) can't
+    start an AI call; the GET form never asks the AI."""
+    from fastapi.testclient import TestClient
+    import backend.main as m
+    called = []
+    monkeypatch.setattr(changes, "compose_digest", lambda **kw: called.append(kw) or None)
+    client.get("/api/digest/preview", params={"ai": 1})
+    assert called[-1]["ai"] is False
+    bare = TestClient(m.app)                                   # no X-Boltarr header
+    assert bare.post("/api/digest/preview", json={"ai": True}).status_code == 403
+    assert len(called) == 1

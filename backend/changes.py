@@ -96,15 +96,23 @@ def top_ports(n: int) -> set[int]:
 
 
 def _parse_port_range(spec: str) -> set[int]:
+    """TCP ports in an nmap -p list: 22,80,8000-8100, open ends (-1024, 60000-)
+    and protocol parts (T:80,U:53 — U:/S:/P: parts aren't TCP) (F-42)."""
     out: set[int] = set()
+    proto = "T"
     for part in (spec or "").split(","):
-        part = part.strip()
+        part = part.strip().upper()
         if not part:
+            continue
+        if len(part) > 1 and part[1] == ":" and part[0] in "TUSP":
+            proto, part = part[0], part[2:].strip()
+        if proto != "T" or not part:
             continue
         try:
             if "-" in part:
                 a, b = part.split("-", 1)
-                out.update(range(int(a), int(b) + 1))
+                lo, hi = int(a or 1), int(b or 65535)
+                out.update(range(max(1, lo), min(65535, hi) + 1))
             else:
                 out.add(int(part))
         except ValueError:
@@ -149,7 +157,10 @@ def record_meta(conn, ip, existed, old_mac, new_mac, old_host, new_host, run_id=
         record(conn, ip, "hostname_changed", old=old_host, new=new_host, run_id=run_id)
 
 
-def record_ports(conn, ip, host_id, old_open: set[int], new_open: set[int], scanned: set[int] | None, run_id=None) -> None:
+def record_ports(conn, ip, host_id, old_open: set[int], new_open: set[int], scanned: set[int] | None,
+                 run_id=None, alias_id=None) -> None:
+    """old_open/new_open are one address's ports: a host's main address, or its
+    second address when alias_id is given (F-24: never compared with each other)."""
     if not _cfg().get("enabled"):
         return
     for p in sorted(new_open - old_open):
@@ -159,7 +170,20 @@ def record_ports(conn, ip, host_id, old_open: set[int], new_open: set[int], scan
         record(conn, ip, "port_closed", port=p, run_id=run_id)
         # mark it closed in the DB so it's not re-detected next scan and the
         # host's port list stays accurate
-        conn.execute("UPDATE ports SET state='closed' WHERE host_id=? AND port=? AND protocol='tcp'", (host_id, p))
+        if alias_id:
+            conn.execute("UPDATE alias_ports SET state='closed' WHERE alias_id=? AND port=? AND protocol='tcp'",
+                         (alias_id, p))
+        else:
+            conn.execute("UPDATE ports SET state='closed' WHERE host_id=? AND port=? AND protocol='tcp'", (host_id, p))
+
+
+def note_new_host_ports(conn, ip, open_ports: set[int], run_id=None) -> None:
+    """A brand-new device: its open ports go on its one 'new device' event
+    instead of a 'port opened' event each (F-42)."""
+    if not open_ports or not _cfg().get("enabled"):
+        return
+    conn.execute("UPDATE change_events SET new_value=? WHERE ip=? AND type='host_new' AND run_id IS ?",
+                 (",".join(str(p) for p in sorted(open_ports)), ip, run_id))
 
 
 def prune(retention_days: int | None = None) -> None:
@@ -223,6 +247,10 @@ def _label_key(ev: dict) -> str:
     (the schema stores no per-event MAC), so a reused dynamic IP collapses together
     — the shown MAC is whatever currently holds that IP."""
     t = ev["type"]
+    if t == "host_new" and ev.get("new_value"):       # new device with its ports (F-42)
+        ports = ev["new_value"].split(",")
+        more = f" +{len(ports) - 6}" if len(ports) > 6 else ""
+        return f"{ev['ip']} (ports {', '.join(ports[:6])}{more})"
     return f"{ev['ip']}:{ev['port']}" if t in ("port_opened", "port_closed") and ev.get("port") is not None else ev["ip"]
 
 
@@ -347,17 +375,14 @@ def send_scan_summary(run_id: int, target_label: str = "") -> None:
     notify.send(title=title, message=summarize(worthy, mac_map=mac_map), tags=["satellite_antenna"])
 
 
-def alert_transition(conn, ip: str, event_type: str) -> None:
-    """Immediate ntfy alert for a single offline/online transition (quiet-hours-aware)."""
+def alert_transition(conn, ip: str, event_type: str) -> str:
+    """Immediate ntfy alert for a single offline/online transition. Returns 'sent',
+    'queued' (quiet hours, or ntfy failed: it goes out later in the held-alerts
+    summary), 'off' (notifications off) or 'skipped' (not alert-worthy).
+    F-17: quiet hours no longer drop it."""
     subnets = [dict(s) for s in conn.execute("SELECT cidr, dhcp_start, dhcp_end FROM subnets")]
     if not is_alert_worthy(conn, {"type": event_type, "ip": ip}, subnets):
-        return
-    try:
-        from .monitor import in_quiet_window
-        if in_quiet_window(local_now().time()):
-            return
-    except Exception:
-        pass
+        return "skipped"
     icon, sing, _ = _LABEL.get(event_type, ("•", event_type, ""))
     host = conn.execute("SELECT hostname, mac FROM hosts WHERE ip=?", (ip,)).fetchone()
     label = ip + (f" ({host['hostname']})" if host and host["hostname"] else "")
@@ -366,14 +391,25 @@ def alert_transition(conn, ip: str, event_type: str) -> None:
                             "ON a.host_id = h.id WHERE a.ip=?", (ip,)).fetchone()
         if host:
             label = f"{ip} (alias of {host['hostname'] or host['ip']})"
+    from . import monitor          # monitor imports changes; import here, not at the top
+    if not notify.is_on():
+        return "off"
+    line = f"{icon} {label} {sing}"
+    if monitor.in_quiet_window(local_now().time()):
+        monitor.queue_alert(line, "quiet")
+        return "queued"
     message = f"{label} {sing}."
     # Optionally attach the MAC — a roaming device keeps its MAC across IPs/APs.
     if get_change_alerts_config().get("include_mac") and host and host["mac"]:
         message += f"\nMAC: {host['mac']}"
-    notify.send(title=f"{label} {sing}",
-                message=message,
-                priority="high" if event_type == "host_offline" else "default",
-                tags=["red_circle"] if event_type == "host_offline" else ["green_circle"])
+    res = notify.deliver(title=f"{label} {sing}",
+                         message=message,
+                         priority="high" if event_type == "host_offline" else "default",
+                         tags=["red_circle"] if event_type == "host_offline" else ["green_circle"])
+    if res == "failed":
+        monitor.queue_alert(line, "failed")
+        return "queued"
+    return res
 
 
 def service_lines() -> list[str]:
@@ -448,7 +484,8 @@ _DIGEST_AI_SYSTEM = (
 
 
 def _clean_ai_text(text: str) -> str:
-    text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.S)   # reasoning models
+    from .llm import strip_thinking
+    text = strip_thinking(text or "")                                   # reasoning models (also unclosed)
     text = " ".join(text.replace("*", "").split())
     return text[:600].strip()
 
@@ -501,21 +538,36 @@ def compose_digest(mark: bool = True, ai: bool | None = None, model: str | None 
     return {"title": title, "body": body, "ai_error": ai_error, "summary": summary, "model": model}
 
 
-def send_digest() -> None:
-    """Daily digest: alert-worthy changes from the last 24h (+ AI summary if on)."""
-    d = compose_digest()
-    if d:
-        notify.send(title=d["title"], message=d["body"], tags=["sunrise"])
-        if d["summary"]:          # keep it for "Past digests" (AI history)
-            try:
-                from . import ai_history
-                ai_history.save_digest(d["title"], d["body"], d["summary"], d["model"])
-            except Exception as e:
-                print(f"[digest] could not save to AI history: {e}")
+def send_digest(d: dict | None = None) -> str | None:
+    """Daily digest: alert-worthy changes from the last 24h (+ AI summary if on).
+    Returns the deliver() result ('sent' | 'off' | 'failed'), None = nothing to send."""
+    d = d if d is not None else compose_digest()
+    if not d:
+        return None
+    res = notify.deliver(title=d["title"], message=d["body"], tags=["sunrise"])
+    if res == "sent" and d["summary"]:          # keep it for "Past digests" (AI history)
+        try:
+            from . import ai_history
+            ai_history.save_digest(d["title"], d["body"], d["summary"], d["model"])
+        except Exception as e:
+            print(f"[digest] could not save to AI history: {e}")
+    return res
+
+
+# F-27: today's digest, composed once (the AI summary and the DHCP "reported" marks
+# happen only once) and re-sent each minute until ntfy takes it, for the rest of the day.
+_pending_digest: dict = {}
+
+
+def _mark_digest_sent(today: str) -> None:
+    cfg = get_config()
+    cfg.setdefault("change_alerts", {})["last_digest"] = today
+    save_config(cfg)
 
 
 def maybe_send_digest() -> None:
-    """Called periodically; sends the digest once per local day, past digest_time."""
+    """Called periodically; sends the digest once per local day, past digest_time.
+    Marked as sent only once it really went out (or there was nothing to send)."""
     a = get_change_alerts_config()
     if not a.get("enabled") or not a.get("digest_enabled"):
         return
@@ -528,8 +580,15 @@ def maybe_send_digest() -> None:
     today = now_local.strftime("%Y-%m-%d")
     if now_local.time() < target or (a.get("last_digest") or "") == today:
         return
-    # mark first (avoid double-send), then send
-    cfg = get_config()
-    cfg.setdefault("change_alerts", {})["last_digest"] = today
-    save_config(cfg)
-    send_digest()
+    if _pending_digest.get("day") != today:
+        _pending_digest.clear()
+        _pending_digest.update(day=today, digest=compose_digest(), tries=0)
+    d = _pending_digest["digest"]
+    res = send_digest(d) if d else None
+    _pending_digest["tries"] += 1
+    if res == "failed":
+        if _pending_digest["tries"] == 1:
+            print("[digest] could not be sent; trying again every minute today")
+        return
+    _mark_digest_sent(today)
+    _pending_digest.clear()

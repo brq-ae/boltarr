@@ -76,10 +76,14 @@ function _aiCardHtml(card, msgIndex) {
   const id = ++aiCardSeq;
   AI_CARDS[id] = { card, msgIndex };
   const detail = (card.detail || []).map(([k, v]) =>
-    `<div class="ai-action-row"><span class="text-3">${escHtml(k)}</span><span>${escHtml(v)}</span></div>`).join("");
+    `<div class="ai-action-row"><span class="text-3">${escHtml(k)}</span><span class="ai-action-val">${escHtml(v)}</span></div>`).join("");
+  // F-33: a note card on a host that has a note offers "Add to note" / "Replace note"
+  const doBtns = (card.choices || []).length
+    ? card.choices.map((c, i) => `<button class="btn${i ? "" : " btn-primary"}" data-click="aiActionDo" data-args="${dargs(id, c.mode)}">${escHtml(c.label)}</button>`).join("")
+    : `<button class="btn btn-primary" data-click="aiActionDo" data-args="${dargs(id)}">Do it</button>`;
   const btns = card.kind === "open"
     ? `<button class="btn" data-click="aiActionDo" data-args="${dargs(id)}">Open</button>`
-    : `<button class="btn btn-primary" data-click="aiActionDo" data-args="${dargs(id)}">Do it</button>
+    : `${doBtns}
        <button class="btn" data-click="aiActionCancel" data-args="${dargs(id)}">Cancel</button>`;
   return `<div class="ai-action" id="aiCard-${id}">
       <div class="ai-action-title">${_AI_ICONS[card.action.do] || "▶"} ${escHtml(card.title)}</div>
@@ -103,18 +107,29 @@ function _aiNoteResult(msgIndex, text) {
   if (m) m.content += `\n\n[Result: ${text}]`;
 }
 
-async function aiActionDo(id) {
+// F-31: the buttons go grey the moment one is clicked, so a double click can't
+// do a change twice (or start two scans)
+function _aiCardBusy(id, on) {
+  document.querySelectorAll(`#aiCard-${id} .ai-action-btns button`).forEach(b => { b.disabled = on; });
+  if (AI_CARDS[id]) AI_CARDS[id].busy = on;
+}
+
+async function aiActionDo(id, mode) {
   const entry = AI_CARDS[id];
-  if (!entry) return;
+  if (!entry || entry.busy || entry.done) return;
   const { card, msgIndex } = entry;
   if (card.kind === "open") {
     await aiOpenTarget(card.target);
     _aiCardStatus(id, "Opened");
     return;
   }
+  _aiCardBusy(id, true);
   _aiCardStatus(id, "Working…");
   try {
-    const r = await api("POST", "/api/ai-actions/run", _aiRecordBody(card, msgIndex));
+    const body = _aiRecordBody(card, msgIndex);
+    if (mode) body.action = { ...body.action, mode };       // which button: add / replace
+    const r = await api("POST", "/api/ai-actions/run", body);
+    entry.done = true;
     if (r.ok) {
       _aiCardStatus(id, "✓ " + r.message, "ai-action-ok", true);
       _aiNoteResult(msgIndex, `the user clicked Do it. ${r.message}`);
@@ -126,6 +141,7 @@ async function aiActionDo(id) {
     }
   } catch (e) {
     _aiCardStatus(id, "✕ " + e.message, "ai-action-fail");
+    _aiCardBusy(id, false);                 // the request never got through: it may be tried again
   }
 }
 
@@ -137,7 +153,6 @@ async function _aiAfterChange(kind, r) {
     startPolling(r.subnet_id);     // progress bar; reloads hosts when done
     loadScans();
   } else if (kind === "probe") {
-    activeRunId = r.run_id;
     startProbePolling(r.run_id, r.ip);
     loadScans();
   } else if (kind === "pause_monitor" || kind === "resume_monitor") {
@@ -158,7 +173,8 @@ function aiOpenScans() { setTab("scans"); setScanTab("history"); }
 
 function aiActionCancel(id) {
   const entry = AI_CARDS[id];
-  if (!entry) return;
+  if (!entry || entry.busy || entry.done) return;
+  entry.done = true;
   _aiCardStatus(id, "Cancelled — nothing was changed.", "", true);
   _aiNoteResult(entry.msgIndex, `the user cancelled "${entry.card.title}".`);
   api("POST", "/api/ai-actions/cancel", _aiRecordBody(entry.card, entry.msgIndex)).catch(() => {});   // only recorded
@@ -172,9 +188,9 @@ function _aiRecordBody(card, msgIndex) {
 }
 
 // Show a host or service panel; with explain, open its latest outage's explanation
-let aiAutoExplain = null;
+let aiAutoExplain = null;        // {kind, key}: the panel whose outage to explain once it loads
 async function aiOpenTarget(t) {
-  aiAutoExplain = t.explain ? t.type : null;
+  aiAutoExplain = t.explain ? { kind: t.type, key: t.type === "host" ? t.ip : t.id } : null;
   if (t.type === "host") {
     if (t.explain) activeDetailTab = "info";      // uptime + outages live on the Info tab
     await showHostDetail(t.ip);
@@ -184,10 +200,14 @@ async function aiOpenTarget(t) {
   }
 }
 
-// Called by the uptime loaders once the outage list is on screen
-function maybeAutoExplain(kind, el) {
-  if (aiAutoExplain !== kind) return;
+// Called by the uptime loaders once the outage list is on screen — or with no
+// el when loading failed. Either way the request is used up, so it can't fire
+// later on some other panel (F-42).
+function maybeAutoExplain(kind, el, key) {
+  if (!aiAutoExplain || aiAutoExplain.kind !== kind) return;
+  const want = aiAutoExplain.key;
   aiAutoExplain = null;
+  if (!el || (key !== undefined && String(key) !== String(want))) return;
   const btn = el.querySelector(".outage-explain");
   if (btn) { btn.click(); btn.scrollIntoView({ block: "center", behavior: "smooth" }); }
 }

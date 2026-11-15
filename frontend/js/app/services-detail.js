@@ -308,6 +308,7 @@ function showSvcDetail(id, fresh = false) {
   urlEl.dataset.auto = svcAutoUrlIp(s.url, [s.container_ip, s.ip], s.port) ? s.url : "";
   document.getElementById("svcDetailContainerIp").value = s.container_ip || "";
   document.getElementById("svcDetailCheckType").value   = s.check_type || (s.url ? "http" : "tcp");
+  document.getElementById("svcDetailCodes").value       = s.accepted_codes || "";
   svcDetailCheckChanged();
   document.getElementById("svcDetailDesc").value        = s.description || "";
 
@@ -318,16 +319,13 @@ function showSvcDetail(id, fresh = false) {
   updateSvcDetailUrlBtn();
   renderSvcDetailDeps(id);
 
-  document.getElementById("svcDetailMonitored").checked = !!s.monitored;
-  setSvcDetailMonDot(s.monitored ? (s.monitor_status || "unknown") : "off");
-  if (!s.monitored && s.monitor_resume_at)      // a timed pause (AI action)
-    document.getElementById("svcDetailMonitorText").textContent = "paused until " + fmtLocal(s.monitor_resume_at);
+  setSvcDetailMonState(s);
 
   document.getElementById("svcDetailPublic").checked = !!s.public;
   document.getElementById("svcDetailPublicName").value = s.public_name || "";
   document.getElementById("svcDetailPublicNameRow").style.display = s.public ? "" : "none";
 
-  loadSvcUptime(id, !!s.monitored);
+  loadSvcUptime(id, !!s.monitored || svcPaused(s));
 
   document.getElementById("svcDetailPanel").classList.add("open");
   makeDesktopResizable(document.getElementById("svcDetailPanel"), "svc");
@@ -347,7 +345,7 @@ function _fmtDur(sec) {
 async function loadSvcUptime(id, monitored) {
   const wrap = document.getElementById("svcDetailUptimeWrap");
   const el   = document.getElementById("svcDetailUptime");
-  if (!monitored) { wrap.style.display = "none"; return; }
+  if (!monitored) { wrap.style.display = "none"; maybeAutoExplain("service", null); return; }
   wrap.style.display = "";
   el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">Loading…</span>`;
   try {
@@ -359,9 +357,10 @@ async function loadSvcUptime(id, monitored) {
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     const outages = outageListHtml("service", id, d.outages);
     el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetSvcUptime" data-args="[${id}]">↺ Reset uptime</button></div>`;
-    maybeAutoExplain("service", el);
+    maybeAutoExplain("service", el, id);
   } catch (e) {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
+    maybeAutoExplain("service", null);
   }
 }
 
@@ -381,20 +380,46 @@ async function resetAllUptime() {
   catch (e) { alert("Error: " + (e.message || e)); }
 }
 
+// The panel's monitor row from the service: tick box, dot + label, Pause button.
+function setSvcDetailMonState(s) {
+  document.getElementById("svcDetailMonitored").checked = !!s.monitored;
+  document.getElementById("svcDetailPauseBtn").hidden = !s.monitored;
+  const sw = document.getElementById("svcDetailMonSwitch");
+  sw.classList.toggle("paused", svcPaused(s));
+  sw.classList.toggle("maint", svcPaused(s) && !!s.monitor_pause_reason);
+  if (svcPaused(s)) {
+    setSvcDetailMonDot("off");
+    document.getElementById("svcDetailMonitorDot").className = "mon-dot mon-paused" + (s.monitor_pause_reason ? " maint" : "");
+    document.getElementById("svcDetailMonitorText").textContent = svcPauseText(s);
+  } else if (s.monitored && s.monitor_not_set_up) {
+    setSvcDetailMonDot("unknown");
+    document.getElementById("svcDetailMonitorDot").classList.remove("checking");
+    document.getElementById("svcDetailMonitorText").textContent = "not set up — add a web address or port";
+  } else {
+    setSvcDetailMonDot(s.monitored ? (s.monitor_status || "unknown") : "off");
+  }
+}
+
+function svcDetailPause() {
+  if (svcDetailId) openPauseModal(svcDetailId);
+}
+
 // Paint the monitor dot + label in the detail panel. status: up|down|unknown|off|checking
 function setSvcDetailMonDot(status) {
   const dot  = document.getElementById("svcDetailMonitorDot");
   const text = document.getElementById("svcDetailMonitorText");
   if (!dot || !text) return;
-  const label = { up: "up", down: "down", unknown: "checking…", checking: "checking…", off: "off" }[status] || "off";
+  const label = { up: "up", down: "down", unknown: "checking…", checking: "checking…", off: "monitoring off" }[status] || "monitoring off";
   const cls   = status === "up" ? "mon-up" : status === "down" ? "mon-down" : "mon-unknown";
   dot.className  = "mon-dot " + cls + (status === "checking" || status === "unknown" ? " checking" : "");
   text.textContent = label;
 }
 
+// The panel's Public switch saves at once, like the table's (the name saves with Save).
 function toggleSvcPublicName() {
   const on = document.getElementById("svcDetailPublic").checked;
   document.getElementById("svcDetailPublicNameRow").style.display = on ? "" : "none";
+  if (svcDetailId) svcSetPublic(svcDetailId, on);
 }
 
 // Saves the public toggle + public name via the dedicated endpoint (never
@@ -412,20 +437,11 @@ async function saveSvcPublic() {
 async function toggleSvcMonitor() {
   if (!svcDetailId) return;
   const on = document.getElementById("svcDetailMonitored").checked;
-  setSvcDetailMonDot(on ? "checking" : "off");
-  try {
-    // Dedicated endpoint — only touches the `monitored` flag, never other fields
-    const r = await api("POST", `/api/services/${svcDetailId}/monitor`, { enabled: on });
-    allServices = allServices.map(s => s.id === svcDetailId
-      ? { ...s, monitored: on ? 1 : 0, monitor_status: r.monitor_status, monitor_resume_at: null } : s);
-    setSvcDetailMonDot(on ? (r.monitor_status || "unknown") : "off");
-    loadSvcUptime(svcDetailId, on);
-    renderServicesTable();
-  } catch (e) {
-    alert("Error: " + e.message);
-    document.getElementById("svcDetailMonitored").checked = !on;
-    setSvcDetailMonDot(!on ? "unknown" : "off");
+  if (!on) {                                   // sliding off asks, like the table: pause or turn off
+    document.getElementById("svcDetailMonitored").checked = true;
+    return openPauseModal(svcDetailId);
   }
+  return svcMonitorOn(svcDetailId);            // same path as the table switch
 }
 
 function hideSvcDetail() {
@@ -463,10 +479,11 @@ async function saveSvcDetail() {
   const checkType   = document.getElementById("svcDetailCheckType").value;
   const containerIp = document.getElementById("svcDetailContainerIp").value.trim();
   const hostIp      = document.getElementById("svcDetailHost").value;
+  const codes       = document.getElementById("svcDetailCodes").value.trim();
   try {
     const svc = await api("PUT", `/api/services/${svcDetailId}`, {
       name, port, protocol: proto, url, description: desc, status: svcDetailStatus,
-      check_type: checkType, container_ip: containerIp, host_ip: hostIp,
+      check_type: checkType, container_ip: containerIp, host_ip: hostIp, accepted_codes: codes || null,
     });
     await saveSvcPublic();   // public toggle + public name (dedicated, safe endpoint)
     allServices = allServices.map(s => s.id === svcDetailId ? { ...s, ...svc } : s);
@@ -660,6 +677,7 @@ registerActions({
   cycleSvcDetailStatus, toggleSvcMonitor, toggleSvcPublicName, updateSvcDetailUrlBtn,
   openBulkAddContainers, bulkSelectAll, bulkAddContainers, toggleBulkChip,
   addSvcDep, removeSvcDep, closeDepsModal, toggleLinkHostsForm, saveHostLink, deleteSelectedHostLink,
+  svcDetailPause,
   editSvcDetail: () => openEditService(svcDetailId),
   closeBulkAdd:  () => document.getElementById("bulkAddModal").classList.remove("open"),
 });

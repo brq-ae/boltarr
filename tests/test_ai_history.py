@@ -7,6 +7,7 @@ import pytest
 
 from backend import ai_history, changes, llm, notify
 from backend.database import get_conn
+from conftest import fake_ntfy
 
 NET = "10.77.0"
 
@@ -142,14 +143,14 @@ def test_clean_history_deletes_everything(client, lab):
 
 def test_digest_summary_is_saved_for_past_digests(client, lab, monkeypatch):
     sent = []
-    monkeypatch.setattr(notify, "send", lambda **kw: sent.append(kw))
+    fake_ntfy(monkeypatch, sent)
     monkeypatch.setattr(changes, "build_digest", lambda mark=True, services=None: ("Daily digest: demo", "Services\n🟢 Demo Web"))
     monkeypatch.setattr(changes, "get_change_alerts_config", lambda: {"enabled": True, "digest_ai": True})
     changes.send_digest()
     d = client.get("/api/digest/history").json()["digests"]
     assert len(sent) == 1 and len(d) == 1
     assert d[0]["title"] == "Daily digest: demo" and d[0]["summary"] == "Demo answer 1." and d[0]["model"] == "demo-default"
-    assert client.get("/api/digest/preview", params={"ai": 1}).json()["body"]   # preview is not saved
+    assert client.post("/api/digest/preview", json={"ai": True}).json()["body"]   # preview is not saved
     assert len(client.get("/api/digest/history").json()["digests"]) == 1
     _set(client, enabled=False)
     changes.send_digest()

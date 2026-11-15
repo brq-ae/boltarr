@@ -1,6 +1,8 @@
 """F-10: alias IPs are pinged on their own and keep their own last-seen."""
+import ipaddress
 from backend import liveness
 from backend.database import get_conn
+from conftest import fake_ntfy
 
 
 def _setup(client, main, alias):
@@ -17,7 +19,7 @@ def _alias(ip):
 
 def _sweep(monkeypatch, live):
     monkeypatch.setattr(liveness, "get_liveness_config", lambda: {"enabled": True, "offline_after": 2})
-    monkeypatch.setattr(liveness, "_sweep_live_ips", lambda: set(live))
+    monkeypatch.setattr(liveness, "_sweep_live_ips", lambda: (set(live), [ipaddress.ip_network("0.0.0.0/0")]))
     liveness.sweep_once()
 
 
@@ -57,7 +59,7 @@ def _alerts_setup(client, monkeypatch, main, alias, cidr):
     client.put(f"/api/hosts/{main}", json={"hostname": "nas"})
     sent = []
     from backend import changes
-    monkeypatch.setattr(changes.notify, "send", lambda **kw: sent.append(kw))
+    fake_ntfy(monkeypatch, sent)
     return sent
 
 

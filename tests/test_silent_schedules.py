@@ -4,6 +4,7 @@ import pytest
 
 from backend import changes
 from backend.database import get_conn
+from conftest import fake_ntfy
 
 SCHED = {"name": "Night deep scan", "timing_type": "interval", "interval_hours": 24}
 
@@ -11,7 +12,7 @@ SCHED = {"name": "Night deep scan", "timing_type": "interval", "interval_hours":
 @pytest.fixture
 def sent(monkeypatch):
     out = []
-    monkeypatch.setattr(changes.notify, "send", lambda **kw: out.append(kw))
+    fake_ntfy(monkeypatch, out)
     monkeypatch.setattr(changes, "get_change_alerts_config",
                         lambda: {"enabled": True, "on_scan": True, "digest_enabled": True})
     monkeypatch.setattr(changes, "is_alert_worthy", lambda conn, e, subnets: True)

@@ -8,17 +8,42 @@ _DATA_DIR = Path(os.environ.get("BOLTARR_DATA_DIR") or (Path(__file__).parent.pa
 DB_PATH = _DATA_DIR / "boltarr.db"
 
 
-def get_conn():
-    DB_PATH.parent.mkdir(exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+def get_conn(path=None):
+    path = Path(path) if path else DB_PATH
+    path.parent.mkdir(exist_ok=True)
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
-def init_db():
-    with get_conn() as conn:
+class MigrationError(RuntimeError):
+    """A database upgrade step failed for a reason other than "already done" (F-37)."""
+
+
+# The only errors an upgrade step may skip: the column/table/index is already there.
+_ALREADY_DONE = ("duplicate column name", "already exists")
+
+
+def _migrate(conn, sql: str) -> bool:
+    """Run one upgrade step. True = it ran now, False = it was already done."""
+    try:
+        conn.execute(sql)
+        conn.commit()
+        return True
+    except sqlite3.OperationalError as e:
+        if any(m in str(e).lower() for m in _ALREADY_DONE):
+            return False
+        first = " ".join(sql.split())[:90]
+        raise MigrationError(f"Boltarr couldn't upgrade its database: {e} (step: {first}). "
+                             "Nothing after this step was changed — restore a backup or report this.") from e
+
+
+def init_db(path=None):
+    """Create/upgrade the schema (idempotent, additive only). path = another DB
+    file (a backup being checked before restore); default = the live DB."""
+    with get_conn(path) as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS subnets (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -310,12 +335,66 @@ def init_db():
                 model      TEXT,
                 created_at TEXT DEFAULT (datetime('now'))
             )""",
+            # v0.27.0 (F-17): 1 = this host's "went offline" alert really went out
+            # (or is waiting in alert_queue), so its services' down-alerts may be held.
+            "ALTER TABLE hosts ADD COLUMN offline_alerted INTEGER NOT NULL DEFAULT 0",
+            # v0.27.0 (F-28): a pause (not "monitoring off"): when it started and the
+            # optional reason, which the status page shows as Maintenance.
+            "ALTER TABLE services ADD COLUMN monitor_paused_at TEXT",
+            "ALTER TABLE services ADD COLUMN monitor_pause_reason TEXT",
+            # v0.27.0 (F-29): HTTP replies that count as up, e.g. "200-299" or "200,404";
+            # NULL = any reply below 500.
+            "ALTER TABLE services ADD COLUMN accepted_codes TEXT",
+            # v0.27.0 (F-17/F-27): alerts held back by quiet hours or a failed send,
+            # sent later as one summary. reason = 'quiet' | 'failed'.
+            """CREATE TABLE IF NOT EXISTS alert_queue (
+                id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts     TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                line   TEXT NOT NULL
+            )""",
+            # v0.27.0 (F-34): hosts a scan couldn't finish, as JSON [{ip, error}]
+            # (the run still completes: "completed with problems").
+            "ALTER TABLE scan_runs ADD COLUMN problems TEXT",
+            # v0.27.0 (F-24): a host's second address keeps its own ports, so the
+            # two addresses are never compared with each other. ports_tracked = 1
+            # once this address has been scanned on its own (the first look is
+            # the baseline, not "ports opened").
+            """CREATE TABLE IF NOT EXISTS alias_ports (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                alias_id INTEGER NOT NULL REFERENCES host_aliases(id) ON DELETE CASCADE,
+                port     INTEGER NOT NULL,
+                protocol TEXT NOT NULL DEFAULT 'tcp',
+                state    TEXT,
+                service  TEXT,
+                version  TEXT,
+                UNIQUE(alias_id, port, protocol)
+            )""",
+            "ALTER TABLE host_aliases ADD COLUMN ports_tracked INTEGER NOT NULL DEFAULT 0",
+            # v0.27.0 (F-42): indexes for the lookups that scan the whole table
+            "CREATE INDEX IF NOT EXISTS idx_scan_runs_started ON scan_runs(started_at)",
+            "CREATE INDEX IF NOT EXISTS idx_scan_runs_subnet_status ON scan_runs(subnet_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_change_events_run ON change_events(run_id)",
+            "CREATE INDEX IF NOT EXISTS idx_services_host ON services(host_id)",
+            "CREATE INDEX IF NOT EXISTS idx_host_aliases_host ON host_aliases(host_id)",
+            # v0.27.0 (F-20): a name / vendor / OS you set stays — scans keep what the
+            # network reports in net_* (shown as a hover hint) and only fill fields you
+            # haven't set. Names already in Boltarr count as yours (left as they are).
+            ("ALTER TABLE hosts ADD COLUMN hostname_set INTEGER NOT NULL DEFAULT 0",
+             "UPDATE hosts SET hostname_set=1 WHERE hostname IS NOT NULL AND hostname != ''"),
+            "ALTER TABLE hosts ADD COLUMN net_hostname TEXT",
+            ("ALTER TABLE hosts ADD COLUMN vendor_set INTEGER NOT NULL DEFAULT 0",
+             "UPDATE hosts SET vendor_set=1 WHERE source='manual' AND vendor IS NOT NULL AND vendor != ''"),
+            "ALTER TABLE hosts ADD COLUMN net_vendor TEXT",
+            ("ALTER TABLE hosts ADD COLUMN os_set INTEGER NOT NULL DEFAULT 0",
+             "UPDATE hosts SET os_set=1 WHERE source='manual' AND os_guess IS NOT NULL AND os_guess != ''"),
+            "ALTER TABLE hosts ADD COLUMN net_os TEXT",
         ]:
-            try:
-                conn.execute(sql)
-                conn.commit()
-            except Exception:
-                pass
+            if isinstance(sql, tuple):            # (step, one-time follow-up when the step ran now)
+                if _migrate(conn, sql[0]):
+                    _migrate(conn, sql[1])
+            else:
+                _migrate(conn, sql)
 
         # Seed built-in scan profiles (idempotent).
         import json as _json

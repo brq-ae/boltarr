@@ -61,6 +61,9 @@ _DEFAULTS: dict = {
         "enabled": False,
         "url": "",            # base URL of the status app, e.g. http://192.168.1.20:12102
         "token": "",          # shared secret; sent as Bearer on /push
+        # Minutes without an update before the status page shows "may be out of
+        # date" (F-27). Sent with every push.
+        "stale_minutes": 5,
     },
     # Host liveness (ping tier): an nmap -sn sweep every interval to detect
     # online/offline of known hosts.
