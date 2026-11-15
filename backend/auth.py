@@ -35,7 +35,7 @@ MIN_PASSWORD = 8
 OPEN_PATHS = {"/login.html", "/js/login.js", "/js/peek.js", "/css/style.css", "/api/version",
               "/api/auth/status", "/api/auth/login", "/api/auth/setup", "/api/auth/skip-setup",
               "/api/auth/logout", "/api/csp-report"}
-OPEN_PREFIXES = ("/img/", "/vendor/")
+OPEN_PREFIXES = ("/img/", "/vendor/", "/api/deploy-keys/")   # deploy-keys: a one-time link checks itself
 
 
 def _b64(b: bytes) -> str:

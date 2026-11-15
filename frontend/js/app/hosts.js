@@ -538,7 +538,7 @@ async function loadIpHistory(refreshSubnets = false, pickSubnet = null) {
     const prev = sel.value;
     const subnets = await api("GET", "/api/subnets");
     if (!subnets.length) {
-      document.getElementById("iphNote").textContent = "No subnets yet — add one in Settings → Subnets.";
+      document.getElementById("iphNote").textContent = "No subnets yet — add one on the Subnets page.";
       return;
     }
     sel.innerHTML = subnets.map(s =>
@@ -614,7 +614,7 @@ function renderIpHistory() {
   const notes = [];
   notes.push(data.has_pool
     ? `Static range = ${escHtml(s.cidr)} outside the DHCP pool ${escHtml(s.dhcp_start)}–${escHtml(s.dhcp_end)}.`
-    : `No DHCP pool set for this subnet, so every IP is shown. Set the pool in Settings → Subnets to limit this to the static range.`);
+    : `No DHCP pool set for this subnet, so every IP is shown. Set the pool on the Subnets page (edit the subnet) to limit this to the static range.`);
   notes.push(`Stale after ${data.stale_days} days, gone after ${data.gone_days} (Settings → IP History).`);
   if (data.tracking_since) notes.push(`Tracking since ${escHtml(fmtLocal(data.tracking_since))} — "never seen" means not since then.`);
   if (_iphStatus === "all" && c.never) notes.push(`${c.never} never-seen IPs hidden — pick "Never seen" to list them.`);

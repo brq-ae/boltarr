@@ -2449,3 +2449,6 @@ label.mon-switch { position: relative; }
 .ctx-info { flex-basis: 100%; margin: 2px 0 0; font-size: 11px; color: var(--text-3); line-height: 1.45; }
 .ctx-info b { color: var(--text-2); }
 .ctx-info.ctx-warn { color: var(--yellow); }
+/* SSH: the deploy command, shown when the browser won't copy it */
+.ssh-cmd-box { width: 100%; margin: 0 0 6px; font-size: 10px; resize: vertical; background: var(--surface2);
+  color: var(--text-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; }

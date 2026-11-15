@@ -579,10 +579,14 @@ async function deleteSchedule(id) {
 async function runScheduleNow(id) {
   try {
     const r = await api("POST", `/api/scan-schedules/${id}/run`);
-    const started = (r.started || []).length, skipped = (r.skipped || []).length;
-    showToast(started ? `Started ${started} scan${started > 1 ? "s" : ""}${skipped ? `, ${skipped} skipped` : ""} — see Scan Log`
-                      : (skipped ? `Skipped ${skipped} (already running or no matching hosts)` : "Nothing to run"));
-    if (started) {
+    const started = (r.started || []).length, queued = (r.queued || []).length, skipped = (r.skipped || []).length;
+    const plural = n => n > 1 ? "s" : "";
+    const parts = [];
+    if (started) parts.push(`Started ${started} scan${plural(started)}`);
+    if (queued)  parts.push(started ? `${queued} waiting in line` : `Queued ${queued} scan${plural(queued)}: waiting for the running scan to finish`);
+    if (skipped) parts.push(`${skipped} skipped (already running or no matching hosts)`);
+    showToast(parts.length ? parts.join(", ") + (started || queued ? " — see Scan Log" : "") : "Nothing to run");
+    if (started || queued) {
       setScanTab("history");     // jump to Scan Log so progress is visible
       await loadScans();
     } else {

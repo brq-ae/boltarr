@@ -2,6 +2,9 @@ import os
 import hashlib
 import re
 import uuid
+import secrets
+import threading
+import time
 import io
 import json
 import ipaddress
@@ -1095,6 +1098,44 @@ def get_authorized_keys(ip: str, user: str = "root"):
     lines = [_CTRL_RE.sub(" ", f"{r['public_key']} {r['name']}") for r in rows]
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse("\n".join(lines) + ("\n" if lines else ""))
+
+
+# One-time deploy links: the copied SSH deploy command runs on another machine,
+# which has no Boltarr login, so it fetches the keys with a code that works once,
+# for one host and user, for 10 minutes. The page asks for it (logged in, with
+# Boltarr's own header), so another site can't get one.
+_DEPLOY_TTL = 600
+_deploy_links: dict[str, tuple] = {}       # code -> (ip, user, expires at)
+_deploy_lock = threading.Lock()
+
+
+class DeployLinkIn(BaseModel):
+    user: str = "root"
+
+
+@app.post("/api/hosts/{ip}/deploy-link")
+def make_deploy_link(ip: str, req: DeployLinkIn):
+    if not _SSH_USER_RE.fullmatch(req.user or ""):
+        raise HTTPException(400, "That username has characters that aren't safe in a command.")
+    code = secrets.token_urlsafe(24)
+    now = time.monotonic()
+    with _deploy_lock:
+        for k in [k for k, v in _deploy_links.items() if v[2] < now]:
+            del _deploy_links[k]
+        _deploy_links[code] = (ip, req.user, now + _DEPLOY_TTL)
+    # Only the path: the page adds the address it is opened on (right behind a proxy too)
+    return {"path": f"/api/deploy-keys/{code}", "expires_in": _DEPLOY_TTL}
+
+
+@app.get("/api/deploy-keys/{code}")
+def use_deploy_link(code: str):
+    with _deploy_lock:
+        link = _deploy_links.pop(code, None)
+    if not link or link[2] < time.monotonic():
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse("This deploy link has expired or was already used. Copy the command again.\n",
+                                 status_code=404)
+    return get_authorized_keys(link[0], link[1])
 
 
 @app.post("/api/hosts/{ip:path}/uptime/reset")

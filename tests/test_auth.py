@@ -160,3 +160,35 @@ def test_password_hashing():
     assert h.startswith("scrypt$") and "pässwörd" not in h
     assert auth.verify_password("pässwörd-1", h) and not auth.verify_password("pässwörd-2", h)
     assert auth.hash_password("same") != auth.hash_password("same")   # salted
+
+
+# ── SSH deploy command with login on: a one-time link ───────────────────────────
+
+def test_deploy_link_works_once_without_login(login_on, monkeypatch):
+    from backend import main
+    from backend.database import get_conn
+    me, anon = login_on, _anon()
+    kid = me.post("/api/ssh-keys", json={"name": "demo-laptop", "public_key":
+                  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyForDeployLinkTest0000000000000"}, headers=H).json()["id"]
+    try:
+        me.post("/api/hosts", json={"ip": "10.31.0.7", "hostname": "demo-deploy"}, headers=H)
+        assert me.post("/api/hosts/10.31.0.7/ssh-access", json={"ssh_key_id": kid, "username": "demo"}, headers=H).status_code < 300
+        assert anon.get("/api/hosts/10.31.0.7/authorized-keys?user=demo").status_code == 401     # still needs login
+        assert anon.post("/api/hosts/10.31.0.7/deploy-link", json={"user": "demo"}, headers=H).status_code == 401
+        assert me.post("/api/hosts/10.31.0.7/deploy-link", json={"user": "demo"}).status_code == 403   # needs Boltarr's header
+        assert me.post("/api/hosts/10.31.0.7/deploy-link", json={"user": "x y"}, headers=H).status_code == 400
+        link = me.post("/api/hosts/10.31.0.7/deploy-link", json={"user": "demo"}, headers=H).json()
+        assert link["expires_in"] == 600 and link["path"].startswith("/api/deploy-keys/")
+        path = link["path"][1:]
+        r = anon.get("/" + path)                                       # the other machine: no login
+        assert r.status_code == 200 and "AAAAC3NzaC1lZDI1NTE5AAAAIDemoKey" in r.text and "demo-laptop" in r.text
+        assert anon.get("/" + path).status_code == 404                 # works once
+        assert anon.get("/api/deploy-keys/made-up-code").status_code == 404
+        link = me.post("/api/hosts/10.31.0.7/deploy-link", json={"user": "demo"}, headers=H).json()
+        code = link["path"].rsplit("/", 1)[1]
+        ip, user, _ = main._deploy_links[code]
+        main._deploy_links[code] = (ip, user, time.monotonic() - 1)    # 10 minutes later
+        assert anon.get(f"/api/deploy-keys/{code}").status_code == 404
+    finally:
+        me.delete("/api/hosts/10.31.0.7", headers=H)
+        me.delete(f"/api/ssh-keys/{kid}", headers=H)

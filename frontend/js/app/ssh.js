@@ -72,7 +72,7 @@ async function copySshKey(id) {
   const k = sshKeys.find(k => k.id === id);
   if (!k) return;
   try {
-    await navigator.clipboard.writeText(k.public_key);
+    await copyText(k.public_key);
     showToast("Key copied to clipboard");
   } catch {
     showToast("Copy failed — try showing the key and copying manually");
@@ -140,12 +140,13 @@ async function loadHostSshSection(ip) {
       </div>`).join("");
 
     return `
-      <div style="margin-bottom:14px">
+      <div class="ssh-user-group" style="margin-bottom:14px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
           <span style="font-size:11px;font-weight:600;color:var(--accent);font-family:monospace">${escHtml(user)}</span>
-          <button class="btn" style="font-size:10px;padding:2px 8px" data-click="copySshCurl" data-args="${dargs(ip, user)}" title="Copies a command that deploys these keys into ${escHtml(user)}'s ~/.ssh/authorized_keys">Copy deploy cmd</button>
+          <button class="btn" style="font-size:10px;padding:2px 8px" data-click="copySshCurl" data-args="${dargs(ip, user)}" title="Copies a command that deploys these keys into ${escHtml(user)}'s ~/.ssh/authorized_keys. Run it on the host within 10 minutes; its link works once.">Copy deploy cmd</button>
           <button class="btn" style="font-size:10px;padding:2px 8px" data-click="downloadAuthorizedKeys" data-args="${dargs(ip, user)}">Download</button>
         </div>
+        <textarea class="ssh-cmd-box mono" readonly hidden rows="3"></textarea>
         ${rows}
       </div>`;
   }).join("");
@@ -192,9 +193,10 @@ async function removeHostSshAccess(accessId, ip) {
 // Same rule as the server: a username can't carry quotes or spaces into the command (F-25).
 const SSH_USER_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
 
-function sshDeployCmd(ip, user) {
+// url = a one-time deploy link from the server (the other machine has no Boltarr login)
+function sshDeployCmd(user, url) {
   if (!SSH_USER_RE.test(user)) throw new Error(`The username "${user}" has characters that aren't safe in a command — remove this entry and add it again.`);
-  const url = `${location.protocol}//${location.host}/api/hosts/${encodeURIComponent(ip)}/authorized-keys?user=${encodeURIComponent(user)}`;
+  if (!/^https?:\/\/[A-Za-z0-9.:\[\]_-]+\/api\/deploy-keys\/[A-Za-z0-9_-]+$/.test(url)) throw new Error("Boltarr sent back an unexpected link — try again.");
   // Resolves the TARGET user's home (root→/root, john→/home/john), creates ~/.ssh,
   // appends keys, dedupes, and fixes perms + ownership. Run as root (or via sudo).
   return `sudo sh -c 'U="${user}"; H=$(getent passwd "$U" | cut -d: -f6); ` +
@@ -207,9 +209,19 @@ function sshDeployCmd(ip, user) {
 
 async function copySshCurl(ip, user) {
   let cmd;
-  try { cmd = sshDeployCmd(ip, user); } catch (e) { return showToast(e.message); }
-  await navigator.clipboard.writeText(cmd);
-  showToast(`Copied — deploys to ${user}'s ~/.ssh/authorized_keys`);
+  try {
+    const link = await api("POST", `/api/hosts/${encodeURIComponent(ip)}/deploy-link`, { user });
+    cmd = sshDeployCmd(user, `${location.protocol}//${location.host}${link.path}`);
+  } catch (e) { return showToast(e.message); }
+  const box = this && this.closest && this.closest(".ssh-user-group")?.querySelector(".ssh-cmd-box");
+  try {
+    await copyText(cmd);
+    if (box) box.hidden = true;
+    showToast(`Copied — run it on the host within 10 minutes (the link works once). Deploys to ${user}'s ~/.ssh/authorized_keys`);
+  } catch (e) {                      // the browser wouldn't copy: show it to select by hand
+    if (box) { box.hidden = false; box.value = cmd; box.focus(); box.select(); }
+    showToast(box ? "Couldn't copy — the command is shown below; select it and copy" : "Couldn't copy the command");
+  }
 }
 
 async function downloadAuthorizedKeys(ip, user) {
