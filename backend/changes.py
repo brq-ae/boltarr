@@ -234,12 +234,14 @@ def _mac_map(conn, events: list[dict]) -> dict:
 FLAP_MIN = 2   # needs >= this many offline AND >= this many online
 
 
-def _ip_key(ip: str):
-    """Sort key: numeric per-octet for IPv4, so .9 < .80 < .100. Non-IPv4 sorts last."""
-    parts = str(ip).split(".")
-    if len(parts) == 4 and all(p.isdigit() for p in parts):
-        return (0, tuple(int(p) for p in parts))
-    return (1, (str(ip),))
+def ip_key(ip: str):
+    """Sort key for IPs, shared by every server-side list: numeric, so .9 < .80 < .100
+    (IPv4 before IPv6); anything that isn't an address sorts last, by name."""
+    try:
+        a = ipaddress.ip_address(str(ip))
+        return (0, a.version, int(a), "")
+    except ValueError:
+        return (1, 0, 0, str(ip))
 
 
 def _label_key(ev: dict) -> str:
@@ -267,7 +269,7 @@ def _agg_line(icon: str, sing: str, plur: str, events: list[dict], mac_map, cap:
         k = _label_key(e)
         counts[k] = counts.get(k, 0) + 1
         ip_of[k] = e["ip"]
-    keys = sorted(counts, key=lambda k: (-counts[k], _ip_key(ip_of[k])))
+    keys = sorted(counts, key=lambda k: (-counts[k], ip_key(ip_of[k])))
     devices, total = len(keys), sum(counts.values())
     shown = keys[:cap]
     parts = [f"{k}{_mac_suffix(ip_of[k], mac_map)}" + (f" ×{counts[k]}" if counts[k] > 1 else "") for k in shown]
@@ -293,7 +295,7 @@ def summarize(events: list[dict], cap: int = 8, mac_map: dict | None = None) -> 
 
     lines = []
     if flappers:
-        keys = sorted(flappers, key=lambda ip: (-(off_by[ip] + on_by[ip]), _ip_key(ip)))
+        keys = sorted(flappers, key=lambda ip: (-(off_by[ip] + on_by[ip]), ip_key(ip)))
         shown = keys[:cap]
         parts = [f"{ip}{_mac_suffix(ip, mac_map)} {off_by[ip]}↓ {on_by[ip]}↑" for ip in shown]
         more = f" +{len(keys) - cap} more" if len(keys) > cap else ""
@@ -433,7 +435,7 @@ def service_lines() -> list[str]:
         outs = monitor.outages(s["id"], 86400, limit=5)
         for o in outs:
             if o.get("end"):
-                lines.append(f"🟢 {where}: down at {at(o['start'])} for {monitor._fmt_duration(o['seconds'])}, back up")
+                lines.append(f"🟢 {where}: down at {at(o['start'])} for {monitor.fmt_duration(o['seconds'])}, back up")
             else:
                 lines.append(f"🔴 {where}: down since {at(o['start'])}, still down")
         if s.get("monitor_status") == "down" and not any(not o.get("end") for o in outs):

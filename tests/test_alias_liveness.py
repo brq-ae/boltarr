@@ -79,14 +79,14 @@ def test_alias_offline_and_back_is_logged_and_alerted(client, monkeypatch):
 
 def test_include_aliases_off_logs_but_does_not_alert(client, monkeypatch):
     sent = _alerts_setup(client, monkeypatch, "10.4.4.1", "10.4.4.2", "10.4.4.0/24")
-    client.put("/api/settings/change-alerts", json={"include_aliases": False})
+    client.put("/api/settings/all", json={"change_alerts": {"include_aliases": False}})
     try:
         _sweep(monkeypatch, {"10.4.4.1", "10.4.4.2"})
         _sweep(monkeypatch, {"10.4.4.1"}); _sweep(monkeypatch, {"10.4.4.1"})
         assert _events("10.4.4.2") == ["host_offline"]   # still in the Changes feed
         assert not [m for m in sent if "10.4.4.2" in m["title"]]   # but no ntfy alert
     finally:
-        client.put("/api/settings/change-alerts", json={"include_aliases": True})
+        client.put("/api/settings/all", json={"change_alerts": {"include_aliases": True}})
 
 
 def test_host_no_offline_alert_also_silences_its_aliases(client, monkeypatch):

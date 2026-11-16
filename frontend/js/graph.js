@@ -362,12 +362,6 @@ function closeConnModal() {
   document.getElementById("connModal").classList.remove("open");
 }
 
-async function deleteConnection(connId, edgeId) {
-  await fetch(`/api/connections/${connId}`, { method: "DELETE" });
-  cy.edges(`[overlay_conn="${connId}"]`).remove();
-  cy.remove(`#${edgeId}`);
-}
-
 // ── Multi-connect mode ────────────────────────────────────────────────────────
 
 function toggleMultiConnectMode() {

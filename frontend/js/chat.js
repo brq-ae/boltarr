@@ -94,10 +94,6 @@ function appendMsg(role, content) {
   return div;
 }
 
-function removeThinking() {
-  document.querySelectorAll(".msg-thinking").forEach((el) => el.remove());
-}
-
 const AI_ERROR_MARK = "\n\n[AI error: ";   // the server's end-of-reply error marker (main.py)
 
 async function sendChat() {

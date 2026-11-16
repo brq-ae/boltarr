@@ -28,7 +28,7 @@ def test_check_changes_nothing_then_apply_restores_in_place(client, monkeypatch)
     client.post("/api/hosts", json={"ip": "10.6.0.1", "hostname": "keep"})
     snap = _backup(client)
     client.post("/api/hosts", json={"ip": "10.6.0.2", "hostname": "added-after"})
-    client.put("/api/settings/ip-history", json={"stale_days": 33, "gone_days": 66})
+    client.put("/api/settings/all", json={"ip_history": {"stale_days": 33, "gone_days": 66}})
 
     r = client.post("/api/restore/check", files={"file": ("b.zip", snap, "application/zip")})
     assert r.status_code == 200, r.text

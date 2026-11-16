@@ -23,9 +23,6 @@ function escHtml(s) {
   return (s == null ? "" : String(s)).replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-// A value passed as a JS string argument inside an inline on*="…" handler.
-// JSON-quote it (JS context) then HTML-escape it (attribute context).
-function jsq(s) { return escHtml(JSON.stringify(s == null ? "" : String(s))); }
 // Only http(s) links may be clickable — blocks javascript:/data: URLs.
 function safeUrl(u) { return /^https?:\/\//i.test(String(u || "").trim()) ? escHtml(String(u).trim()) : "#"; }
 function noteIsUrl(s) { return /^https?:\/\/\S+$/i.test((s || "").trim()); }
@@ -247,7 +244,7 @@ function hostsVisibleRows() {
   }
   return [...visible].sort((a, b) => {
     let va = a[sortCol] ?? "", vb = b[sortCol] ?? "";
-    if (sortCol === "ip") { va = ipToNum(va); vb = ipToNum(vb); }
+    if (sortCol === "ip") return cmpIp(a.ip, b.ip) * sortDir;
     if (sortCol === "open_ports") {
       va = hostOpenPorts(a).length;
       vb = hostOpenPorts(b).length;
@@ -379,8 +376,14 @@ function toggleAliasRow(ip) {
   renderHostsTable();
 }
 
+// IP sort order, shared by every list: 10.0.0.9 before 10.0.0.80; anything that
+// isn't an IPv4 address (a map's node-… placeholder) goes last, by name
 function ipToNum(ip) {
-  return (ip||"").split(".").reduce((a, o) => a * 256 + parseInt(o||0), 0);
+  return /^\d+\.\d+\.\d+\.\d+$/.test(ip || "") ? ip.split(".").reduce((a, o) => a * 256 + (+o), 0) : Infinity;
+}
+function cmpIp(a, b) {
+  const x = ipToNum(a), y = ipToNum(b);
+  return x !== y ? (x < y ? -1 : 1) : x === Infinity ? String(a || "").localeCompare(String(b || "")) : 0;
 }
 function sortTable(col) {
   sortDir = sortCol === col ? -sortDir : 1;
@@ -583,7 +586,6 @@ function iphVisibleRows() {
   if (q) rows = rows.filter(r =>
     [r.ip, r.hostname, r.mac, r.vendor, r.alias_of].some(v => v && String(v).toLowerCase().includes(q)));
 
-  const ipNum = ip => ip.split(".").reduce((a, o) => a * 256 + (+o), 0);
   const { key, dir } = _iphSort;
   rows.sort((a, b) => {
     if (key === "days") {
@@ -591,9 +593,9 @@ function iphVisibleRows() {
       const db = b.status === "never" ? -1 : (b.days ?? 0);
       if (da !== db) return (da - db) * dir;
     } else {
-      return (ipNum(a.ip) - ipNum(b.ip)) * dir;
+      return cmpIp(a.ip, b.ip) * dir;
     }
-    return ipNum(a.ip) - ipNum(b.ip);
+    return cmpIp(a.ip, b.ip);
   });
 
   return rows;

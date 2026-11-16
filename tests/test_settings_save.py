@@ -73,12 +73,18 @@ def test_save_is_atomic_no_temp_left(client, data_dir):
     assert not (data_dir / "config.yaml.tmp").exists()
 
 
-def test_section_endpoints_still_work(client):
-    r = client.put("/api/settings/ip-history", json={"stale_days": 25, "gone_days": 70})
+def test_one_section_saves_on_its_own(client):
+    r = client.put("/api/settings/all", json={"ip_history": {"stale_days": 25, "gone_days": 70}})
     assert r.json()["ip_history"] == {"stale_days": 25, "gone_days": 70}
-    r = client.put("/api/settings/ip-history", json={"stale_days": 90})
+    r = client.put("/api/settings/all", json={"ip_history": {"stale_days": 90}})
     assert r.status_code == 422
     assert config.get_config()["ip_history"]["stale_days"] == 25
+
+
+def test_old_section_addresses_are_gone(client):
+    # F-41: Settings saves through /api/settings/all only
+    for sec in ("general", "liveness", "notifications", "change-alerts", "change-tracking", "ip-history"):
+        assert client.put(f"/api/settings/{sec}", json={}).status_code in (404, 405)
 
 
 def test_include_aliases_setting_round_trips(client):

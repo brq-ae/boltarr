@@ -334,13 +334,6 @@ function showSvcDetail(id, fresh = false) {
 function _uptimeClass(pct) {
   return pct >= 99.5 ? "uptime-good" : pct >= 95 ? "uptime-mid" : "uptime-bad";
 }
-function _fmtDur(sec) {
-  if (sec < 60) return sec + "s";
-  const m = Math.floor(sec / 60);
-  if (m < 60) return m + "m";
-  const h = Math.floor(m / 60);
-  return h < 24 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d ${h % 24}h`;
-}
 
 async function loadSvcUptime(id, monitored) {
   const wrap = document.getElementById("svcDetailUptimeWrap");

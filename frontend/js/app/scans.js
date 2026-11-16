@@ -328,10 +328,7 @@ function fmtRelFuture(ts) {
   if (!d) return "";
   let s = (d.getTime() - Date.now()) / 1000;
   if (s <= 30) return "due now";
-  if (s < 3600) return `in ${Math.round(s / 60)}m`;
-  if (s < 86400) { const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60); return `in ${h}h${m ? " " + m + "m" : ""}`; }
-  const days = Math.floor(s / 86400), h = Math.round((s % 86400) / 3600);
-  return `in ${days}d${h ? " " + h + "h" : ""}`;
+  return `in ${fmtDur(s < 86400 ? Math.round(s / 60) * 60 : Math.round(s / 3600) * 3600)}`;   // to the minute / hour
 }
 
 // Show a stored (UTC) timestamp in the configured timezone (APP_TZ), else browser-local.
@@ -354,13 +351,13 @@ function fmtLocalStamp(ts) {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
 }
 
+// A length of time, the same way everywhere: "45s", "3m 12s", "2h 5m", "2d 4h"
+// (the two largest units; a zero second unit is left out: "3m", "2h")
 function fmtDur(secs) {
   secs = Math.max(0, Math.round(secs));
-  if (secs < 60) return `${secs}s`;
-  const m = Math.floor(secs / 60), s = secs % 60;
-  if (m < 60) return `${m}m ${s}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  const d = Math.floor(secs / 86400), h = Math.floor(secs / 3600) % 24, m = Math.floor(secs / 60) % 60, s = secs % 60;
+  const [a, b] = d ? [d + "d", h && h + "h"] : h ? [h + "h", m && m + "m"] : m ? [m + "m", s && s + "s"] : [s + "s", 0];
+  return b ? `${a} ${b}` : a;
 }
 
 function scanDurationHTML(s) {

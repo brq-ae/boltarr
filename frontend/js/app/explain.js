@@ -12,8 +12,8 @@ function outageListHtml(kind, id, outages) {
   return `<div class="outage-list">${outages.map((o, i) => {
     const start = fmtLocal(o.start);
     const line = o.end
-      ? `<span class="outage-item">▾ ${start} — down ${_fmtDur(o.seconds)}</span>`
-      : `<span class="outage-item ongoing">▾ ${start} — down now (${_fmtDur(o.seconds)})</span>`;
+      ? `<span class="outage-item">▾ ${start} — down ${fmtDur(o.seconds)}</span>`
+      : `<span class="outage-item ongoing">▾ ${start} — down now (${fmtDur(o.seconds)})</span>`;
     const box = _explainBoxId(kind, id, i);
     return `<div class="outage-row">${line}<button class="link-btn outage-explain" data-click="toggleExplain"
         data-args="${dargs(kind, id, o.start, i)}" title="What likely caused this outage">Explain</button></div>

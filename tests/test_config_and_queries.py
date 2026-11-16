@@ -73,3 +73,10 @@ def test_topology_graph_still_renders(client):
     assert r.status_code == 200
     nodes = {n["data"]["ip"]: n["data"] for n in r.json()["nodes"] if "ip" in n["data"]}
     assert nodes["10.2.0.21"]["open_ports"] == 2
+
+
+def test_ip_sort_key_is_numeric_and_puts_non_addresses_last():
+    # F-41: one shared sort key for every server-side list of IPs
+    from backend.changes import ip_key
+    ips = ["node-switch", "10.0.0.100", "fd00::1", "10.0.0.9", "10.0.0.80", "node-ap"]
+    assert sorted(ips, key=ip_key) == ["10.0.0.9", "10.0.0.80", "10.0.0.100", "fd00::1", "node-ap", "node-switch"]

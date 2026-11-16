@@ -34,9 +34,9 @@ def test_off_by_default_everything_open(client):
     assert client.get("/api/auth/status").json()["enabled"] is False
     assert _anon().get("/api/hosts").status_code == 200
     # F-15: even with login off, a change without X-Boltarr (a forged cross-site request) is refused
-    r = _anon().put("/api/settings/ip-history", json={"stale_days": 30})
+    r = _anon().put("/api/settings/all", json={"ip_history": {"stale_days": 30}})
     assert r.status_code == 403 and "X-Boltarr" in r.text
-    assert _anon().put("/api/settings/ip-history", json={"stale_days": 30}, headers=H).status_code == 200
+    assert _anon().put("/api/settings/all", json={"ip_history": {"stale_days": 30}}, headers=H).status_code == 200
     r = _anon().post("/api/scan/preview", content=b'{"timing":"T4"}')       # no-cors fetch: no Content-Type, no header
     assert r.status_code == 403
 
@@ -66,8 +66,8 @@ def test_login_and_cookie_flags(login_on):
 
 
 def test_changes_need_the_header(login_on):
-    assert login_on.put("/api/settings/ip-history", json={"stale_days": 30}).status_code == 403
-    assert login_on.put("/api/settings/ip-history", json={"stale_days": 30}, headers=H).status_code == 200
+    assert login_on.put("/api/settings/all", json={"ip_history": {"stale_days": 30}}).status_code == 403
+    assert login_on.put("/api/settings/all", json={"ip_history": {"stale_days": 30}}, headers=H).status_code == 200
 
 
 def test_wrong_password_slowdown(login_on):

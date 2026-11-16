@@ -374,9 +374,9 @@ async function clearCspReports() {
   loadCspReports();
 }
 
-// Save = save and close; Apply = save and keep the window open
-async function saveSettings(keepOpen = false) {
-  const payload = {
+// What each section's fields hold right now — used by Save and by that section's Test button
+function _llmPayload() {
+  return {
     provider:     document.getElementById("setProvider").value,
     base_url:     document.getElementById("setBaseUrl").value.trim(),
     api_key:      document.getElementById("setApiKey").value,
@@ -386,7 +386,9 @@ async function saveSettings(keepOpen = false) {
     num_ctx:      _numCtxValue(),
     move_secret:  _moveSecret("ai"),
   };
-  const ntfyPayload = {
+}
+function _ntfyPayload() {
+  return {
     enabled: document.getElementById("setNtfyEnabled").checked,
     server:  document.getElementById("setNtfyServer").value.trim(),
     topic:   document.getElementById("setNtfyTopic").value.trim(),
@@ -399,13 +401,20 @@ async function saveSettings(keepOpen = false) {
     suppress_when_host_down: document.getElementById("setSuppressHostDown").checked,
     move_secret: _moveSecret("ntfy"),
   };
-  const spPayload = {
+}
+function _spPayload() {
+  return {
     enabled: document.getElementById("setSpEnabled").checked,
     url:     document.getElementById("setSpUrl").value.trim(),
     token:   document.getElementById("setSpToken").value,
     stale_minutes: _staleMinutes(),
     move_secret: _moveSecret("sp"),
   };
+}
+
+// Save = save and close; Apply = save and keep the window open
+async function saveSettings(keepOpen = false) {
+  const payload = _llmPayload();
   const ctPayload = {
     enabled:          document.getElementById("setCtEnabled").checked,
     host_new:         document.getElementById("setCtHostNew").checked,
@@ -447,8 +456,8 @@ async function saveSettings(keepOpen = false) {
     const saved = await api("PUT", "/api/settings/all", {
       general:         generalPayload,
       llm:             payload,
-      notifications:   ntfyPayload,
-      statuspage:      spPayload,
+      notifications:   _ntfyPayload(),
+      statuspage:      _spPayload(),
       change_tracking: ctPayload,
       liveness:        lvPayload,
       ip_history: {
@@ -493,13 +502,7 @@ async function testStatusPush() {
   resultEl.textContent = "Saving & pushing…";
   try {
     // save current values first so the push uses what's typed
-    const saved = await api("PUT", "/api/settings/statuspage", {
-      enabled: document.getElementById("setSpEnabled").checked,
-      url:     document.getElementById("setSpUrl").value.trim(),
-      token:   document.getElementById("setSpToken").value,
-      stale_minutes: _staleMinutes(),
-      move_secret: _moveSecret("sp"),
-    });
+    const saved = await api("PUT", "/api/settings/statuspage", _spPayload());
     _rememberSecrets(saved);
     const r = await api("POST", "/api/statuspage/test");
     if (r.ok) {
@@ -522,12 +525,7 @@ async function testNotification() {
   resultEl.className = "settings-test-result";
   resultEl.textContent = "Sending…";
   try {
-    const result = await api("POST", "/api/notifications/test", {
-      server: document.getElementById("setNtfyServer").value.trim(),
-      topic:  document.getElementById("setNtfyTopic").value.trim(),
-      token:  document.getElementById("setNtfyToken").value,
-      move_secret: _moveSecret("ntfy"),
-    });
+    const result = await api("POST", "/api/notifications/test", _ntfyPayload());
     if (result.ok) {
       resultEl.className = "settings-test-result ok";
       resultEl.textContent = "✓ Sent — check your phone";
@@ -642,17 +640,7 @@ async function testLLMConnection() {
   resultEl.textContent = "Saving and testing…";
   try {
     // Save current form values first so the test uses what the user typed
-    const payload = {
-      provider:     document.getElementById("setProvider").value,
-      base_url:     document.getElementById("setBaseUrl").value.trim(),
-      api_key:      document.getElementById("setApiKey").value,
-      model:        document.getElementById("setModel").value.trim(),
-      timeout:      parseInt(document.getElementById("setTimeout").value) || 120,
-      long_timeout: parseInt(document.getElementById("setLongTimeout").value) || 600,
-      num_ctx:      _numCtxValue(),
-      move_secret:  _moveSecret("ai"),
-    };
-    await api("PUT", "/api/settings", payload);
+    await api("PUT", "/api/settings", _llmPayload());
     const result = await api("POST", "/api/settings/test");
     if (result.ok) {
       resultEl.classList.add("test-ok");

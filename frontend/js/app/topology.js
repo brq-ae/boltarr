@@ -34,7 +34,7 @@ function buildParentMap(hosts, edges, tiers) {
     if (!myTier || myTier === 1) return;
     const up = (adj[h.ip] || [])
       .filter(n => tiers[n.ip] === myTier - 1)
-      .sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip))[0];
+      .sort((a, b) => cmpIp(a.ip, b.ip))[0];
     if (up) parentOf[h.ip] = up;
   });
   return parentOf;
@@ -51,7 +51,7 @@ function hierNodeHTML(ip, childrenMap, hostMap, tiers, connEdge, depth) {
     if (connEdge.port_mode) parts.push(connEdge.port_mode);
     return `<span class="hier-conn-pill">${escHtml(parts.join("·"))}</span>`;
   })() : "";
-  const children = (childrenMap[ip] || []).sort((a, b) => ipToNum(a.ip) - ipToNum(b.ip));
+  const children = (childrenMap[ip] || []).sort((a, b) => cmpIp(a.ip, b.ip));
 
   return `<div class="hier-node">
     <div class="hier-node-row" data-click="showHostDetail" data-args="${dargs(ip)}">

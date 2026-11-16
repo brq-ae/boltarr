@@ -39,9 +39,9 @@ from . import ai_history
 from . import maintenance
 from . import ai_actions
 from . import host_fields
-from .changes import classify_host
+from .changes import classify_host, ip_key
 from .llm import (
-    list_models, generate, chat, chat_stream, is_configured, get_default_model,
+    list_models, generate, chat_stream, is_configured, get_default_model,
     build_host_prompt, build_network_prompt, parse_device_type, LLMError, long_timeout, ollama_context,
 )
 
@@ -770,24 +770,6 @@ def create_scan_profile(data: ScanProfileIn):
             msg = "A profile with that name already exists" if "UNIQUE" in str(e) else str(e)
             raise HTTPException(400, msg)
         return _profile_row(conn.execute("SELECT * FROM scan_profiles WHERE name=?", (data.name.strip(),)).fetchone())
-
-
-@app.put("/api/scan-profiles/{pid}")
-def update_scan_profile(pid: int, data: ScanProfileIn):
-    with get_conn() as conn:
-        row = conn.execute("SELECT builtin FROM scan_profiles WHERE id=?", (pid,)).fetchone()
-        if not row:
-            raise HTTPException(404, "Profile not found")
-        if row["builtin"]:
-            raise HTTPException(400, "Built-in profiles can't be edited")
-        try:
-            conn.execute("UPDATE scan_profiles SET name=?, options=? WHERE id=?",
-                         (data.name.strip(), json.dumps(data.options.dict()), pid))
-            conn.commit()
-        except Exception as e:
-            msg = "A profile with that name already exists" if "UNIQUE" in str(e) else str(e)
-            raise HTTPException(400, msg)
-        return _profile_row(conn.execute("SELECT * FROM scan_profiles WHERE id=?", (pid,)).fetchone())
 
 
 @app.delete("/api/scan-profiles/{pid}")
@@ -1714,11 +1696,6 @@ def monitor_health():
     return {"notify": notify.health(), "push": monitor.push_health(), "held_alerts": held}
 
 
-@app.post("/api/services/{svc_id}/check")
-def check_service_now(svc_id: int):
-    return monitor.check_now(svc_id)
-
-
 class PublicToggleIn(BaseModel):
     enabled: bool
     name:    Optional[str] = None   # public label; None leaves it unchanged
@@ -1907,12 +1884,6 @@ class ConnectionIn(BaseModel):
     speed:       Optional[str] = None
     tagged_only: Optional[bool] = None
     vlan_ids:    Optional[list[int]] = None
-
-
-@app.get("/api/connections")
-def list_connections():
-    with get_conn() as conn:
-        return [dict(r) for r in conn.execute("SELECT * FROM connections ORDER BY id")]
 
 
 @app.post("/api/connections", status_code=201)
@@ -2221,13 +2192,6 @@ def _ip_split(ip: str) -> tuple[str, str]:
     return "other", ip
 
 
-def _ip_key(ip: str):
-    try:
-        return (0, int(ipaddress.ip_address(ip)))
-    except ValueError:
-        return (1, 0)
-
-
 _NOTE_SHORT = 150        # a host's note in a full line…
 _NOTE_PINNED = 2000      # …and in full for hosts the conversation mentions (F-33)
 UNTRUSTED_DATA_LINE = (
@@ -2300,7 +2264,7 @@ def _roll_call_lines(rest: list[dict], why_by: dict, mode: str = "all") -> list[
     counts (when the notes must shrink to fit). Shared by the chat and Analyze
     Network (F-33)."""
     from collections import Counter
-    rest = sorted(rest, key=lambda h: _ip_key(h["ip"]))
+    rest = sorted(rest, key=lambda h: ip_key(h["ip"]))
     def counted(group, what):
         _cnt = ", ".join(f"{n} {t}" for t, n in Counter(h.get("device_type") or "unknown" for h in group).most_common())
         return f"  {len(group)} {what}, not listed to save room ({_cnt})."
@@ -2492,7 +2456,7 @@ def _chat_context(messages=None, step: int = 0) -> str:
                 port_hosts.setdefault((p["port"], p["service"] or "?"), []).append(p["addr"])
         index_lines, used, skipped = [], 0, 0
         for (port, svc), ips in sorted(port_hosts.items(), key=lambda kv: (-len(kv[1]), kv[0][0])):
-            line = f"  {port}/{svc}: " + " ".join(sorted(ips, key=_ip_key))   # full IPs: small models misread ".N"
+            line = f"  {port}/{svc}: " + " ".join(sorted(ips, key=ip_key))   # full IPs: small models misread ".N"
             if used + len(line) > _INDEX_CHARS:
                 skipped += 1; continue
             index_lines.append(line); used += len(line)
@@ -2622,17 +2586,6 @@ def _chat_prompt(messages) -> str:
 
 
 AI_ERROR_MARK = "\n\n[AI error: "     # chat.js looks for this at the end of a streamed reply
-
-
-@app.post("/api/chat")
-async def chat_endpoint(req: ChatReq):
-    system_msg = await run_in_threadpool(_chat_prompt, req.messages)   # F-33: not on the event loop
-    messages = [{"role": m.role, "content": m.content} for m in req.messages]
-    try:
-        response = await chat(messages, model=req.model or get_default_model(), system=system_msg)
-    except LLMError as e:
-        raise HTTPException(503, str(e))
-    return {"response": response, "model": req.model or get_default_model()}
 
 
 @app.post("/api/chat/stream")
@@ -3028,60 +2981,12 @@ def digest_history():
     return {"digests": ai_history.digests()}
 
 
-@app.put("/api/settings/change-tracking")
-def update_change_tracking(data: ChangeTrackingIn):
-    cfg = get_config()
-    _apply_change_tracking(cfg, data)
-    save_config(cfg)
-    return {"ok": True, "change_tracking": cfg["change_tracking"]}
-
-
-@app.put("/api/settings/ip-history")
-def update_ip_history(data: IpHistoryIn):
-    cfg = get_config()
-    _apply_ip_history(cfg, data)
-    save_config(cfg)
-    return {"ok": True, "ip_history": cfg["ip_history"]}
-
-
-@app.put("/api/settings/general")
-def update_general(data: GeneralIn):
-    cfg = get_config()
-    _apply_general(cfg, data)
-    save_config(cfg)
-    return {"ok": True, "general": cfg["general"]}
-
-
-@app.put("/api/settings/liveness")
-def update_liveness(data: LivenessIn):
-    cfg = get_config()
-    _apply_liveness(cfg, data)
-    save_config(cfg)
-    return {"ok": True, "liveness": cfg["liveness"]}
-
-
-@app.put("/api/settings/change-alerts")
-def update_change_alerts(data: ChangeAlertsIn):
-    cfg = get_config()
-    _apply_change_alerts(cfg, data)
-    save_config(cfg)
-    return {"ok": True, "change_alerts": get_settings()["change_alerts"]}
-
-
 @app.put("/api/settings")
 def update_settings(data: LLMSettingsIn):
     cfg = get_config()
     _apply_llm(cfg, data)
     save_config(cfg)
     return {"ok": True, "llm": get_settings()["llm"]}
-
-
-@app.put("/api/settings/notifications")
-def update_notification_settings(data: NotificationSettingsIn):
-    cfg = get_config()
-    _apply_notifications(cfg, data)
-    save_config(cfg)
-    return {"ok": True, "notifications": get_settings()["notifications"]}
 
 
 @app.post("/api/notifications/test")

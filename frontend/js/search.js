@@ -11,7 +11,6 @@
 
   const $ = id => document.getElementById(id);
   const isPhone = () => window.matchMedia("(max-width: 799px)").matches;
-  const ipNum = ip => /^\d+\.\d+\.\d+\.\d+$/.test(ip || "") ? ip.split(".").reduce((a, o) => a * 256 + (+o), 0) : Infinity;
 
   // Show where the text matched, with the matching part bold.
   function mark(text, q) {
@@ -52,7 +51,7 @@
 
   function results(q) {
     const hosts = allHosts.filter(h => hostMatches(h, q))
-      .sort((a, b) => hostRank(a, q) - hostRank(b, q) || ipNum(a.ip) - ipNum(b.ip) || (a.hostname || "").localeCompare(b.hostname || ""));
+      .sort((a, b) => hostRank(a, q) - hostRank(b, q) || cmpIp(a.ip, b.ip) || (a.hostname || "").localeCompare(b.hostname || ""));
     const svcs = allServices.filter(s => svcMatches(s, q))
       .sort((a, b) => svcRank(a, q) - svcRank(b, q) || (a.name || "").localeCompare(b.name || ""));
     return { hosts, svcs };

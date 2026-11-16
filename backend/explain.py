@@ -158,7 +158,7 @@ def gather(kind: str, target_id: int, start_iso: str) -> dict:
         n_watched = (conn.execute("SELECT COUNT(DISTINCT host_id) FROM host_events").fetchone()[0]
                      + sum(1 for s in svcs.values() if s["monitored"]))
 
-    dur = f"for {monitor._fmt_duration(end - start)}" if end else "and is still down"
+    dur = f"for {monitor.fmt_duration(end - start)}" if end else "and is still down"
     facts = [f"Outage: {what} went down at {_local(start)} {dur}."]
 
     # 1. the whole host (for a host outage, the device itself is down by definition)

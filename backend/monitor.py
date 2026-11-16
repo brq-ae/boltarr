@@ -77,7 +77,8 @@ def _parse(iso: str | None) -> datetime | None:
         return None
 
 
-def _fmt_duration(seconds: float) -> str:
+def fmt_duration(seconds: float) -> str:
+    """A length of time for alert and digest text: "12 min", "2 h 5 min"."""
     m = int(seconds // 60)
     if m < 60:
         return f"{m} min"
@@ -467,12 +468,12 @@ def _alert_down(svc: dict) -> str:
 
 
 def _up_line(svc: dict, down_seconds: float | None) -> str:
-    tail = f" after ~{_fmt_duration(down_seconds)} down" if down_seconds else ""
+    tail = f" after ~{fmt_duration(down_seconds)} down" if down_seconds else ""
     return f"✅ {svc['name']} is back up{tail} (on {_where(svc)})"
 
 
 def _alert_up(svc: dict, down_seconds: float | None) -> str:
-    tail = f" after ~{_fmt_duration(down_seconds)} down" if down_seconds else ""
+    tail = f" after ~{fmt_duration(down_seconds)} down" if down_seconds else ""
     return notify.deliver(
         title=f"{svc['name']} recovered",
         message=f"{svc['name']} is back up{tail} (on {_where(svc)}).",

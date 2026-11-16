@@ -49,7 +49,7 @@ def _ai(monkeypatch, reply=None, error=None):
 
 
 def _settings(client, **ca):
-    r = client.put("/api/settings/change-alerts", json=ca)
+    r = client.put("/api/settings/all", json={"change_alerts": ca})
     assert r.status_code == 200, r.text
 
 

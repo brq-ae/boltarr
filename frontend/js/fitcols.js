@@ -25,7 +25,7 @@
       menu: "svcColMenu", hiddenKey: "boltarr.svcHiddenCols", pinKey: "boltarr.svcPinnedCols",
       prefix: "hide-svc-", flex: "name",
       cols: { check: [".td-check", 34], icon: [".col-svc-icon", 52], name: [".col-svc-name", 220],
-              host: [".col-svc-host", 160], ps: [".col-svc-ps", 190], mon: [".col-svc-mon", 90],
+              host: [".col-svc-host", 160], ps: [".col-svc-ps", 190], mon: [".col-svc-mon", 112],   // switch + "PAUSED"
               pub: [".col-svc-pub", 80], url: [".col-svc-url", 200] },
       order: ["icon", "url", "pub", "mon", "ps"],
     },

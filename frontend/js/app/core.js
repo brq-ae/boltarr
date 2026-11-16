@@ -438,12 +438,6 @@ function setTab(name) {
   else stopMonitorPolling();
 }
 
-// ── Chat toggle ───────────────────────────────────────────────────────────────
-
-function toggleChat() {
-  document.getElementById("chatPanel").classList.toggle("open");
-}
-
 // ── Legend toggle ─────────────────────────────────────────────────────────────
 
 function toggleLegend() {
@@ -457,6 +451,6 @@ function toggleLegend() {
 registerActions({
   openTopology, setTab, toggleSidebar, closeSidebar, toggleChat, toggleLegend, stopScan, stopProbe,
   openAddSubnet, closeAddSubnet, saveSubnet, toggleSubnetVisibility,
-  openEditSubnet, triggerScan, deleteSubnet,
+  openEditSubnet, triggerScan,
   printPage: () => window.print(),
 });

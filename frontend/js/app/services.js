@@ -614,7 +614,7 @@ function renderServicesTable() {
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-3);font-size:12px">${svcFilterText ? "No matches." : "No services yet — add one with + Service."}</td></tr>`;
     return;
   }
 
@@ -785,13 +785,6 @@ function svcHostDownTag(s) {
   if (s.host_online === 0 && s.monitored && (s.monitor_status || "") === "down")
     return ` <span class="host-down-chip" title="This service is down because its host is offline">host offline</span>`;
   return "";
-}
-
-async function deleteSvcFromTable(id) {
-  if (!confirm("Delete this service?")) return;
-  await api("DELETE", `/api/services/${id}`);
-  allServices = allServices.filter(s => s.id !== id);
-  renderServicesTable();
 }
 
 // Periodically refresh live monitor status while viewing the Services tab.
