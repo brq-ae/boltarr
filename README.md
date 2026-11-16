@@ -10,7 +10,7 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 
 ## Features
 
-> 📷 **Screenshot to add:** the Topology graph with the host panel open, as the README's main picture.
+![the Topology graph with the host panel open, as the README's main picture](docs/images/readme-main.png)
 
 **Map your network**
 - **Network scanning** — nmap-powered host and port discovery with a visual scan builder and reusable scan profiles (Quick/Standard/Full + custom). Scans wait in a queue instead of overlapping, have a per-host time limit, and show nmap's own error when one fails
@@ -107,7 +107,7 @@ bottom of the sidebar), or via environment variables. **⚡ Test AI** checks the
 See the wiki's [AI Assistant](https://github.com/brq-ae/boltarr/wiki/AI-Assistant) page for
 everything the AI can do.
 
-> 📷 **Screenshot to add:** the chat panel with an AI card ("Change the note on …" with Add to note / Replace note / Cancel).
+![the chat panel with an AI card ("Change the note on …" with Add to note / Replace note / Cancel)](docs/images/chat-note-card.png)
 
 ### Supported providers
 
