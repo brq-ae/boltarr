@@ -534,6 +534,9 @@ select:disabled { opacity: .5; cursor: not-allowed; }
 .tab-panel.active { display: flex; }
 
 /* ── Graph tab ─────────────────────────────────────────────────────────────── */
+/* The toolbar, legend and hints place themselves inside the map, so they move
+   aside when the chat or host panel takes room */
+#panel-topology { position: relative; }
 #cy {
   flex: 1;
   background: var(--bg);
@@ -544,11 +547,15 @@ select:disabled { opacity: .5; cursor: not-allowed; }
   position: absolute;
   top: 12px;
   left: 12px;
+  right: 12px;                 /* wraps instead of running under the chat panel */
+  flex-wrap: wrap;
+  pointer-events: none;        /* the empty part of the row still lets you drag the map */
   display: flex;
   align-items: center;
   gap: 8px;
   z-index: 5;
 }
+.graph-toolbar > * { pointer-events: auto; }
 
 .connect-hint {
   background: var(--surface);
@@ -846,6 +853,7 @@ tbody td {
   transition: width 0.22s ease, border-left-width 0.22s ease;
   flex-shrink: 0;
   position: relative;
+  z-index: 6;                  /* above the map's toolbar */
 }
 .chat-panel.open {
   width: 340px;
@@ -1209,6 +1217,26 @@ tbody td {
   max-height: 90dvh;
   overflow-y: auto;
 }
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 14px;
+}
+.icon-btn {
+  border: none;
+  background: none;
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--surface2); color: var(--text); }
 .modal-title {
   font-size: 14px;
   font-weight: 600;
@@ -2232,7 +2260,7 @@ table.fit-cols .port-list, table.fit-cols .svc-port-status { flex-wrap: nowrap; 
 .restore-facts span { font-size: 12px; color: var(--text); }
 .restore-compare { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 12px; }
 .restore-compare th { text-align: left; font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .05em; padding: 4px 6px; border-bottom: 1px solid var(--border); }
-.restore-compare td { padding: 5px 6px; border-bottom: 1px solid var(--border); color: var(--text-2); }
+.restore-compare td { max-width: none; padding: 5px 6px; border-bottom: 1px solid var(--border); color: var(--text-2); }
 .restore-compare td.restore-diff { color: var(--accent); font-weight: 600; }
 .restore-note { font-size: 12px; line-height: 1.5; color: var(--text-2); background: var(--surface2); border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 10px; }
 .restore-warn { font-size: 12px; line-height: 1.55; color: var(--text-2); border: 1px solid oklch(58% 0.21 25 / 0.5); background: oklch(58% 0.21 25 / 0.08); border-radius: var(--radius-sm); padding: 9px 11px; }
