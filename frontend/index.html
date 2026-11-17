@@ -499,9 +499,11 @@
             </div>
           </div>
           <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" data-click="svcDeleteSelected">Delete selected</button>
+          <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openMaintModal" title="Plan maintenance ahead: no alerts while it runs, shown on the status page">🗓 Maintenance</button>
           <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openBulkAddContainers">⊕ Bulk</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openAddService">+ Service</button>
         </div>
+        <div id="svcMaintBanner" class="maint-banner" style="display:none" data-click="openMaintModal" title="Open planned maintenance"></div>
         <div id="svc-panel-list" class="table-wrap">
           <table id="servicesTable">
             <thead>
@@ -1142,6 +1144,56 @@
       <button class="btn-ghost" data-click="pauseTurnOff" style="margin-right:auto" title="Stop monitoring for good: it leaves the status page">Turn monitoring off</button>
       <button class="btn" data-click="closePauseModal">Cancel</button>
       <button class="btn btn-primary" data-click="pauseSubmit"><span class="pause-ico"></span>Pause</button>
+    </div>
+  </div>
+</div>
+
+<!-- Planned maintenance (R-22) -->
+<div class="modal-overlay" id="maintModal">
+  <div class="modal" style="width:640px">
+    <div class="modal-header"><span id="maintModalTitle">🗓 Planned maintenance</span>
+      <button class="icon-btn" data-click="closeMaintModal" title="Close">✕</button></div>
+    <div id="maintListView">
+      <p class="settings-hint" style="margin:0 0 12px">Plan work ahead. While it runs, Boltarr pauses the services it covers
+        (no alerts, no downtime counted) and holds the devices' "went offline" alerts. Anything still down when it ends
+        alerts as usual. Public services and devices show it on the status page. Times in <b id="maintTz"></b>.</p>
+      <div id="maintList"></div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" data-click="maintNew">＋ Plan maintenance</button>
+      </div>
+    </div>
+    <div id="maintFormView" style="display:none">
+      <div class="form-row">
+        <label>Title <span style="color:var(--text-3);font-weight:400;text-transform:none">(shown on the status page)</span></label>
+        <input type="text" id="maintTitle" maxlength="100" placeholder="e.g. NAS disk upgrade">
+      </div>
+      <div class="form-row">
+        <label>Note <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional, also shown on the status page)</span></label>
+        <textarea id="maintNote" maxlength="500" rows="2" placeholder="e.g. Files and photos are unavailable meanwhile"></textarea>
+      </div>
+      <div class="form-2col">
+        <div class="form-row"><label>Starts</label><input type="datetime-local" id="maintStarts"></div>
+        <div class="form-row"><label>Ends</label><input type="datetime-local" id="maintEnds"></div>
+      </div>
+      <div class="form-2col maint-pickers">
+        <div class="form-row">
+          <label>Devices <span style="color:var(--text-3);font-weight:400;text-transform:none">(all their services)</span>
+            <span class="maint-count" id="maintHostCount"></span></label>
+          <input type="text" id="maintHostFilter" placeholder="Filter devices…" data-input="maintFilterPick" data-args='["host"]'>
+          <div class="maint-pick" id="maintHostPick"></div>
+        </div>
+        <div class="form-row">
+          <label>Services <span class="maint-count" id="maintSvcCount"></span></label>
+          <input type="text" id="maintSvcFilter" placeholder="Filter services…" data-input="maintFilterPick" data-args='["svc"]'>
+          <div class="maint-pick" id="maintSvcPick"></div>
+        </div>
+      </div>
+      <p class="settings-hint" id="maintActiveHint" style="display:none;margin:2px 0 10px">In progress: you can change the title,
+        note and end. What it covers stays as it was when it started.</p>
+      <div class="modal-actions">
+        <button class="btn" data-click="maintCancelForm">Back</button>
+        <button class="btn btn-primary" data-click="maintSave">Save</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1914,6 +1966,7 @@
 <script src="/js/app/scans.js"></script>
 <script src="/js/app/services.js"></script>
 <script src="/js/app/services-detail.js"></script>
+<script src="/js/app/maintenance.js"></script>
 <script src="/js/app/explain.js"></script>
 <script src="/js/app/ai-actions.js"></script>
 <script src="/js/app/topology.js"></script>

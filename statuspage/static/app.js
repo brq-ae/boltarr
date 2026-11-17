@@ -244,11 +244,11 @@ function renderMaintBody(){
   const active = m.active.map(a =>
     `<div class="agenda-item active"><span class="dot-sev ${sevClass(a.severity)}"></span>
        <div><div class="ag-title">${esc(a.title)} <span class="ag-now">in progress</span></div>
-       <div class="ag-when">until ${esc(a.ends)}</div></div></div>`).join("");
+       <div class="ag-when">until ${esc(a.ends)}</div>${a.body ? `<div class="ag-note">${esc(a.body)}</div>` : ""}</div></div>`).join("");
   const up = m.upcoming.map(u =>
     `<div class="agenda-item"><span class="dot-sev ${sevClass(u.severity)}"></span>
        <div><div class="ag-title">${esc(u.title)}</div>
-       <div class="ag-when">${esc(u.when)}</div></div></div>`).join("");
+       <div class="ag-when">${esc(u.when)}</div>${u.body ? `<div class="ag-note">${esc(u.body)}</div>` : ""}</div></div>`).join("");
   body.innerHTML = active + (up || (active ? "" : '<div class="muted">Nothing scheduled.</div>'));
 }
 async function loadMonth(delta){

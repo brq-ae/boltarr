@@ -389,6 +389,21 @@ def init_db(path=None):
             ("ALTER TABLE hosts ADD COLUMN os_set INTEGER NOT NULL DEFAULT 0",
              "UPDATE hosts SET os_set=1 WHERE source='manual' AND os_guess IS NOT NULL AND os_guess != ''"),
             "ALTER TABLE hosts ADD COLUMN net_os TEXT",
+            # v0.28.0 (R-22): planned maintenance. Times in UTC; service_ids/host_ids are
+            # JSON lists (a device covers all its services); state planned|active|done.
+            """CREATE TABLE IF NOT EXISTS maintenance_windows (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT NOT NULL,
+                note        TEXT NOT NULL DEFAULT '',
+                starts_at   TEXT NOT NULL,
+                ends_at     TEXT NOT NULL,
+                service_ids TEXT NOT NULL DEFAULT '[]',
+                host_ids    TEXT NOT NULL DEFAULT '[]',
+                state       TEXT NOT NULL DEFAULT 'planned',
+                created_at  TEXT DEFAULT (datetime('now'))
+            )""",
+            # the window that paused this service (cleared when you change it by hand)
+            "ALTER TABLE services ADD COLUMN maint_window_id INTEGER",
         ]:
             if isinstance(sql, tuple):            # (step, one-time follow-up when the step ran now)
                 if _migrate(conn, sql[0]):

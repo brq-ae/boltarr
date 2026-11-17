@@ -343,6 +343,10 @@ def is_alert_worthy(conn, ev: dict, subnets: list[dict]) -> bool:
         return False
     if ev["type"] in ("host_offline", "host_online") and row and row["no_offline_alert"]:
         return False
+    if ev["type"] in ("host_offline", "host_online"):
+        from . import planned      # R-22: a device in planned maintenance doesn't alert
+        if planned.host_in_window(conn, ev["ip"]):
+            return False
     return True
 
 

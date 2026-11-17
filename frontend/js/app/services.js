@@ -591,6 +591,7 @@ function populateSvcHostFilter() {
 async function loadServicesTab() {
   await loadServicesData();
   renderServicesTable();
+  loadMaintWindows();          // the planned-maintenance line above the table
 }
 
 // The services the table shows (host filter + search, in the current sort).

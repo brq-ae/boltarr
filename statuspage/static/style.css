@@ -220,6 +220,7 @@ body.has-stripe .svc::before,body.has-stripe .agenda-item::before{
 .dot-sev.sev-info{background:#58a6ff}.dot-sev.sev-maintenance{background:var(--accent)}.dot-sev.sev-critical{background:var(--down)}
 .ag-title{font-weight:600}
 .ag-when{font-size:12px;color:var(--muted);margin-top:2px}
+.ag-note{font-size:12px;margin-top:4px;white-space:pre-line}
 .ag-now{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--accent);
   border:1px solid var(--accent);border-radius:4px;padding:1px 6px;margin-left:4px}
 

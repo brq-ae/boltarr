@@ -2375,3 +2375,43 @@ label.mon-switch { position: relative; }
 /* SSH: the deploy command, shown when the browser won't copy it */
 .ssh-cmd-box { width: 100%; margin: 0 0 6px; font-size: 10px; resize: vertical; background: var(--surface2);
   color: var(--text-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px; }
+
+/* ── Planned maintenance (R-22) ─────────────────────────────────────────────── */
+.maint-banner {
+  margin: 0 16px 8px; padding: 7px 12px; border: 1px solid var(--yellow); border-radius: var(--radius);
+  color: var(--text); font-size: 12px; cursor: pointer;
+  background: color-mix(in oklch, var(--yellow) 10%, transparent);
+}
+.maint-banner:hover { background: color-mix(in oklch, var(--yellow) 18%, transparent); }
+.maint-more { color: var(--text-3); }
+.maint-empty { color: var(--text-3); font-size: 12px; padding: 14px 0; text-align: center; }
+.maint-item { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; }
+.maint-item.active { border-color: var(--yellow); }
+.maint-item.done { opacity: .65; }
+.maint-item-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.maint-state {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border2); color: var(--text-2);
+}
+.maint-state.active { border-color: var(--yellow); color: var(--yellow); }
+.maint-title { font-weight: 600; color: var(--text); }
+.maint-when { margin-left: auto; font-size: 12px; color: var(--text-2); font-family: var(--font-mono); }
+.maint-covers { font-size: 12px; color: var(--text-2); margin-top: 6px; }
+.maint-note { font-size: 12px; color: var(--text-2); margin-top: 4px; white-space: pre-line; }
+.maint-dim { color: var(--text-3); }
+.maint-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; flex-wrap: wrap; }
+.maint-btns .btn { font-size: 11px; padding: 4px 10px; }
+.maint-pickers .form-row { min-width: 0; }
+.maint-count { float: right; color: var(--accent); font-weight: 600; text-transform: none; }
+.maint-pick {
+  margin-top: 6px; height: 180px; overflow-y: auto; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 4px 0;
+}
+.form-row .maint-pick-row {
+  display: flex; align-items: center; gap: 7px; padding: 4px 8px; font-size: 12px; cursor: pointer;
+  text-transform: none; font-weight: 400; color: var(--text); letter-spacing: 0; margin: 0;
+}
+.form-row .maint-pick-row:hover { background: var(--surface2); }
+.form-row .maint-pick-row input { accent-color: var(--accent); flex: none; width: auto; margin: 0; }
+.form-row .maint-pick-row .mono { font-size: 11px; }
+@media (max-width: 640px) { .maint-when { margin-left: 0; width: 100%; } }

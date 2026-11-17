@@ -36,6 +36,7 @@ from .database import get_conn
 from .config import get_monitoring_config, get_statuspage_config, get_check_seconds, local_now, get_timezone
 from . import notify
 from . import maintenance
+from . import planned
 
 CHECK_INTERVAL = 60          # default probe interval; live value = get_check_seconds()
 HTTP_TIMEOUT   = 6           # seconds per HTTP connect / read step
@@ -499,14 +500,15 @@ def set_monitored(conn, svc_id: int, on: bool, resume_at: str | None = None,
                            "WHERE id=?", (svc_id,)).fetchone()
         if on:
             conn.execute("UPDATE services SET monitored=1, monitor_resume_at=NULL, monitor_paused_at=NULL, "
-                         "monitor_pause_reason=NULL WHERE id=?", (svc_id,))
+                         "monitor_pause_reason=NULL, maint_window_id=NULL WHERE id=?", (svc_id,))
             return
         reason = ((reason or "").strip()[:PAUSE_REASON_MAX] or None) if pause else None
         kind = "maint" if reason else "paused"
         paused_at = (row["monitor_paused_at"] if row and row["monitor_paused_at"] else _iso(_now_dt())) if pause else None
         conn.execute(
             "UPDATE services SET monitored=0, monitor_status='unknown', monitor_fail_since=NULL, "
-            "monitor_alerted=0, monitor_resume_at=?, monitor_paused_at=?, monitor_pause_reason=? WHERE id=?",
+            "monitor_alerted=0, monitor_resume_at=?, monitor_paused_at=?, monitor_pause_reason=?, "
+            "maint_window_id=NULL WHERE id=?",
             (resume_at, paused_at, reason, svc_id))
         last = conn.execute("SELECT status FROM monitor_events WHERE service_id=? "
                             "ORDER BY ts DESC, id DESC LIMIT 1", (svc_id,)).fetchone()
@@ -986,6 +988,8 @@ def build_status_payload() -> dict:
     return {"updated_at": _iso(_now_dt()), "title": "Service Status",
             "services": services, "hosts": hosts, "networking": networking,
             "incidents": incidents[:25], "announcements": [],
+            # R-22: planned maintenance (upcoming + in progress), public items only
+            "maintenance_windows": planned.status_payload(),
             # F-27: the status page warns visitors once no update came for this long
             "stale_after_minutes": stale_minutes()}
 
@@ -1059,6 +1063,11 @@ def _loop() -> None:
                 # Probe services only when the configured interval has elapsed. This
                 # is the detection cadence — slower interval = slower to notice a
                 # change, but cheaper.
+                try:
+                    if planned.tick():
+                        push_status()         # the status page shows it started / ended
+                except Exception as e:
+                    print(f"[monitor] planned maintenance: {e}")
                 try:
                     if resume_due():
                         last_sweep = 0.0      # probe the resumed ones straight away

@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .database import init_db, get_conn, MigrationError
 from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_command, check_opts, check_target, ScanOptionError, ScanBusy
-from .config import get_config, get_llm_config, get_notifications_config, save_config, invalidate_config_cache
+from .config import get_config, get_llm_config, get_notifications_config, save_config, invalidate_config_cache, get_timezone
 from . import notify
 from . import monitor
 from . import liveness
@@ -34,6 +34,7 @@ from . import auth
 from . import security
 from . import dhcp_check
 from . import changes
+from . import planned
 from . import explain
 from . import ai_history
 from . import maintenance
@@ -1549,6 +1550,7 @@ class ServiceUpdate(BaseModel):
 @app.get("/api/services")
 def list_all_services():
     try:
+        planned.tick()            # also here, so maintenance starts/ends on time even with the loops off
         monitor.resume_due()      # also here, so a pause ends on time even with the loops off
     except Exception:
         pass
@@ -1694,6 +1696,124 @@ def monitor_health():
     with get_conn() as conn:
         held = conn.execute("SELECT COUNT(*) FROM alert_queue").fetchone()[0]
     return {"notify": notify.health(), "push": monitor.push_health(), "held_alerts": held}
+
+
+# ── Planned maintenance (R-22) ────────────────────────────────────────────────
+
+class MaintWindowIn(BaseModel):
+    title:       str
+    note:        str = ""
+    starts:      str                 # "YYYY-MM-DDTHH:MM" in Boltarr's timezone
+    ends:        str
+    service_ids: list[int] = []
+    host_ids:    list[int] = []
+
+
+def _local_to_utc(text: str, what: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(text.strip())
+    except ValueError:
+        raise HTTPException(400, f"The {what} time isn't a date and time")
+    if dt.tzinfo is None:
+        tz = get_timezone()
+        dt = dt.replace(tzinfo=tz) if tz else dt.astimezone()
+    return dt.astimezone(timezone.utc)
+
+
+def _utc_to_local(iso: str) -> str:
+    dt = datetime.fromisoformat(iso)
+    tz = get_timezone()
+    return (dt.astimezone(tz) if tz else dt.astimezone()).strftime("%Y-%m-%dT%H:%M")
+
+
+def _check_window(data: MaintWindowIn, active: bool) -> tuple:
+    title = data.title.strip()
+    if not title:
+        raise HTTPException(400, "Give the maintenance a title")
+    if len(title) > planned.TITLE_MAX:
+        raise HTTPException(400, f"The title can be up to {planned.TITLE_MAX} characters")
+    note = data.note.strip()
+    if len(note) > planned.NOTE_MAX:
+        raise HTTPException(400, f"The note can be up to {planned.NOTE_MAX} characters")
+    starts, ends = _local_to_utc(data.starts, "start"), _local_to_utc(data.ends, "end")
+    if not active and ends <= starts:
+        raise HTTPException(400, "The end must be after the start")
+    if ends <= datetime.now(timezone.utc):
+        raise HTTPException(400, "The end is already in the past")
+    svc, hosts = sorted(set(data.service_ids)), sorted(set(data.host_ids))
+    if not active and not svc and not hosts:
+        raise HTTPException(400, "Pick at least one service or device")
+    with get_conn() as conn:
+        for table, ids, name in (("services", svc, "service"), ("hosts", hosts, "device")):
+            if ids:
+                q = ",".join("?" * len(ids))
+                found = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE id IN ({q})", ids).fetchone()[0]
+                if found != len(ids):
+                    raise HTTPException(400, f"A picked {name} no longer exists")
+    return title, note, starts, ends, svc, hosts
+
+
+def _push_soon() -> None:
+    """Tell the status page in the background: an unreachable one would hold the
+    answer up to its 8-second timeout."""
+    threading.Thread(target=monitor.push_status, daemon=True).start()
+
+
+def _windows_out() -> list[dict]:
+    out = planned.list_windows()
+    for w in out:
+        w["starts_local"], w["ends_local"] = _utc_to_local(w["starts_at"]), _utc_to_local(w["ends_at"])
+    return out
+
+
+@app.get("/api/maintenance-windows")
+def list_maintenance_windows():
+    try:
+        if planned.tick():
+            _push_soon()
+    except Exception as e:
+        print(f"[planned] {e}")
+    return {"windows": _windows_out()}
+
+
+@app.post("/api/maintenance-windows", status_code=201)
+def add_maintenance_window(data: MaintWindowIn):
+    title, note, starts, ends, svc, hosts = _check_window(data, active=False)
+    wid = planned.save(None, title, note, starts, ends, svc, hosts)
+    planned.tick()                # a window that starts now starts straight away
+    _push_soon()
+    return {"id": wid, "windows": _windows_out()}
+
+
+@app.put("/api/maintenance-windows/{wid}")
+def edit_maintenance_window(wid: int, data: MaintWindowIn):
+    with get_conn() as conn:
+        w = planned.get(conn, wid)
+    if not w:
+        raise HTTPException(404, "Maintenance not found")
+    if w["state"] == "done":
+        raise HTTPException(400, "This maintenance is over")
+    title, note, starts, ends, svc, hosts = _check_window(data, active=w["state"] == "active")
+    planned.save(wid, title, note, starts, ends, svc, hosts)
+    planned.tick()
+    _push_soon()
+    return {"windows": _windows_out()}
+
+
+@app.post("/api/maintenance-windows/{wid}/done")
+def end_maintenance_window(wid: int):
+    if not planned.end_now(wid):
+        raise HTTPException(404, "Maintenance not found or already over")
+    _push_soon()
+    return {"windows": _windows_out()}
+
+
+@app.delete("/api/maintenance-windows/{wid}")
+def delete_maintenance_window(wid: int):
+    if not planned.delete(wid):
+        raise HTTPException(404, "Maintenance not found")
+    _push_soon()
+    return {"windows": _windows_out()}
 
 
 class PublicToggleIn(BaseModel):

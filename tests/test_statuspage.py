@@ -190,3 +190,47 @@ def test_paused_and_maintenance_items_pass_through(sp):
     _push(sp, {"services": items})
     got = sp.get("/data").json()["services"]
     assert [(i["status"], i.get("note")) for i in got] == [("maintenance", "Demo: updating"), ("paused", None)]
+
+
+# ── R-22: planned maintenance from Boltarr ────────────────────────────────────
+def _hours(h):
+    return (datetime.now(timezone.utc) + timedelta(hours=h)).isoformat(timespec="seconds")
+
+
+def test_boltarr_windows_show_as_upcoming_and_in_progress(sp):
+    sp.mod.set_visibility({"services": "public"})
+    _push(sp, {"services": [{"key": "svc-1", "name": "Web", "status": "maintenance"},
+                            {"key": "svc-2", "name": "Files", "status": "up"}],
+               "maintenance_windows": [
+                   {"title": "Demo: router swap", "note": "Wi-Fi drops", "start": _hours(-1), "end": _hours(1),
+                    "affects": ["svc-1"]},
+                   {"title": "Demo: disk change", "note": "", "start": _hours(24), "end": _hours(26),
+                    "affects": ["svc-2"]}]})
+    d = sp.get("/data").json()
+    assert [a["title"] for a in d["maintenance"]["active"]] == ["Demo: router swap"]
+    assert d["maintenance"]["active"][0]["body"] == "Wi-Fi drops"
+    assert [u["title"] for u in d["maintenance"]["upcoming"]] == ["Demo: disk change"]
+    assert any(b["title"] == "Demo: router swap" and "In progress until" in b["body"] for b in d["announcements"])
+    month = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime("%Y-%m")
+    days = sp.get(f"/api/calendar?month={month}").json()["days"]
+    assert any(e["title"] == "Demo: disk change" for evs in days.values() for e in evs)
+
+
+def test_boltarr_window_marks_a_down_item_as_maintenance(sp):
+    sp.mod.set_visibility({"hosts": "public"})
+    _push(sp, {"hosts": [{"key": "host-7", "name": "NAS", "status": "down",
+                          "incidents": [{"key": "host-7", "start": _hours(-0.5), "ongoing": True}]}],
+               "maintenance_windows": [{"title": "Demo: NAS update", "start": _hours(-1), "end": _hours(1),
+                                        "affects": ["host-7"]}]})
+    nas = sp.get("/data").json()["hosts"][0]
+    assert nas["maintenance"] is True and nas["incidents"][0]["maintenance"] is True
+
+
+def test_window_over_a_private_section_stays_private(sp):
+    sp.mod.set_visibility({"services": "public", "hosts": "private"})
+    sp.post("/logout")
+    _push(sp, {"hosts": [{"key": "host-9", "name": "Box", "status": "up"}],
+               "maintenance_windows": [{"title": "Demo: hidden work", "start": _hours(2), "end": _hours(3),
+                                        "affects": ["host-9"]}]})
+    d = sp.get("/data").json()
+    assert d["maintenance"]["upcoming"] == [] and "hidden" not in json.dumps(d)

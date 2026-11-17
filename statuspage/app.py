@@ -383,7 +383,34 @@ def _active_events(tzinfo):
     return active
 
 
-def maintenance_view(tzinfo, tzname) -> dict:
+def _boltarr_windows(visible=None):
+    """Planned maintenance from Boltarr (R-22), as [(start_utc, end_utc, window)].
+    Planned in Boltarr, read-only here. With `visible` (a set of sections), only the
+    windows that touch an item in one of those sections — a window over private
+    items stays private."""
+    sect_of = {it.get("key"): s for s in SECTIONS for it in STATE.get(s, []) if isinstance(it, dict)}
+    out = []
+    for w in STATE.get("maintenance_windows") or []:
+        if not isinstance(w, dict):
+            continue
+        su, eu = _parse_ts(w.get("start")), _parse_ts(w.get("end"))
+        if not su or not eu or eu <= su:
+            continue
+        keys = [k for k in (w.get("affects") or []) if isinstance(k, str)]
+        if visible is not None and not any(sect_of.get(k) in visible for k in keys):
+            continue
+        out.append((su, eu, {"title": str(w.get("title") or "Maintenance")[:100],
+                             "body": str(w.get("note") or "")[:500], "affects": keys}))
+    return out
+
+
+def _ends_str(su: datetime, eu: datetime, tzinfo) -> str:
+    """'03:00', or 'Sat 03:00' when it ends on a later day."""
+    s, e = su.astimezone(tzinfo), eu.astimezone(tzinfo)
+    return e.strftime("%H:%M") if s.date() == e.date() else e.strftime("%a %H:%M")
+
+
+def maintenance_view(tzinfo, tzname, visible=None) -> dict:
     now = datetime.now(timezone.utc)
     active = [{"title": ev["title"], "body": ev["body"], "severity": ev["severity"],
                "ends": eu.astimezone(tzinfo).strftime("%H:%M")}
@@ -396,17 +423,32 @@ def maintenance_view(tzinfo, tzname) -> dict:
             if su > now:
                 upcoming.append((su, {"title": ev["title"], "severity": ev["severity"],
                                       "when": _when_str(su, eu, tzinfo)}))
+    for su, eu, w in _boltarr_windows(visible):
+        if su <= now < eu:
+            active.append({"title": w["title"], "body": w["body"], "severity": "maintenance",
+                           "ends": _ends_str(now, eu, tzinfo)})
+        elif now < su < now + timedelta(days=90):
+            s = su.astimezone(tzinfo)
+            upcoming.append((su, {"title": w["title"], "body": w["body"], "severity": "maintenance",
+                                  "when": f'{s.strftime("%a, %b ")}{s.day} · {s.strftime("%H:%M")}–'
+                                          f'{_ends_str(su, eu, tzinfo)}'}))
     upcoming.sort(key=lambda x: x[0])
     return {"active": active, "upcoming": [u for _, u in upcoming[:12]], "tz": tzname}
 
 
-def _event_banners(tzinfo):
+def _event_banners(tzinfo, visible=None):
     out = []
     for ev, eu in _active_events(tzinfo):
         ends = eu.astimezone(tzinfo).strftime("%H:%M")
         tail = f"In progress until {ends}."
         body = f'{ev["body"]} {tail}'.strip() if ev["body"] else tail
         out.append({"severity": ev["severity"], "title": ev["title"], "body": body})
+    now = datetime.now(timezone.utc)
+    for su, eu, w in _boltarr_windows(visible):
+        if su <= now < eu:
+            tail = f"In progress until {_ends_str(now, eu, tzinfo)}."
+            out.append({"severity": "maintenance", "title": w["title"],
+                        "body": f'{w["body"]} {tail}'.strip() if w["body"] else tail})
     return out
 
 
@@ -655,9 +697,12 @@ def _relabel_windows():
 
 def _overlaps_window(evs, lo, hi, tzinfo):
     """True if [lo, hi] touches any occurrence of any window in evs. A zero-width
-    range (lo == hi) is an instant check (window covers that moment)."""
+    range (lo == hi) is an instant check (window covers that moment). A Boltarr
+    window (R-22) is {"_span": (start, end)}."""
     for ev in evs:
-        for su, eu in _occurrences(ev, lo - timedelta(days=1), hi + timedelta(days=1), tzinfo):
+        spans = [ev["_span"]] if "_span" in ev else \
+            _occurrences(ev, lo - timedelta(days=1), hi + timedelta(days=1), tzinfo)
+        for su, eu in spans:
             if lo == hi:
                 if su <= lo < eu:
                     return True
@@ -670,7 +715,8 @@ def _annotate_maintenance(out: dict, tzinfo) -> None:
     """Mark items/ticks/incidents that fall inside an automated-maintenance window
     so the page can paint them amber. Never hides or recounts anything — the dip
     stays true, only its reason is labelled."""
-    wins = _relabel_windows()
+    wins = _relabel_windows() + [{"_span": (su, eu), "affects": ",".join(w["affects"])}
+                                 for su, eu, w in _boltarr_windows()]
     if not wins:
         return
     # These lists are shared references into STATE — copy before tagging so the
@@ -752,12 +798,13 @@ def _staleness(now: datetime | None = None) -> dict | None:
 def data(request: Request):
     admin = is_admin(request)
     vis = get_visibility()
+    visible = set(SECTIONS) if admin else {s for s in SECTIONS if vis[s] == "public"}
     tzinfo, tzname = _tz()
     out = {
         "updated_at": STATE.get("updated_at"),
         "title": STATE.get("title", "Service Status"),
-        "announcements": _merge_banners(active_announcements(), _event_banners(tzinfo)),
-        "maintenance": maintenance_view(tzinfo, tzname),
+        "announcements": _merge_banners(active_announcements(), _event_banners(tzinfo, visible)),
+        "maintenance": maintenance_view(tzinfo, tzname, visible),
         "branding": get_branding(),
         "display": get_display(),
         "timezone": tzname,   # so the page renders incident times in the page's zone
@@ -991,6 +1038,14 @@ def api_calendar(request: Request):
             days.setdefault(loc.date().isoformat(), []).append({
                 "title": ev["title"], "severity": ev["severity"],
                 "when": loc.strftime("%H:%M") + "–" + eu.astimezone(tzinfo).strftime("%H:%M")})
+    vis = get_visibility()
+    visible = set(SECTIONS) if is_admin(request) else {s for s in SECTIONS if vis[s] == "public"}
+    for su, eu, w in _boltarr_windows(visible):        # R-22: planned in Boltarr
+        loc = su.astimezone(tzinfo)
+        if (loc.year, loc.month) == (y, m):
+            days.setdefault(loc.date().isoformat(), []).append({
+                "title": w["title"], "severity": "maintenance",
+                "when": loc.strftime("%H:%M") + "–" + _ends_str(su, eu, tzinfo)})
     return {"month": f"{y:04d}-{m:02d}", "tz": tzname, "days": days}
 
 
