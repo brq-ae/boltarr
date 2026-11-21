@@ -137,6 +137,12 @@ _DEFAULTS: dict = {
     "security": {
         "frame_origins": "",       # dashboards allowed to show Boltarr in a frame, e.g. "https://homarr.lan"
     },
+    # Screen options (S-15). Each browser keeps its own view level; a browser that
+    # has none yet starts on `start_level`, decided once: an install that already
+    # had devices or networks (an upgrade) starts on "advanced", an empty one on "basic".
+    "ui": {
+        "start_level": "",         # basic | intermediate | advanced; "" = not decided yet
+    },
 }
 
 
@@ -187,6 +193,7 @@ def _load_config() -> dict:
         "ai_history": dict(_DEFAULTS["ai_history"]),
         "auth": dict(_DEFAULTS["auth"]),
         "security": dict(_DEFAULTS["security"]),
+        "ui": dict(_DEFAULTS["ui"]),
     }
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -215,6 +222,8 @@ def _load_config() -> dict:
             cfg["auth"].update({k: v for k, v in raw["auth"].items() if v is not None})
         if "security" in raw:
             cfg["security"].update({k: v for k, v in raw["security"].items() if v is not None})
+        if "ui" in raw:
+            cfg["ui"].update({k: v for k, v in raw["ui"].items() if v is not None})
 
     # Env vars override file — useful for Docker deployments
     env_map = {

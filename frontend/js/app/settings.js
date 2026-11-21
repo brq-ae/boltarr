@@ -1,4 +1,4 @@
-// Boltarr — Settings: AI, Security (strict-mode check), Backup & Restore.
+// Boltarr — Settings page: tabs, save bar, AI, Security (strict-mode check), Backup & Restore.
 // Part of the app split from app.js (F-08); files share globals and load in order (see index.html).
 
 // ── AI Settings ───────────────────────────────────────────────────────────────
@@ -42,7 +42,59 @@ async function loadAppTz() {
   } catch (_) {}
 }
 
-async function openSettings() {
+// ── The Settings page (S-15) ──────────────────────────────────────────────────
+// A page with tabs (General · Alerts · Monitoring · Status page · AI · Login & Security
+// · Data). Every field keeps its id, so loading and saving work as before. A change in
+// any tab shows the save bar; Login, Data, the Test buttons and AI-history cleaning act
+// straight away and are marked data-nosave.
+
+let currentSettingsTab = "general";
+let settingsDirty = false;
+
+function openSettings() { setTab("settings"); }
+
+function setSettingsTab(tab) {
+  currentSettingsTab = tab;
+  document.querySelectorAll("#panel-settings .set-pane").forEach(p => { p.hidden = p.id !== "set-pane-" + tab; });
+  document.querySelectorAll("#panel-settings .svc-subtab").forEach(b => b.classList.remove("active"));
+  document.getElementById("setTabBtn-" + tab)?.classList.add("active");
+  document.getElementById("settingsPage").scrollTop = 0;
+}
+
+function _setDirty(on) {
+  settingsDirty = on;
+  document.getElementById("settingsSaveBar").hidden = !on;
+}
+
+function _onSettingsEdit(e) {
+  const t = e.target;
+  if (!t.closest(".set-pane") || t.closest("[data-nosave]")) return;
+  _setDirty(true);
+}
+
+// Leaving the page (another tab, or closing the browser tab) with changes not saved asks first
+function settingsLeaveOk() {
+  if (!settingsDirty || !document.getElementById("panel-settings").classList.contains("active")) return true;
+  if (!confirm("You have unsaved changes in Settings. Leave without saving them?")) return false;
+  loadSettings();                            // put the saved values back for next time
+  return true;
+}
+
+function undoSettings() { loadSettings(); showToast("Changes undone"); }
+
+document.addEventListener("DOMContentLoaded", () => {
+  const page = document.getElementById("panel-settings");
+  page.addEventListener("input", _onSettingsEdit);
+  page.addEventListener("change", _onSettingsEdit);
+  window.addEventListener("beforeunload", e => {
+    if (settingsDirty) { e.preventDefault(); e.returnValue = ""; }
+  });
+});
+
+// Fill every field from what's saved (on opening the page, and for Undo)
+async function loadSettings() {
+  _setDirty(false);
+  _resetDataTab();
   renderLoginSettings();
   try {
     const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history, ai_history, security } = await api("GET", "/api/settings");
@@ -135,18 +187,14 @@ async function openSettings() {
     document.getElementById("setCaDigestTime").value         = ca.digest_time || "08:00";
     document.getElementById("setCaDigestServices").checked   = ca.digest_services !== false;
     document.getElementById("setCaDigestAi").checked         = !!ca.digest_ai;
+    needsInUse(document.getElementById("setCaDigestAi"), ca.digest_ai);   // keeps the AI summary line when it's on
+    needsInUse(document.getElementById("setCaDigestAiModel"), ca.digest_ai);
     fillDigestModelSelect(ca.digest_ai_model || "");
     document.getElementById("digestPreview").hidden = true;
+    levelInUse("frames", !!document.getElementById("setFrameOrigins").value.trim());
+    document.querySelectorAll("#settingsPage [data-fold-form]").forEach(levelFoldForm);   // after the values are in
   } catch (e) { console.warn("Settings load:", e.message); }
-  document.getElementById("settingsModal").classList.add("open");
-}
-
-let _appliedTimer = null;
-function _flashApplied() {
-  const el = document.getElementById("settingsApplied");
-  el.hidden = false;
-  clearTimeout(_appliedTimer);
-  _appliedTimer = setTimeout(() => { el.hidden = true; }, 2500);
+  _setDirty(false);
 }
 
 // Digest AI model: "" = the default model from Settings → AI, or a model of its own
@@ -183,10 +231,6 @@ async function previewDigest() {
   } catch (e) {
     box.innerHTML = `<div class="digest-preview-note">Preview failed: ${escHtml(e.message)}</div>`;
   }
-}
-
-function closeSettings() {
-  document.getElementById("settingsModal").classList.remove("open");
 }
 
 function onQuietToggle() {
@@ -412,8 +456,8 @@ function _spPayload() {
   };
 }
 
-// Save = save and close; Apply = save and keep the window open
-async function saveSettings(keepOpen = false) {
+// Save every tab at once (the save bar)
+async function saveSettings() {
   const payload = _llmPayload();
   const ctPayload = {
     enabled:          document.getElementById("setCtEnabled").checked,
@@ -470,15 +514,22 @@ async function saveSettings(keepOpen = false) {
     });
     APP_TZ = generalPayload.timezone;
     _rememberSecrets(saved);   // the new addresses are now the saved ones (F-16)
-    if (keepOpen) { _flashApplied(); loadAiHistory(); } else closeSettings();
+    try { await saveLoginProxy(); }   // Login & Security → Login service in front (its own server part)
+    catch (e) {
+      alert("Everything else was saved, but not the login service settings (Login & Security):\n\n" + e.message);
+      return;                           // the save bar stays, so they can be fixed and saved
+    }
+    _setDirty(false);
+    loadAiHistory();
     await loadModels();
     updateAiStatusDot(payload.provider !== "none");
+    setFeatureReady("sp", !!saved.statuspage?.enabled);
     // times may now render in a different zone — refresh the visible time views
     if (document.getElementById("scan-panel-history")?.style.display !== "none") loadScans();
     if (document.getElementById("scan-panel-changes")?.style.display !== "none") loadChanges();
     if (document.getElementById("scan-panel-schedules")?.style.display !== "none") loadSchedules();
     if (currentHostsTab === "iphistory" && document.getElementById("panel-hosts").classList.contains("active")) loadIpHistory();
-    if (!keepOpen) showToast("Settings saved");
+    showToast("Settings saved");
   } catch (e) {
     alert("Settings not saved — nothing was changed.\n\n" + e.message);
   }
@@ -492,6 +543,7 @@ function generateStatusToken() {
   el.type = "text";                        // reveal so it can be copied
   el.value = "boltarr_status_" + hex;
   el.focus(); el.select();
+  _setDirty(true);
   showToast("Token generated — Save here, and put the same value in the status app's .env");
 }
 
@@ -499,12 +551,10 @@ async function testStatusPush() {
   const resultEl = document.getElementById("setSpTestResult");
   resultEl.style.display = "";
   resultEl.className = "settings-test-result";
-  resultEl.textContent = "Saving & pushing…";
+  resultEl.textContent = "Pushing…";
   try {
-    // save current values first so the push uses what's typed
-    const saved = await api("PUT", "/api/settings/statuspage", _spPayload());
-    _rememberSecrets(saved);
-    const r = await api("POST", "/api/statuspage/test");
+    // pushes with what's on screen; nothing is saved until Save
+    const r = await api("POST", "/api/statuspage/test", _spPayload());
     if (r.ok) {
       resultEl.className = "settings-test-result ok";
       resultEl.textContent = "✓ Pushed to the status app";
@@ -637,19 +687,15 @@ async function testLLMConnection() {
   const resultEl = document.getElementById("setTestResult");
   resultEl.style.display = "";
   resultEl.className = "settings-test-result";
-  resultEl.textContent = "Saving and testing…";
+  resultEl.textContent = "Testing…";
   try {
-    // Save current form values first so the test uses what the user typed
-    await api("PUT", "/api/settings", _llmPayload());
-    const result = await api("POST", "/api/settings/test");
+    // tests what's on screen; nothing is saved until Save
+    const result = await api("POST", "/api/settings/test", _llmPayload());
     if (result.ok) {
       resultEl.classList.add("test-ok");
       const mList = result.models?.length ? result.models.slice(0,5).join(", ") : "no models listed";
       resultEl.textContent = `✓ Connected. Models: ${mList}`;
-      await loadModels();
       fillModelSuggestions(result.models || []);
-      loadCtxInfo();
-      updateAiStatusDot(true);
     } else {
       resultEl.classList.add("test-fail");
       resultEl.textContent = `✗ ${result.error}`;
@@ -664,6 +710,7 @@ function updateAiStatusDot(configured) {
   const dot = document.getElementById("aiStatusDot");
   if (!dot) return;
   dot.className = "ai-status-dot " + (configured ? "ai-status-ok" : "ai-status-none");
+  setFeatureReady("ai", configured);
 }
 
 // F-27: the "may be out of date" minutes (1–1440; empty or bad -> 5).
@@ -711,19 +758,24 @@ function showToast(msg) {
 
 // ── Backup & Restore ─────────────────────────────────────────────────────────
 
-function downloadBackup() { openBackupModal(); }
-
-function openBackupModal() {
+// Data tab back to its starting state (on opening Settings)
+function _resetDataTab() {
   const $ = id => document.getElementById(id);
   $("backupProtect").checked = true;
   $("backupPw").value = ""; $("backupPw2").value = "";
   $("backupErr").textContent = "";
   onBackupProtectChange();
-  $("backupModal").classList.add("open");
-  $("backupPw").focus();
+  if (!restoreToken) $("restoreBox").hidden = true;
+  $("resetKeepSettings").checked = true;
+  $("resetConfirm").value = "";
+  onResetConfirmInput();
 }
 
-function closeBackupModal() { document.getElementById("backupModal").classList.remove("open"); }
+// "download a backup of the current data" (from the Restore part): go to Backup
+function focusBackup() {
+  document.getElementById("backupForm").scrollIntoView({ block: "start", behavior: "smooth" });
+  document.getElementById("backupPw").focus();
+}
 
 function onBackupProtectChange() {
   const on = document.getElementById("backupProtect").checked;
@@ -751,7 +803,7 @@ async function doBackup(e) {
     a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    closeBackupModal();
+    $("backupPw").value = ""; $("backupPw2").value = "";
     showToast(protect ? "Protected backup downloaded" : "Backup downloaded");
   } catch (err) {
     $("backupErr").textContent = "Backup failed: " + err.message;
@@ -794,11 +846,11 @@ async function restoreBackup(input) {
   const file = input.files[0];
   input.value = "";
   if (!file) return;
-  closeSettings();
+  if (restoreToken) api("DELETE", `/api/restore/${restoreToken}`).catch(() => {});
   restoreToken = null;
   restoreFile = file;
   document.getElementById("restoreFileName").textContent = file.name;
-  document.getElementById("restoreModal").classList.add("open");
+  document.getElementById("restoreBox").hidden = false;
   await _checkRestoreFile();
 }
 
@@ -824,7 +876,7 @@ async function _checkRestoreFile(password) {
       $("restorePw").focus();
       return;
     }
-    $("restoreModal").classList.remove("open");
+    $("restoreBox").hidden = true;
     alert("This backup can't be restored — nothing was changed.\n\n" + e.message);
   }
 }
@@ -865,7 +917,7 @@ function cancelRestore() {
   if (restoreToken) api("DELETE", `/api/restore/${restoreToken}`).catch(() => {});
   restoreToken = null;
   restoreFile = null;
-  document.getElementById("restoreModal").classList.remove("open");
+  document.getElementById("restoreBox").hidden = true;
 }
 
 function _restoreStep(name, state) {   // state: active | done | fail
@@ -877,7 +929,7 @@ async function applyRestore() {
   if (!restoreToken) return;
   const $ = id => document.getElementById(id);
   const token = restoreToken;
-  $("restoreModal").classList.remove("open");
+  $("restoreBox").hidden = true;
   $("restoreSteps").querySelectorAll("li").forEach(li => li.className = "");
   $("restoreOverlayTitle").textContent = "Restoring…";
   $("restoreOverlayMsg").textContent = "";
@@ -928,15 +980,6 @@ function showRestoredBanner() {
   document.body.prepend(bar);
 }
 
-function openFactoryReset() {
-  document.getElementById("resetKeepSettings").checked = true;
-  document.getElementById("resetConfirm").value = "";
-  onResetConfirmInput();
-  document.getElementById("factoryResetModal").classList.add("open");
-}
-function closeFactoryReset() {
-  document.getElementById("factoryResetModal").classList.remove("open");
-}
 function onResetConfirmInput() {
   document.getElementById("resetConfirmBtn").disabled =
     document.getElementById("resetConfirm").value.trim() !== "DELETE";
@@ -946,20 +989,18 @@ async function doFactoryReset() {
   const keep = document.getElementById("resetKeepSettings").checked;
   try {
     await api("POST", "/api/factory-reset", { keep_settings: keep });
-    closeFactoryReset();
     alert("Factory reset complete." + (keep ? "" : " Settings were reset to defaults too."));
     location.reload();
   } catch (e) { alert("Reset failed: " + e.message); }
 }
 
 registerActions({
-  openSettings, previewDigest,
-  applySettings: () => saveSettings(true),
-  closeSettings, saveSettings, updateTzPreview, toggleCspList, clearCspReports,
+  openSettings, setSettingsTab, undoSettings, previewDigest,
+  saveSettings: () => saveSettings(), updateTzPreview, toggleCspList, clearCspReports,
   aiHistoryChanged, askCleanAiHistory, cancelCleanAiHistory, cleanAiHistory,
   onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification, showCtxInfo,
-  generateStatusToken, testStatusPush, secretMoveCheck, downloadBackup, openFactoryReset,
-  onResetConfirmInput, closeFactoryReset, doFactoryReset, openBackupModal, closeBackupModal,
+  generateStatusToken, testStatusPush, secretMoveCheck,
+  onResetConfirmInput, doFactoryReset, focusBackup,
   onBackupProtectChange, cancelRestore, applyRestore, closeRestoreOverlay,
   pickRestoreFile:    () => document.getElementById("restoreInput").click(),
   restoreBackupInput: function () { restoreBackup(this); },

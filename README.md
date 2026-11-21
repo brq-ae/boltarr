@@ -32,6 +32,7 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 - **Service uptime monitor** — **HTTP(S), TCP or Ping (ICMP)** checks with an overridable target, every 15–600 s; 5xx replies count as down, with an optional **Accepted replies** list per service. **Pause** with a reason and an end time (shown as Maintenance). Alerts have a grace period and quiet hours; failed notifications are retried and shown in Settings
 - **Public status page** — push a sanitized status summary (services, hosts, and networking gear) to a separate, internet-facing page over your LAN — public names only, never internal IPs. Includes an **admin panel**: public/private section gating, uptime windows (1h/24h/7d/30d), branding, announcements, a **maintenance calendar**, **automated-maintenance windows**, an **incident timeline**, and a "may be out of date" banner when updates stop
 - **Timezone-aware** — your timezone drives schedule times, quiet hours, the digest, and every time shown
+- **View levels** — Basic / Intermediate / Advanced: show as little or as much as you like. Things you use always show, and search finds anything your level hides
 
 **AI (optional)**
 - **AI chat that knows your live network** — status, uptime, recent changes and outages. The most important devices are sent in full and every other one in a short line; devices you mention get full detail. Streaming, formatted replies, Stop, wide view, New chat
@@ -64,7 +65,7 @@ docker compose up -d
 
 Open **http://\<host-ip\>:12100** — with host networking Boltarr binds `:12100`
 directly on the host (no port mapping). On a new install Boltarr first asks you to
-create an admin login (you can skip it and set one later in **Settings → 🔒 Login**).
+create an admin login (you can skip it and set one later in **Settings → Login & Security**).
 
 Images are also tagged with their version (e.g. `brqae/boltarr:0.27.0`) if you want
 to stay on one version or go back to an earlier one.
@@ -98,11 +99,11 @@ docker exec boltarr-ollama-1 ollama pull llama3.2
 ```
 
 The bundle already points Boltarr at `http://ollama:11434` with `llama3.2`. If you pull a
-different model, pick it in **⚙ Settings → 🤖 AI → Default Model**.
+different model, pick it in **⚙ Settings → AI → Default Model**.
 
 ## AI configuration
 
-AI is optional. Configure it in **⚙ Settings → 🤖 AI** (the ⚙ Settings button is at the
+AI is optional. Configure it in **⚙ Settings → AI** (the ⚙ Settings button is at the
 bottom of the sidebar), or via environment variables. **⚡ Test AI** checks the connection.
 See the wiki's [AI Assistant](https://github.com/brq-ae/boltarr/wiki/AI-Assistant) page for
 everything the AI can do.
@@ -135,7 +136,7 @@ Env vars override the UI settings when set.
 ### Context size (Ollama)
 
 Ollama's own context window is small by default, which can cut off the network notes
-the chat sends. **Settings → 🤖 AI → Context (tokens)** (default 8192) sets it. Boltarr
+the chat sends. **Settings → AI → Context (tokens)** (default 8192) sets it. Boltarr
 keeps about a quarter of the window for the answer and trims its notes to fit; if the
 AI still runs out of room it says so. Under the box, Settings shows the model's maximum
 context and whether it is loaded fully on the GPU.
@@ -220,7 +221,7 @@ All data is stored in `data/`:
 
 Mount `./data` as a Docker volume to persist data across container restarts (done automatically in the provided compose files).
 
-**Backup & restore** live in **Settings → 🗄 Data**. Backups contain your tokens and keys —
+**Backup & restore** live in **Settings → Data**. Backups contain your tokens and keys —
 keep the password-protected option on. A restore shows what's in the backup before it
 replaces anything, needs no restart, and is refused while a scan is running. See
 [Backup and Restore](https://github.com/brq-ae/boltarr/wiki/Backup-and-Restore).
@@ -248,7 +249,7 @@ curl -X POST -H "X-Boltarr: 1" http://<host-ip>:12100/api/…
 
 ## Browser security
 
-Boltarr tells your browser to refuse any code written into its pages (strict mode), so code slipped into a hostname or note can't run. **Settings → 🛡 Security** lists anything the browser blocked. If a button stops working after an update, set `BOLTARR_ALLOW_INLINE_SCRIPTS=1` in the container's environment to switch strict mode off, restart, and please open an issue.
+Boltarr tells your browser to refuse any code written into its pages (strict mode), so code slipped into a hostname or note can't run. **Settings → Login & Security → Strict mode** lists anything the browser blocked. If a button stops working after an update, set `BOLTARR_ALLOW_INLINE_SCRIPTS=1` in the container's environment to switch strict mode off, restart, and please open an issue.
 
 ## Updating
 

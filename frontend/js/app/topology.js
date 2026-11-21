@@ -145,6 +145,7 @@ function hierMultiLinkFrom(ip) {
 
 async function loadVlans() {
   try { allVlans = await api("GET", "/api/vlans"); } catch { allVlans = []; }
+  levelInUse("vlans", allVlans.length > 0);
 }
 
 function openVlanPanel() {
@@ -157,6 +158,7 @@ function closeVlanPanel() {
 }
 
 function renderVlans() {
+  levelInUse("vlans", allVlans.length > 0);
   const list = document.getElementById("vlanList");
   if (!allVlans.length) {
     list.innerHTML = `<div style="padding:10px 2px;font-size:11px;color:var(--text-3)">No VLANs yet. Add one below.</div>`;

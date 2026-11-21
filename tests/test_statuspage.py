@@ -234,3 +234,25 @@ def test_window_over_a_private_section_stays_private(sp):
                                         "affects": ["host-9"]}]})
     d = sp.get("/data").json()
     assert d["maintenance"]["upcoming"] == [] and "hidden" not in json.dumps(d)
+
+
+# ── S-15: 🌐 Push now tries what's on screen and saves nothing ─────────────────
+
+def test_push_now_uses_the_posted_settings_without_saving(client, monkeypatch):
+    from backend import config, monitor
+    cfg = config.get_config()
+    old = dict(cfg["statuspage"])
+    cfg["statuspage"].update(enabled=True, url="http://status.demo", token="demo-saved-token")
+    config.save_config(cfg)
+    seen = []
+    monkeypatch.setattr(monitor, "push_status", lambda c=None: (seen.append(c), (True, ""))[1])
+    try:
+        r = client.post("/api/statuspage/test", json={"enabled": True, "url": "http://status.demo/",
+                                                     "token": "••••••••", "stale_minutes": 9})
+        assert r.json() == {"ok": True, "error": ""}
+        assert seen[-1]["token"] == "demo-saved-token" and seen[-1]["stale_minutes"] == 9   # on-screen values, saved token
+        assert config.get_config()["statuspage"].get("stale_minutes") != 9                   # nothing saved
+        r = client.post("/api/statuspage/test", json={"url": "http://other.demo", "token": "••••••••"})
+        assert r.status_code == 409                               # the saved token stays at its address
+    finally:
+        cfg = config.get_config(); cfg["statuspage"] = old; config.save_config(cfg)

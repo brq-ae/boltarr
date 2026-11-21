@@ -46,13 +46,14 @@ async function showHostDetail(ip) {
       </div>
       <span class="tag tag-${escHtml(dt)}" id="detailTypeTag" style="font-size:11px">${escHtml(dt)}</span>
       <div class="detail-header-right">
-        <select id="analyzeModel" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
-        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" data-click="analyzeHost" data-args="${dargs(ip)}">Analyze</button>
+        <select id="analyzeModel" data-needs="ai" style="font-size:11px;padding:4px 7px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
+        <button class="btn btn-primary" style="font-size:11px;padding:5px 10px" data-needs="ai" data-click="analyzeHost" data-args="${dargs(ip)}">Analyze</button>
         <button class="btn" style="font-size:11px;padding:5px 10px" data-click="openEditHost" data-args="${dargs(ip)}">Edit</button>
-        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="openMergeHost" data-args="${dargs(ip)}">⇌ Merge</button>
-        <select id="probeProfile" title="Scan profile for the probe" style="font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)">${_probeProfileOptions()}</select>
-        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="probeHost" data-args="${dargs(ip)}">⟳ Probe</button>
-        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" data-click="deleteHost" data-args="${dargs(ip)}">Delete</button>
+        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="openMergeHost" data-args="${dargs(ip)}" data-lvl="a">⇌ Merge</button>
+        <select id="probeProfile" data-lvl="i" title="Scan profile for the probe" style="font-size:11px;padding:4px 6px;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)">${_probeProfileOptions()}</select>
+        <button class="btn" style="font-size:11px;padding:5px 10px" data-click="probeHost" data-args="${dargs(ip)}" data-lvl="i">⟳ Probe</button>
+        <button class="btn btn-danger" style="font-size:11px;padding:5px 10px" data-click="deleteHost" data-args="${dargs(ip)}" data-more="Delete host">Delete</button>
+        <div class="more-wrap"><button class="btn more-btn" style="font-size:11px;padding:5px 10px" data-click="toggleMoreMenu" title="More" aria-label="More">⋯</button><div class="col-menu"></div></div>
         <button class="btn-ghost" data-click="hideHostDetail" style="font-size:18px;padding:2px 8px">×</button>
       </div>
     </div>
@@ -62,8 +63,8 @@ async function showHostDetail(ip) {
       <button class="detail-tab" data-tab="links" data-click="switchDetailTab" data-args='["links"]'>Links (${countLinks(ip)})</button>
       <button class="detail-tab" data-tab="ports" data-click="switchDetailTab" data-args='["ports"]'>Ports (${(host.ports||[]).length + (host.alias_ports||[]).length})</button>
       <button class="detail-tab" data-tab="services" data-click="switchDetailTab" data-args='["services"]'>Services (${(host.services||[]).length})</button>
-      <button class="detail-tab" data-tab="analysis" data-click="switchDetailTab" data-args='["analysis"]'>Analysis</button>
-      <button class="detail-tab" data-tab="ssh" data-click="detailTabSsh" data-args="${dargs(ip)}">SSH</button>
+      <button class="detail-tab${host.analyses?.length ? " lvl-inuse" : ""}" data-tab="analysis" data-needs="ai" data-click="switchDetailTab" data-args='["analysis"]'>Analysis</button>
+      <button class="detail-tab" data-tab="ssh" data-lvl="a" data-click="detailTabSsh" data-args="${dargs(ip)}">SSH</button>
       <button class="detail-tab" data-tab="changes" data-click="detailTabChanges" data-args="${dargs(ip)}">Changes</button>
     </div>
 
@@ -170,8 +171,10 @@ async function showHostDetail(ip) {
   initSheetDrag();
   makeDesktopResizable(panel, "host");
   if (!host.ip.startsWith("node-")) loadHostUptime(ip);
+  if (!host.ip.startsWith("node-")) api("GET", `/api/hosts/${ip}/ssh-access`).then(a => markSshTabInUse(ip, a.length > 0)).catch(() => {});
   // Open on the tab last picked (until the page reloads), so switching hosts
   // keeps you on e.g. Analysis. SSH and Changes load their content on demand.
+  if (isLevelHidden(document.querySelector(`.detail-tab[data-tab="${activeDetailTab}"]`))) activeDetailTab = "info";   // hidden at this level
   if (activeDetailTab !== "info" && document.getElementById(`dtab-${activeDetailTab}`)) {
     if (activeDetailTab === "ssh") loadHostSshSection(ip);
     if (activeDetailTab === "changes") loadHostChanges(ip);
@@ -189,7 +192,7 @@ async function loadHostUptime(ip) {
          : `<div class="uptime-stat"><span class="val ${_uptimeClass(u.pct)}">${u.pct.toFixed(2)}%</span><span class="lbl">${escHtml(label)}</span></div>`;
     const rows = `<div class="uptime-row">${stat("24 h", d.uptime["24h"])}${stat("7 days", d.uptime["7d"])}${stat("30 days", d.uptime["30d"])}</div>`;
     const outages = outageListHtml("host", d.host_id, d.outages);
-    el.innerHTML = rows + outages + `<div class="uptime-reset"><button class="btn-ghost" data-click="resetHostUptime" data-args="${dargs(ip)}">↺ Reset uptime</button></div>`;
+    el.innerHTML = rows + outages + `<div class="uptime-reset" data-lvl="i"><button class="btn-ghost" data-click="resetHostUptime" data-args="${dargs(ip)}">↺ Reset uptime</button></div>`;
     maybeAutoExplain("host", el, ip);
   } catch {
     el.innerHTML = `<span style="font-size:11px;color:var(--text-3)">No uptime data yet.</span>`;
@@ -229,6 +232,22 @@ function switchDetailTab(name) {
     p.classList.toggle("active", p.id === `dtab-${name}`)
   );
 }
+
+// The SSH tab is Advanced, but shows (tagged) on a device with SSH access set up
+function markSshTabInUse(ip, on) {
+  const t = document.querySelector('.detail-tab[data-tab="ssh"]');
+  if (!t || document.getElementById("hostDetail")?.dataset.ip !== ip) return;
+  t.classList.toggle("lvl-inuse", on);
+  t.querySelector(".lvl-tag")?.remove();
+  if (on) t.appendChild(levelTag("a"));
+  if (!on && t.classList.contains("active") && isLevelHidden(t)) t.classList.add("lvl-visit");   // removed the last one while on it: stay
+}
+
+// On the SSH tab when the level hides it: back to Info
+onLevelChange(() => {
+  const t = document.querySelector(".detail-tab.active");
+  if (t && isLevelHidden(t)) switchDetailTab("info");
+});
 
 function hideHostDetail() {
   const panel = document.getElementById("hostDetail");
@@ -431,6 +450,7 @@ async function openEditHost(ip) {
   document.getElementById("editNoOfflineAlert").checked = !!host.no_offline_alert;
   document.getElementById("editNoDhcpWarn").checked = !!host.no_dhcp_warn;
   document.getElementById("editPublic").checked = !!host.public;
+  needsInUse(document.getElementById("editPublic"), host.public);
   document.getElementById("editPublicName").value = host.public_name || "";
   onEditPublicToggle();
   document.getElementById("editDhcpPoolRow").style.display = host.is_dhcp ? "" : "none";
@@ -438,6 +458,7 @@ async function openEditHost(ip) {
   sel.innerHTML = DEVICE_TYPES.map(t =>
     `<option value="${t}"${t === host.device_type ? " selected" : ""}>${t}</option>`
   ).join("");
+  levelFoldForm(document.querySelector("#editModal .modal"));   // rare fields fold below Advanced
   document.getElementById("editModal").classList.add("open");
 }
 function closeEditHost() {

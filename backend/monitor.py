@@ -1013,8 +1013,10 @@ def push_health() -> dict:
         return dict(_push_health)
 
 
-def push_status() -> tuple[bool, str]:
-    cfg = get_statuspage_config()
+def push_status(cfg: dict | None = None) -> tuple[bool, str]:
+    """Push the status to the status app. `cfg` tries other settings than the saved
+    ones (Settings → 🌐 Push now pushes with what's on screen without saving it)."""
+    cfg = cfg or get_statuspage_config()
     if not cfg.get("enabled") or not cfg.get("url"):
         return False, "status page push disabled or no URL"
     base = cfg["url"].strip().rstrip("/")

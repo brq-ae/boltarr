@@ -173,22 +173,8 @@ body {
 .ctx-item:hover { background: var(--surface3, var(--surface)); color: var(--text-1); }
 .ctx-sep { height: 1px; background: var(--border); margin: 4px 8px; }
 
-.sidebar-footer {
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-/* ── AI settings button ────────────────────────────────────────────────────── */
-.ai-settings-btn {
-  display: flex; align-items: center; gap: 7px;
-  width: 100%; padding: 6px 8px; margin-bottom: 8px;
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius); color: var(--text-2);
-  font-size: 11px; font-family: var(--font-ui); cursor: pointer;
-  text-align: left;
-}
-.ai-settings-btn:hover { border-color: var(--accent); color: var(--text); }
+/* AI status dot on the Settings nav item (grey = AI not set up, green = set up) */
+.sidebar-nav-item .ai-status-dot { margin-left: auto; }
 
 .ai-status-dot {
   width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
@@ -205,47 +191,13 @@ body {
 .test-ok   { border-color: var(--green);  color: var(--green); }
 .test-fail { border-color: var(--red);    color: var(--red);   }
 
-/* ── Settings accordion (native <details>) ─────────────────────────────────── */
-.settings-section { margin-bottom: 8px; }
 /* Daily digest preview (Settings → Alerts) */
 .digest-preview { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px;
   background: var(--surface2); display: flex; flex-direction: column; gap: 6px; }
 .digest-preview-title { font-weight: 600; font-size: 12px; }
 .digest-preview-body { margin: 0; white-space: pre-wrap; word-break: break-word;
   font-family: inherit; font-size: 12px; line-height: 1.5; }
-.settings-applied { color: var(--green); font-size: 12px; align-self: center; margin-right: auto; }
 .digest-preview-note { color: var(--yellow); font-size: 11.5px; }
-.settings-section > summary {
-  list-style: none; cursor: pointer; user-select: none;
-  display: flex; align-items: center; gap: 10px;
-  padding: 11px 13px; font-size: 13px; font-weight: 600;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.settings-section[open] > summary {
-  border-color: var(--accent);
-  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
-}
-.settings-section > summary::-webkit-details-marker { display: none; }
-.settings-section > summary::before {
-  content: "+"; font-size: 17px; font-weight: 700; line-height: 1;
-  color: var(--accent); width: 15px; text-align: center; flex: none;
-}
-.settings-section[open] > summary::before { content: "−"; }
-.settings-section > summary:hover { border-color: var(--accent); color: var(--accent); }
-.acc-body {
-  display: flex; flex-direction: column; gap: 12px;
-  padding: 14px 13px 16px;
-  border: 1px solid var(--border); border-top: none;
-  border-radius: 0 0 8px 8px;
-}
-.acc-subhead {
-  display: flex; align-items: center; gap: 10px;
-  font-size: 12px; font-weight: 600; color: var(--text-2);
-  text-transform: uppercase; letter-spacing: .05em;
-  padding-bottom: 2px; border-bottom: 1px solid var(--border);
-}
 
 /* ── Toast ─────────────────────────────────────────────────────────────────── */
 .toast {
@@ -309,6 +261,8 @@ body {
 .gs-title, .gs-why { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gs-title { font-size: 12px; color: var(--text); }
 .gs-why { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+.gs-feat-ico { width: 18px; text-align: center; color: var(--text-3); flex-shrink: 0; }
+.gs-title .lvl-tag { margin-left: 4px; }
 .gs-item b { color: var(--accent); font-weight: 600; }
 .gs-dim { color: var(--text-3); font-size: 11px; }
 .gs-more { font-size: 11px; color: var(--accent); justify-content: center; }
@@ -1153,6 +1107,12 @@ tbody td {
 .field-dim input, .field-dim select { pointer-events: none; }
 .form-row label { display: block; font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
 .form-row input, .form-row select, .form-row textarea { width: 100%; }
+/* a tick box with its words, inside a form row (beats the .form-row label/input rules) */
+.form-row label.form-check {
+  display: flex; align-items: center; gap: 7px; height: 32px; margin: 0; cursor: pointer;
+  font-size: 12px; font-weight: 400; color: var(--text-2); text-transform: none; letter-spacing: 0;
+}
+.form-row .form-check input { width: 14px; height: 14px; accent-color: var(--accent); }
 .form-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 
@@ -1553,6 +1513,8 @@ tbody td {
   white-space: pre-wrap; word-break: break-all; display: block;
 }
 .scan-build-actions { display: flex; align-items: center; gap: 8px; }
+/* below Advanced the command preview is hidden, so give Run scan its own room */
+html[data-level="basic"] .scan-build-actions, html[data-level="intermediate"] .scan-build-actions { margin-top: 14px; }
 /* checkbox group — override the .form-row label/input rules */
 .scan-checks { display: flex; flex-wrap: wrap; gap: 8px 20px; }
 .scan-checks label {
@@ -1564,8 +1526,8 @@ tbody td {
 
 /* change-tracking feed */
 .chg-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
-.chg-row[onclick] { padding: 8px; margin: 0 -8px; border-radius: 6px; }
-.chg-row[onclick]:hover { background: var(--surface2); }
+.chg-row[data-click] { padding: 8px; margin: 0 -8px; border-radius: 6px; }
+.chg-row[data-click]:hover { background: var(--surface2); }
 .chg-icon {
   width: 20px; height: 20px; flex-shrink: 0; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -2089,6 +2051,12 @@ table.fit-cols .port-list, table.fit-cols .svc-port-status { flex-wrap: nowrap; 
 .col-menu label.auto-hidden { color: var(--text-3); }
 .col-menu label.auto-hidden::after { content: "hidden: no room"; font-size: 10px; color: var(--text-3); margin-left: 6px; order: 1; }
 .col-menu label.auto-hidden .col-pin { order: 2; }
+/* Columns ▾: the ones your view level hides, under their own heading (S-15) */
+.col-menu .col-menu-head {
+  margin: 6px 2px 2px; padding: 7px 6px 3px; border-top: 1px solid var(--border2);
+  font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3);
+}
+.col-menu label .lvl-tag { margin-left: 2px; }
 /* Phones: finger-sized rows, pins and the sheet's × */
 @media (hover: none), (max-width: 799px) {
   .col-menu label { padding: 9px 10px; font-size: 13px; }
@@ -2184,6 +2152,9 @@ table.fit-cols .port-list, table.fit-cols .svc-port-status { flex-wrap: nowrap; 
 /* ── Login ─────────────────────────────────────────────────────────────────── */
 .settings-sub { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .06em; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .nopw-banner { border-color: oklch(82% 0.17 85 / 0.45); flex-wrap: wrap; }
+.level-banner { width: min(640px, calc(100% - 32px)); border-color: oklch(82% 0.17 85 / 0.45); line-height: 1.5; }
+.level-banner button { flex-shrink: 0; font-size: 12px; padding: 6px 14px; }
+@media (max-width: 640px) { .level-banner { flex-direction: column; align-items: stretch; } }
 
 .login-page { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; background: var(--bg); }
 .login-card { width: 360px; max-width: 100%; background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius); padding: 28px 26px 24px; }
@@ -2415,3 +2386,115 @@ label.mon-switch { position: relative; }
 .form-row .maint-pick-row input { accent-color: var(--accent); flex: none; width: auto; margin: 0; }
 .form-row .maint-pick-row .mono { font-size: 11px; }
 @media (max-width: 640px) { .maint-when { margin-left: 0; width: 100%; } }
+
+/* ── Settings page (S-15): tabs on top, cards, a save bar at the bottom ─────── */
+.set-subtabs { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }   /* wraps to a 2nd row on a phone */
+.set-page { flex: 1; overflow-y: auto; padding: 16px; }
+.set-pane { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.set-card {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 16px 16px; margin: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+}
+.set-card-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.set-card-note { font-size: 11px; margin: -6px 0 0; }
+.set-card-head { display: flex; align-items: center; gap: 10px; }
+.set-card-head .set-card-title { flex: 1; }
+.set-card-head label { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
+/* groups of fields inside a card keep the card's spacing */
+.set-card #loginOff, .set-card #loginOn, .set-card #backupPwRows { display: flex; flex-direction: column; gap: 12px; }
+.set-card .login-error:empty { display: none; }
+.set-group { display: flex; flex-direction: column; gap: 12px; }
+.set-card .form-row { margin-bottom: 0; }
+.set-card .settings-sub { margin: 4px 0 0; }
+.set-danger { border-color: oklch(58% 0.21 25 / 0.45); }
+.set-danger .set-card-title { color: var(--red); }
+.restore-box { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface2); }
+.restore-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.set-savebar {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  padding: 10px 16px; border-top: 1px solid var(--accent);
+  background: var(--surface2);
+}
+.set-savebar[hidden] { display: none !important; }
+.set-savebar-msg { margin-right: auto; font-size: 12px; color: var(--accent); }
+@media (max-width: 799px) {
+  .set-page { padding: 12px; }
+  .set-savebar { padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ── View levels (S-15) ─────────────────────────────────────────────────────── */
+/* An item for a higher level hides below it, unless it's in use (.lvl-inuse) or its
+   box is opened for now (.lvl-showall). Advanced shows everything. */
+html[data-level="basic"] [data-lvl="i"]:not(.lvl-inuse):not(.lvl-visit):not(.lvl-showall [data-lvl]),
+html[data-level="basic"] [data-lvl="a"]:not(.lvl-inuse):not(.lvl-visit):not(.lvl-showall [data-lvl]),
+html[data-level="intermediate"] [data-lvl="a"]:not(.lvl-inuse):not(.lvl-visit):not(.lvl-showall [data-lvl]) { display: none !important; }
+/* Step 8: AI / status page controls at Basic while that feature isn't set up */
+html[data-level="basic"][data-ai="off"] [data-needs="ai"]:not(.lvl-inuse),
+html[data-level="basic"][data-sp="off"] [data-needs="sp"]:not(.lvl-inuse) { display: none !important; }
+/* a sub-tab bar left with one tab, and a toolbar left empty, aren't shown */
+.svc-subtabs.lvl-onetab, .svc-toolbar.lvl-emptybar { display: none !important; }
+/* the small grey tag on something shown because it's in use */
+.lvl-tag {
+  display: inline-block; margin-left: 6px; padding: 0 5px; border-radius: 3px;
+  font-size: 9px; font-weight: 500; line-height: 15px; letter-spacing: 0.3px; text-transform: none;
+  color: var(--text-3); background: var(--surface2); border: 1px solid var(--border); vertical-align: middle;
+}
+/* the tag only shows below the level the item belongs to */
+html[data-level="advanced"] .lvl-tag,
+html[data-level="intermediate"] .lvl-tag[data-tag-for="i"] { display: none; }
+
+/* the switch at the bottom of the sidebar */
+.sidebar-level { padding: 10px 12px 14px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.sidebar-level-label { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+.level-seg { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 2px; gap: 2px; }
+.level-seg button {
+  flex: 1 1 auto; min-width: 0; padding: 5px 4px; border: none; border-radius: calc(var(--radius) - 2px);
+  background: none; color: var(--text-2); font-size: 11px; font-family: var(--font-ui); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.level-seg button:hover { color: var(--text); background: var(--surface2); }
+.level-seg button.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+
+/* the choices in Settings → General */
+.level-choices { display: flex; flex-direction: column; gap: 8px; }
+.level-choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface2); color: var(--text-2); font-family: var(--font-ui); cursor: pointer;
+}
+.level-choice b { font-size: 13px; color: var(--text); }
+.level-choice span { font-size: 11px; color: var(--text-3); }
+.level-choice:hover { border-color: var(--text-3); }
+.level-choice.active { border-color: var(--accent); background: var(--accent-dim); }
+.level-choice.active b { color: var(--accent); }
+
+/* ⋯ menu: rare buttons (data-more) move into it at Basic and Intermediate */
+.more-wrap { position: relative; flex-shrink: 0; display: none; }
+html[data-level="basic"] .more-wrap, html[data-level="intermediate"] .more-wrap { display: inline-block; }
+html[data-level="basic"] [data-more], html[data-level="intermediate"] [data-more] { display: none !important; }
+.more-wrap .col-menu { min-width: 180px; }
+.more-wrap .col-menu button {
+  display: block; width: 100%; background: none; border: 0; color: var(--text); text-align: left;
+  padding: 6px 8px; border-radius: 5px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.more-wrap .col-menu button:hover { background: var(--surface3); }
+.more-wrap .col-menu button.more-danger { color: var(--red); }
+@media (hover: none), (max-width: 799px) { .more-wrap .col-menu button { padding: 10px; font-size: 13px; } }
+
+/* S-15 step 6: "More options" fold at the bottom of long forms (below Advanced) */
+.lvl-fold { margin: 4px 0 2px; }
+.lvl-fold-btn {
+  background: none; border: 0; padding: 6px 0; cursor: pointer;
+  color: var(--text-2); font-size: 12px; font-weight: 600;
+}
+.lvl-fold-btn::after { content: " ▸"; color: var(--text-3); }
+.lvl-fold-btn[aria-expanded="true"]::after { content: " ▾"; }
+.lvl-fold-btn:hover { color: var(--text); }
+.lvl-fold-body { padding: 8px 0 0 12px; border-left: 2px solid var(--border2); margin-left: 2px; }
+.form-2col > :only-child { grid-column: 1 / -1; }   /* its partner moved into the fold */
+
+/* S-15 step 9: an item opened from search is pointed out briefly */
+.lvl-flash { animation: lvl-flash 1.8s ease-out; }
+@keyframes lvl-flash { 0%, 40% { outline: 2px solid var(--accent); outline-offset: 3px; } 100% { outline: 2px solid transparent; outline-offset: 3px; } }
+@media (prefers-reduced-motion: reduce) { .lvl-flash { animation: none; outline: 2px solid var(--accent); outline-offset: 3px; } }

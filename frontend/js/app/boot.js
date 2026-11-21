@@ -5,12 +5,13 @@
 
 async function initAiStatus() {
   try {
-    const { llm } = await api("GET", "/api/settings");
+    const { llm, statuspage } = await api("GET", "/api/settings");
     updateAiStatusDot(llm.configured);
+    setFeatureReady("sp", !!statuspage?.enabled);
   } catch (_) {}
 }
 
-document.addEventListener("DOMContentLoaded", () => { boot(); initAiStatus(); });
+document.addEventListener("DOMContentLoaded", () => { boot(); initAiStatus(); initViewLevel(); });
 
 
 // ── Login ─────────────────────────────────────────────────────────────────────
@@ -47,24 +48,41 @@ function snoozeNoPwBanner() {
 
 async function openLoginSettings() {
   document.querySelector(".nopw-banner")?.remove();
-  await openSettings();
-  const sec = document.getElementById("setLoginSection");
-  sec.open = true;
-  sec.scrollIntoView({ block: "start" });
+  setTab("settings");
+  setSettingsTab("security");
   document.getElementById("loginNewPw")?.focus();
 }
 
-async function renderLoginSettings() {
+// The login-service fields are settings (saved with the Settings save bar); the rest of
+// the Login part are actions with their own buttons. After an action (keepEdits) the
+// login-service fields keep any change not saved yet.
+let _loginProxySaved = null;
+function loginProxyValues() {
+  const $ = id => document.getElementById(id);
+  return { trust_proxy: $("loginTrustProxy").checked, trusted_proxies: $("loginProxies").value,
+           proxy_header: $("loginProxyHeader").value };
+}
+function loginProxyChanged() {
+  return !!_loginProxySaved && JSON.stringify(loginProxyValues()) !== JSON.stringify(_loginProxySaved);
+}
+
+async function renderLoginSettings(keepEdits = false) {
   let s;
   try { s = await api("GET", "/api/auth/settings"); } catch (_) { return; }
   const $ = id => document.getElementById(id);
   $("loginOff").hidden = !!s.enabled;
   $("loginOn").hidden = !s.enabled;
   $("loginUserName").textContent = s.username || "admin";
-  $("loginTrustProxy").checked = !!s.trust_proxy;
-  $("loginProxies").value = s.trusted_proxies || "";
+  const edited = keepEdits && loginProxyChanged();
+  _loginProxySaved = { trust_proxy: !!s.trust_proxy, trusted_proxies: s.trusted_proxies || "",
+                       proxy_header: s.proxy_header || "Remote-User" };
+  levelInUse("proxy", _loginProxySaved.trust_proxy);
+  if (!edited) {
+    $("loginTrustProxy").checked = _loginProxySaved.trust_proxy;
+    $("loginProxies").value = _loginProxySaved.trusted_proxies;
+    $("loginProxyHeader").value = _loginProxySaved.proxy_header;
+  }
   loginProxyCheck();
-  $("loginProxyHeader").value = s.proxy_header || "Remote-User";
   ["loginNewPw", "loginNewPw2", "loginCurPw", "loginChgPw", "loginChgPw2", "loginOffPw"].forEach(id => { $(id).value = ""; });
 }
 
@@ -76,7 +94,7 @@ async function enableLogin() {
     await api("POST", "/api/auth/setup", { username: $("loginNewUser").value.trim() || "admin", password: pw });
   } catch (e) { return alert("Login not turned on: " + e.message); }
   showToast("Login is on — this browser stays signed in");
-  await renderLoginSettings();
+  await renderLoginSettings(true);
   await loadLoginState();
 }
 
@@ -87,7 +105,7 @@ async function changeLoginPassword() {
     await api("POST", "/api/auth/password", { current: $("loginCurPw").value, new: $("loginChgPw").value });
   } catch (e) { return alert("Password not changed: " + e.message); }
   showToast("Password changed");
-  await renderLoginSettings();
+  await renderLoginSettings(true);
 }
 
 // F-35: a whole range (e.g. 172.18.0.0/16) trusts every device in it — say so under the box.
@@ -103,14 +121,10 @@ function loginProxyCheck() {
   warn.hidden = !wide.length;
 }
 
+// Saved by the Settings save bar (saveSettings), only when changed
 async function saveLoginProxy() {
-  const $ = id => document.getElementById(id);
-  let r;
-  try {
-    r = await api("PUT", "/api/auth/settings", { trusted_proxies: $("loginProxies").value,
-      proxy_header: $("loginProxyHeader").value, trust_proxy: $("loginTrustProxy").checked });
-  } catch (e) { return alert("Not saved: " + e.message); }
-  showToast("Saved");
+  if (!loginProxyChanged()) return;
+  await api("PUT", "/api/auth/settings", loginProxyValues());
   await renderLoginSettings();
 }
 
@@ -119,7 +133,7 @@ async function disableLogin() {
     await api("POST", "/api/auth/disable", { password: document.getElementById("loginOffPw").value });
   } catch (e) { return alert("Login is still on: " + e.message); }
   showToast("Login is off");
-  await renderLoginSettings();
+  await renderLoginSettings(true);
   await loadLoginState();
 }
 
@@ -128,4 +142,4 @@ async function logout() {
   location.href = "/login.html";
 }
 
-registerActions({ enableLogin, changeLoginPassword, saveLoginProxy, loginProxyCheck, disableLogin, logout, openLoginSettings, snoozeNoPwBanner });
+registerActions({ enableLogin, changeLoginPassword, loginProxyCheck, disableLogin, logout, openLoginSettings, snoozeNoPwBanner });

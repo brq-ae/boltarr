@@ -388,12 +388,14 @@ function openEditService(id) {
   document.getElementById("svcModalMonitored").checked = !!s.monitored;
   svcModalMonitorToggled();
   document.getElementById("svcModalPublic").checked    = !!s.public;
+  needsInUse(document.getElementById("svcModalPublic"), s.public);
   document.getElementById("svcModalPublicName").value  = s.public_name || "";
   svcModalPublicToggled();
   populateSvcHostSelect(s.ip);                                 // let the host be changed on edit too
   document.getElementById("svcHostRow").style.display        = "";
   document.getElementById("containerPickRow").style.display  = "none";
   document.getElementById("svcModalDeleteBtn").style.display = "";
+  levelFoldForm(document.querySelector("#serviceModal .modal"));
   document.getElementById("serviceModal").classList.add("open");
 }
 
@@ -414,6 +416,7 @@ function openAddService(presetIp) {
   document.getElementById("svcModalMonitored").checked = false;
   svcModalMonitorToggled();
   document.getElementById("svcModalPublic").checked    = false;
+  needsInUse(document.getElementById("svcModalPublic"), false);
   document.getElementById("svcModalPublicName").value  = "";
   svcModalPublicToggled();
   document.getElementById("svcModalDeleteBtn").style.display = "none";
@@ -431,6 +434,7 @@ function openAddService(presetIp) {
   const last   = localStorage.getItem("boltarr_last_svc_host");
   const preset = (presetIp && allHosts.some(h => h.ip === presetIp)) ? presetIp : (last || null);
   populateSvcHostSelect(preset);
+  levelFoldForm(document.querySelector("#serviceModal .modal"));
   document.getElementById("serviceModal").classList.add("open");
 }
 
@@ -554,6 +558,7 @@ let svcSortDir    = 1;
 async function loadServicesData() {
   try { allServices = await api("GET", "/api/services"); } catch { allServices = []; }
   try { allDependencies = await api("GET", "/api/service-dependencies"); } catch { allDependencies = []; }
+  levelInUse("deps", allDependencies.length > 0);
   populateSvcHostFilter();
   scheduleSvcResumeRefresh();
 }
@@ -610,6 +615,7 @@ function renderServicesTable() {
   const tbody = document.querySelector("#servicesTable tbody");
   if (!tbody) return;
   const rows = servicesVisibleRows();
+  applySvcHiddenCols();   // a first description shows that line at Basic
 
   const count = document.getElementById("serviceCount");
   if (count) count.textContent = `${rows.length} of ${allServices.length}`;
@@ -713,30 +719,25 @@ async function saveSvcField(id, field, value) {
 
 // ── Services column show/hide (persisted per browser) ────────────────────────
 const SVC_COLS = ["icon", "desc", "host", "ps", "mon", "pub", "url"];
-function getSvcHiddenCols() {
-  try { return JSON.parse(localStorage.getItem("boltarr.svcHiddenCols") || "[]"); }
-  catch (e) { return []; }
-}
+function getSvcHiddenCols() { return hiddenColsFor("servicesTable"); }   // your choices + the level's defaults (levels.js)
 function applySvcHiddenCols() {
   const t = document.getElementById("servicesTable");
   if (!t) return;
   const hidden = getSvcHiddenCols();
-  SVC_COLS.forEach(c => t.classList.toggle("hide-svc-" + c, hidden.includes(c)));
+  let changed = false;
+  SVC_COLS.forEach(c => { if (t.classList.contains("hide-svc-" + c) !== hidden.includes(c)) { changed = true; t.classList.toggle("hide-svc-" + c); } });
+  syncLevelColMenu("servicesTable");
+  if (changed) window.fitColumns?.("servicesTable");
 }
 function setSvcColumn(key, visible) {
-  let hidden = getSvcHiddenCols();
-  if (visible) hidden = hidden.filter(k => k !== key);
-  else if (!hidden.includes(key)) hidden.push(key);
-  localStorage.setItem("boltarr.svcHiddenCols", JSON.stringify(hidden));
+  chooseColumn("servicesTable", key, visible);
   applySvcHiddenCols();
 }
 function initSvcColumnMenu() {
   const btn = document.getElementById("svcColMenuBtn");
   const menu = document.getElementById("svcColMenu");
   if (!btn || !menu) return;
-  const hidden = getSvcHiddenCols();
   menu.querySelectorAll("input[data-col]").forEach(cb => {
-    cb.checked = !hidden.includes(cb.getAttribute("data-col"));
     cb.addEventListener("change", () => setSvcColumn(cb.getAttribute("data-col"), cb.checked));
   });
   btn.addEventListener("click", e => { e.stopPropagation(); menu.classList.toggle("open"); });
@@ -866,8 +867,9 @@ function setSvcTab(tab) {
   document.getElementById("svc-panel-topology").style.display  = tab === "topology" ? "flex" : "none";
   document.getElementById("serviceFilter").style.display       = tab === "list"     ? ""     : "none";
   document.getElementById("serviceCount").style.display        = tab === "list"     ? ""     : "none";
-  document.querySelectorAll(".svc-subtab").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll("#panel-services .svc-subtab").forEach(b => b.classList.remove("active"));
   document.getElementById(`svcTabBtn-${tab}`)?.classList.add("active");
+  levelVisit(document.getElementById(`svcTabBtn-${tab}`));
   if (tab === "topology") renderSvcTopology();
 }
 

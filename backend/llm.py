@@ -165,8 +165,10 @@ def get_default_model() -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def list_models() -> list[str]:
-    cfg = _cfg()
+async def list_models(cfg: dict | None = None) -> list[str]:
+    """The AI server's models. `cfg` tests other settings than the saved ones
+    (Settings → ⚡ Test AI tries what's on screen without saving it)."""
+    cfg = cfg or _cfg()
     provider = cfg.get("provider", "none")
     if provider == "none":
         return []

@@ -33,6 +33,7 @@ function _maintShift(local, minutes) {
 
 async function loadMaintWindows() {
   try { maintWindows = (await api("GET", "/api/maintenance-windows")).windows || []; } catch { maintWindows = []; }
+  levelInUse("maint", maintWindows.some(w => w.state !== "done"));
   renderMaintBanner();
 }
 

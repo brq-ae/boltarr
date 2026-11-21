@@ -27,6 +27,7 @@ A practical guide to operating Boltarr day-to-day. For installation, see the
 15. [AI assistant](#ai-assistant)
 16. [Login & security](#login--security)
 17. [Backup & restore](#backup--restore)
+18. [View levels](#view-levels)
 
 For every feature in more detail, see the
 [Boltarr wiki](https://github.com/brq-ae/boltarr/wiki).
@@ -40,7 +41,9 @@ to **create your admin login** (or **Skip for now — set it later in Settings**
 see [Login & security](#login--security).
 
 The left sidebar holds the main pages — **Topology, Services, Hosts, Subnets,
-Scans, SSH Keys** — and the ⚙ **Settings** button at the bottom. The top bar has
+Scans, SSH Keys** — and the ⚙ **Settings** button at the bottom. Settings is a page
+with tabs (General, Alerts, Monitoring, Status page, AI, Login & Security, Data);
+change anything and a bar at the bottom offers **Undo** and **Save**. The top bar has
 the **search box** and **💬 Chat**. On a phone the main pages are in a bar at the
 bottom.
 
@@ -138,13 +141,13 @@ within 5 minutes.
 
 ## Change tracking & alerts
 
-Every scan is diffed against the last known state. **Settings → Change tracking**
+Every scan is diffed against the last known state. **Settings → Monitoring → Changes history**
 controls what's recorded (new hosts, opened/closed ports, MAC/hostname changes,
 offline/online) and how long to keep it (retention days). Recorded changes show
 in the **Scans → Changes** feed and per-host **Changes** tab; click a row to jump
 to that host.
 
-**Settings → Change alerts** turns recorded changes into ntfy notifications,
+**Settings → Alerts → Device & network alerts** turns recorded changes into ntfy notifications,
 delivered as a **per-scan summary** and/or a **daily digest** at a time you set.
 Use **"Alert for"** to scope every alert type by host classification —
 **Static / Dynamic / All** (unknown-classified hosts never alert). This only
@@ -171,7 +174,7 @@ offline — the coloured dot next to each IP in the Hosts table (green online /
 red offline / grey unknown). A host goes offline after a few consecutive missed
 sweeps and back online on the first response, so brief blips don't false-alarm.
 
-Configure it in **Settings → Liveness** (enable, sweep interval, offline-after
+Configure it in **Settings → Monitoring → Device up/down** (enable, sweep interval, offline-after
 threshold). Offline/online transitions are recorded as changes and — for static
 hosts, unless opted out — fire an immediate ntfy alert. During quiet hours they
 are sent together as one summary when quiet hours end. First activation is silent
@@ -227,7 +230,7 @@ and Changes. The panel remembers your tab when you switch hosts.
 
 **IP History** lists every static-range IP (outside the DHCP pool) as *In use /
 Recent / Stale / Gone / Never seen*, so you can tell which addresses are free.
-**Settings → 🕓 IP History** sets when an unseen IP reads as stale (default 30
+**Settings → Monitoring → IP History** sets when an unseen IP reads as stale (default 30
 days) or gone (default 60).
 
 From the detail panel you can:
@@ -301,7 +304,7 @@ built-in Uptime-Kuma.
 default, so you only watch the services you care about.
 
 - Boltarr checks the service on a timer — **every 60 seconds by default,
-  configurable 15–600s** in Settings → Notifications (*"Probe each service every
+  configurable 15–600s** in Settings → Monitoring → Service checks (*"Probe each service every
   N seconds"*). A longer interval is lighter but slower to notice an outage; the
   interval also sets the width of one tick on the status page's 1-hour bar.
 - **Monitor check** picks how: **HTTP(S)** (a web request to the URL), **TCP** (a
@@ -324,9 +327,9 @@ default, so you only watch the services you care about.
   down service on an offline host is tagged **"host offline"** so you can see the
   root cause at a glance. When a host goes offline, its services' down-alerts are
   **suppressed** (you get the one host-offline alert instead of a flood) — a
-  toggle in Settings → Notifications, on by default.
+  toggle in Settings → Alerts → Service alerts, on by default.
 
-Alerts are configured under Settings → Notifications (below).
+Alerts are configured under Settings → Alerts (below).
 
 ---
 
@@ -335,7 +338,7 @@ Alerts are configured under Settings → Notifications (below).
 Boltarr sends push notifications via [ntfy](https://ntfy.sh) — the public
 `ntfy.sh` or your own self-hosted server.
 
-**Set up** in ⚙ **Settings → Notifications**:
+**Set up** in ⚙ **Settings → Alerts → Where alerts go (ntfy)**:
 
 - **Enabled** — master on/off.
 - **Server** — `https://ntfy.sh` or your self-hosted URL (e.g.
@@ -393,7 +396,7 @@ the page (under **Networking** if its device type is router/gateway/switch/
 unmanaged-switch/firewall/AP, otherwise under **Hosts**). As with services, only
 the public name, status, uptime and ticks are pushed — never the IP.
 
-**2. Configure the push** in ⚙ **Settings → Public status page**:
+**2. Configure the push** in ⚙ **Settings → Status page**:
 
 - **Enabled** — on/off.
 - **Status app URL** — the LAN address of your status app, e.g.
@@ -467,7 +470,7 @@ they should have access to.
 
 ## AI assistant
 
-AI is optional. Set it up in **⚙ Settings → 🤖 AI**: **Provider** (Ollama,
+AI is optional. Set it up in **⚙ Settings → AI**: **Provider** (Ollama,
 OpenAI-compatible, or Anthropic), **Base URL**, **API Key**, **Default Model**,
 **Timeout / Long timeout**, and for Ollama **Context (tokens)**. **⚡ Test AI**
 checks the connection. Environment variables (`LLM_*`) override these.
@@ -492,7 +495,7 @@ checks the connection. Environment variables (`LLM_*`) override these.
 - **Explain** — every outage in a service or host panel has an Explain link:
   Boltarr gathers the facts and the AI words a likely cause. Without AI you still
   get the facts.
-- **AI history** (**Settings → 🤖 AI → AI history**) — keeps earlier results and
+- **AI history** (**Settings → AI → AI history**) — keeps earlier results and
   the **AI actions record** (every Do it and Cancel). **Keep up to** N per item
   (default 10), **Delete after** N days (default 90, 0 = no limit), **🗑 Clean
   history**.
@@ -510,7 +513,7 @@ notes go to that provider.
 
 ## Login & security
 
-- **Login** (**Settings → 🔒 Login**) — optional, one admin account. Password 8+
+- **Login** (**Settings → Login & Security**) — optional, one admin account. Password 8+
   characters; browsers stay logged in for 30 days. **Change password** logs out
   other browsers. Behind Authelia/Authentik? Under **Login service in front**, enter
   **Its IP address(es)** and the **User header** (default `Remote-User`) and tick
@@ -522,7 +525,7 @@ notes go to that provider.
   (POST/PUT/PATCH/DELETE), with login on or off. This blocks forged requests from
   other websites.
 - **Strict browser security** — Boltarr's pages load nothing from outside and the
-  browser refuses code written into the page. **Settings → 🛡 Security** lists
+  browser refuses code written into the page. **Settings → Login & Security → Strict mode** lists
   anything blocked and lets you allow dashboards (Homarr, Home Assistant…) to show
   Boltarr in a frame. Off-switch if a button breaks:
   `BOLTARR_ALLOW_INLINE_SCRIPTS=1` (and please open an issue).
@@ -534,7 +537,7 @@ notes go to that provider.
 
 ## Backup & restore
 
-Everything is in **⚙ Settings → 🗄 Data**. Boltarr's data lives in `data/`
+Everything is in **⚙ Settings → Data**. Boltarr's data lives in `data/`
 (`boltarr.db` + `config.yaml`).
 
 - **⬇ Backup** — downloads a zip of the database and settings. **Protect with a
@@ -564,3 +567,20 @@ all* + *Delete selected* for clearing many at once.
 
 Mount `./data` as a Docker volume to persist across container restarts (the
 provided compose files do this automatically).
+
+---
+
+## View levels
+
+Pick how much Boltarr shows: **Basic** (the essentials: what's on my network, and
+is it working?), **Intermediate** (adds tools for running a homelab: schedules,
+hierarchy, status page) or **Advanced** (everything, with every option). Switch
+under **View** at the bottom of the sidebar (☰ on a phone) or in **Settings →
+General**. Each browser keeps its own level.
+
+The level only changes what you see; everything keeps working the same. New
+installs start on Basic, upgrades on Advanced (so nothing moves). Things you use
+always show, with a small grey tag; rarer options sit under **More options**;
+and search lists anything your level hides under **Features**, opening it for
+that visit. See the wiki's
+[View Levels](https://github.com/brq-ae/boltarr/wiki/View-Levels) page.

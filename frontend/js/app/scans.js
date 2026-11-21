@@ -20,6 +20,7 @@ function setScanTab(tab) {
   document.getElementById("scan-panel-changes").style.display   = tab === "changes"   ? "" : "none";
   document.querySelectorAll("#panel-scans .svc-subtab").forEach(b => b.classList.remove("active"));
   document.getElementById(`scanTabBtn-${tab}`)?.classList.add("active");
+  levelVisit(document.getElementById(`scanTabBtn-${tab}`));
   if (tab === "changes")   loadChanges();
   if (tab === "schedules") loadSchedules();
   if (tab === "history")   loadScans();   // always refresh (picks up running scans/probes + starts the live poll)
@@ -35,6 +36,8 @@ const _CHANGE_META = {
   port_closed:      { icon: "▼", cls: "chg-closed", text: e => `Port ${escHtml(e.port)} closed` },
   mac_changed:      { icon: "⇄", cls: "chg-id",     text: e => `MAC changed: ${escHtml(e.old_value||"?")} → ${escHtml(e.new_value||"?")}` },
   hostname_changed: { icon: "⇄", cls: "chg-id",     text: e => `Hostname: ${escHtml(e.old_value||"?")} → ${escHtml(e.new_value||"?")}` },
+  host_offline:     { icon: "●", cls: "chg-closed", text: () => "Went offline" },
+  host_online:      { icon: "●", cls: "chg-new",    text: () => "Back online" },
 };
 
 // A change row in the global feed: open that host, or say it's gone (deleted since)
@@ -44,7 +47,7 @@ async function openChangeHost(ip) {
 }
 
 function changeEventHTML(e, showIp = true) {
-  const m = _CHANGE_META[e.type] || { icon: "•", cls: "", text: () => e.type };
+  const m = _CHANGE_META[e.type] || { icon: "•", cls: "", text: () => escHtml(String(e.type).replace(/_/g, " ")) };
   const when = fmtLocal(e.ts);
   // In the global feed the row is clickable → jump to that host's panel.
   const click = showIp ? ` style="cursor:pointer" data-click="openChangeHost" data-args="${dargs(e.ip)}" title="Open ${escHtml(e.ip)}"` : "";
@@ -108,6 +111,18 @@ async function loadScanProfiles() {
 }
 
 function _scanOptsFromFields() {
+  const o = _scanOptsShown();
+  // A field your level hides never sends a value left over from a higher level: it
+  // uses the chosen profile's own setting instead.
+  const p = _scanProfileOpts(), hid = id => isLevelHidden(document.getElementById(id));
+  if (hid("scanPorts"))  Object.assign(o, { ports: p.ports, top_n: p.top_n, port_range: p.port_range || "" });
+  if (hid("scanSv"))     Object.assign(o, { sv: !!p.sv, os: !!p.os, pn: !!p.pn, udp: !!p.udp });
+  if (hid("scanTiming")) o.timing = p.timing || "T4";
+  if (hid("scanScripts")) o.scripts = p.scripts || "";
+  if (hid("scanHostTimeout")) o.host_timeout = p.host_timeout ?? 15;
+  return o;
+}
+function _scanOptsShown() {
   return {
     ports:      document.getElementById("scanPorts").value,
     top_n:      parseInt(document.getElementById("scanTopN").value) || 100,
@@ -151,13 +166,18 @@ function updateScanPreview() {
   }, 120);
 }
 
+const _SCAN_DEFAULTS = { ports:"top1000", top_n:100, port_range:"", sv:true, os:true, timing:"T4", pn:false, udp:false, scripts:"", host_timeout:15 };
+function _scanProfileOpts() {
+  const p = scanProfiles.find(x => String(x.id) === document.getElementById("scanProfile").value);
+  return { ..._SCAN_DEFAULTS, ...((p && p.options) || {}) };
+}
+
 function applyScanProfile() {
   const sel = document.getElementById("scanProfile");
   const p = scanProfiles.find(x => String(x.id) === sel.value);
   document.getElementById("scanProfileDelete").style.display = (p && !p.builtin) ? "" : "none";
   if (!p) { updateScanPreview(); return; }
-  const d = { ports:"top1000", top_n:100, port_range:"", sv:true, os:true, timing:"T4", pn:false, udp:false, scripts:"", host_timeout:15 };
-  const o = { ...d, ...(p.options || {}) };
+  const o = _scanProfileOpts();
   document.getElementById("scanPorts").value     = o.ports;
   document.getElementById("scanTopN").value      = o.top_n;
   document.getElementById("scanPortRange").value = o.port_range || "";
@@ -217,7 +237,7 @@ async function loadScans() {
     return;
   }
   wrap.innerHTML = `
-    <div class="scans-toolbar">
+    <div class="scans-toolbar" data-lvl="a">
       <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);cursor:pointer">
         <input type="checkbox" id="scansSelectAll" data-change="scansToggleAllBox" style="accent-color:var(--accent)">
         Select all
@@ -278,10 +298,10 @@ async function loadScans() {
       // A running scan can't be deleted (it would carry on unseen) — stop it first (F-34)
       const deleteBtn = running || waiting
         ? `<button class="btn-ghost" style="font-size:12px;padding:2px 7px;flex-shrink:0;opacity:.35;cursor:not-allowed" disabled title="Stop it first, then delete it">✕</button>`
-        : `<button class="btn-ghost btn-danger" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="deleteScanRun" data-args="[${s.id}]" title="Delete">✕</button>`;
+        : `<button class="btn-ghost btn-danger" data-lvl="i" style="font-size:12px;padding:2px 7px;flex-shrink:0" data-click="deleteScanRun" data-args="[${s.id}]" title="Delete">✕</button>`;
       return `
         <div class="scan-card" id="scan-card-${s.id}">
-          <input type="checkbox" class="scan-checkbox" data-id="${s.id}" style="accent-color:var(--accent);flex-shrink:0" data-change="scansUpdateBulkBtn">
+          <input type="checkbox" class="scan-checkbox" data-lvl="a" data-id="${s.id}" style="accent-color:var(--accent);flex-shrink:0" data-change="scansUpdateBulkBtn">
           <div class="scan-indicator ${waiting ? "queued" : probs.length && s.status === "completed" ? "problems" : live}"></div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:500;font-size:12px">${target}</div>
@@ -439,6 +459,7 @@ async function loadSchedules() {
   const wrap = document.getElementById("schedulesWrap");
   if (!scanProfiles || !scanProfiles.length) { try { await loadScanProfiles(); } catch {} }
   scanSchedules = await api("GET", "/api/scan-schedules");
+  levelInUse("schedules", scanSchedules.length > 0);
   if (!scanSchedules.length) {
     wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-3);font-size:12px">No schedules yet — create one to run scans automatically.</div>`;
     return;
@@ -504,6 +525,7 @@ function openScheduleEditor(sched) {
 
   onSchedFilterChange();
   onSchedTimingChange();
+  levelFoldForm(document.querySelector("#scheduleModal .modal"));
   document.getElementById("scheduleModal").classList.add("open");
 }
 

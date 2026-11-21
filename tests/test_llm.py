@@ -298,3 +298,24 @@ def test_ai_context_reports_the_max_and_how_its_loaded(client, provider):
     assert "not found" in client.get("/api/ai/context?model=demo-x").json()["error"]
     provider["use"]("anthropic")
     assert client.get("/api/ai/context").json() == {}
+
+
+# ── S-15: ⚡ Test AI tries what's on screen and saves nothing ────────────────────
+
+def test_test_ai_uses_the_posted_settings_without_saving(client, provider):
+    provider["use"]("ollama")
+    provider["handler"] = lambda req: httpx.Response(200, json={"models": [{"name": "demo-other:1b"}]})
+    r = client.post("/api/settings/test", json={"provider": "ollama", "base_url": "http://ai2.demo",
+                                                 "model": "demo-other:1b", "api_key": ""}).json()
+    assert r == {"ok": True, "models": ["demo-other:1b"]}
+    assert provider["seen"][-1].url.host == "ai2.demo"            # the on-screen address was tested
+    llm_cfg = config.get_config()["llm"]
+    assert llm_cfg["base_url"] == "http://ai.demo" and llm_cfg["model"] == "demo-model"   # nothing saved
+
+
+def test_test_ai_keeps_the_saved_key_at_its_address(client, provider):
+    provider["use"]("openai")
+    r = client.post("/api/settings/test", json={"provider": "openai", "base_url": "http://elsewhere.demo",
+                                                 "api_key": "••••••••"})
+    assert r.status_code == 409 and "isn't sent to a new address" in r.json()["detail"]
+    assert not provider["seen"]                                   # nothing was sent anywhere

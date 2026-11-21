@@ -171,30 +171,25 @@ function editMac(ip, td) {
 
 // ── Hosts column show/hide (persisted per browser) ───────────────────────────
 const HOST_COLS = ["host", "mac", "vendor", "type", "os", "ports", "seen", "notes"];
-function getHiddenCols() {
-  try { return JSON.parse(localStorage.getItem("boltarr.hostsHiddenCols") || "[]"); }
-  catch (e) { return []; }
-}
+function getHiddenCols() { return hiddenColsFor("hostsTable"); }   // your choices + the level's defaults (levels.js)
 function applyHiddenCols() {
   const t = document.getElementById("hostsTable");
   if (!t) return;
   const hidden = getHiddenCols();
-  HOST_COLS.forEach(c => t.classList.toggle("hide-" + c, hidden.includes(c)));
+  let changed = false;
+  HOST_COLS.forEach(c => { if (t.classList.contains("hide-" + c) !== hidden.includes(c)) { changed = true; t.classList.toggle("hide-" + c); } });
+  syncLevelColMenu("hostsTable");
+  if (changed) window.fitColumns?.("hostsTable");
 }
 function setColumn(key, visible) {
-  let hidden = getHiddenCols();
-  if (visible) hidden = hidden.filter(k => k !== key);
-  else if (!hidden.includes(key)) hidden.push(key);
-  localStorage.setItem("boltarr.hostsHiddenCols", JSON.stringify(hidden));
+  chooseColumn("hostsTable", key, visible);
   applyHiddenCols();
 }
 function initColumnMenu() {
   const btn = document.getElementById("colMenuBtn");
   const menu = document.getElementById("colMenu");
   if (!btn || !menu) return;
-  const hidden = getHiddenCols();
   menu.querySelectorAll("input[data-col]").forEach(cb => {
-    cb.checked = !hidden.includes(cb.getAttribute("data-col"));
     cb.addEventListener("change", () => setColumn(cb.getAttribute("data-col"), cb.checked));
   });
   btn.addEventListener("click", e => { e.stopPropagation(); menu.classList.toggle("open"); });
@@ -256,6 +251,7 @@ function hostsVisibleRows() {
 function renderHostsTable() {
   const tbody = document.querySelector("#hostsTable tbody");
   tbody.innerHTML = "";
+  applyHiddenCols();   // a first note shows the Notes column at Basic
   const sorted = hostsVisibleRows();
 
   const count = document.getElementById("hostCount");
@@ -524,6 +520,7 @@ function setHostsTab(tab, subnetId) {
   document.getElementById("hosts-panel-iphistory").style.display = tab === "iphistory" ? "" : "none";
   document.querySelectorAll("#panel-hosts .svc-subtab").forEach(b => b.classList.remove("active"));
   document.getElementById(`hostsTabBtn-${tab}`)?.classList.add("active");
+  levelVisit(document.getElementById(`hostsTabBtn-${tab}`));
   if (tab === "iphistory") loadIpHistory(true, subnetId);
 }
 

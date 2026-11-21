@@ -75,7 +75,7 @@ def test_column_fit_script_loaded(client):
     assert 'class="col-svc-name"' in page          # Services' flexible column
 
 
-APP_FILES = ["core", "hosts", "host-detail", "scans", "services", "services-detail", "maintenance",
+APP_FILES = ["core", "levels", "hosts", "host-detail", "scans", "services", "services-detail", "maintenance",
              "explain", "ai-actions", "topology", "subnets", "settings", "ssh", "boot"]
 
 

@@ -3,6 +3,7 @@
 // description, port, URL, host) in the data already loaded, and opens the match.
 // "+N more" opens that tab filtered by the same text (same matching rules).
 // "See all results" (or Shift+Enter) opens the Search page: every match, no limit.
+// Below your level's view, a Features group lists what the level hides (levels.js).
 // Shortcuts: "/" (not while typing in a field) and Ctrl/⌘+K.
 
 (function () {
@@ -54,7 +55,8 @@
       .sort((a, b) => hostRank(a, q) - hostRank(b, q) || cmpIp(a.ip, b.ip) || (a.hostname || "").localeCompare(b.hostname || ""));
     const svcs = allServices.filter(s => svcMatches(s, q))
       .sort((a, b) => svcRank(a, q) - svcRank(b, q) || (a.name || "").localeCompare(b.name || ""));
-    return { hosts, svcs };
+    const feats = window.levelFeatureMatches ? levelFeatureMatches(q) : [];
+    return { hosts, svcs, feats };
   }
 
   // One result row, shared by the drop-down and the Search page.
@@ -65,6 +67,16 @@
     const meta = page && h.device_type ? `<span class="tag tag-${escHtml(h.device_type)}">${escHtml(h.device_type)}</span>` : "";
     return `<div class="gs-item" role="option" data-i="${i}">${synthetic ? "" : livenessDot(h.online)}
       <div class="gs-text"><div class="gs-title">${title}</div><div class="gs-why">${hostWhy(h, q)}</div></div>${meta}</div>`;
+  }
+  function featRow(f, q, i) {
+    return `<div class="gs-item" role="option" data-i="${i}"><span class="gs-feat-ico" aria-hidden="true">◇</span>
+      <div class="gs-text"><div class="gs-title">${mark(f.name, q)} <span class="lvl-tag">${escHtml(f.tag)}</span></div>${f.where ? `<div class="gs-why">${escHtml(f.where)}</div>` : ""}</div></div>`;
+  }
+  function featGroup(feats, q, list, limit) {
+    if (!feats.length) return "";
+    let html = `<div class="gs-group">Features <span>${feats.length}</span></div>`;
+    feats.slice(0, limit).forEach(f => { list.push({ kind: "feat", i: f.i }); html += featRow(f, q, list.length - 1); });
+    return html;
   }
   function svcRow(s, q, i) {
     const where = `${mark(s.ip, q)}${s.port ? ":" + mark(String(s.port), q) : ""}${s.hostname ? " · " + mark(s.hostname, q) : ""}`;
@@ -77,7 +89,7 @@
     lastQ = raw;
     items = []; active = -1;
     if (!q) { box.hidden = true; box.innerHTML = ""; $("gsInput").setAttribute("aria-expanded", "false"); return; }
-    const { hosts, svcs } = results(q);
+    const { hosts, svcs, feats } = results(q);
     let html = "";
     if (hosts.length) {
       html += `<div class="gs-group">Hosts <span>${hosts.length}</span></div>`;
@@ -101,9 +113,11 @@
         html += `<div class="gs-item gs-more" role="option" data-i="${items.length - 1}">+${svcs.length - PER_GROUP} more services — show all in Services</div>`;
       }
     }
+    html += featGroup(feats, q, items, PER_GROUP);
     if (html) {
       items.push({ kind: "page" });
-      html += `<div class="gs-item gs-more gs-all" role="option" data-i="${items.length - 1}">See all ${hosts.length + svcs.length} results on the Search page <span class="gs-dim">Shift+Enter</span></div>`;
+      const total = hosts.length + svcs.length + feats.length;
+      html += `<div class="gs-item gs-more gs-all" role="option" data-i="${items.length - 1}">See ${total === 1 ? "1 result" : `all ${total} results`} on the Search page <span class="gs-dim">Shift+Enter</span></div>`;
     }
     box.innerHTML = html || `<div class="gs-empty">No host or service matches “${escHtml(raw)}”.</div>`;
     box.hidden = false;
@@ -134,6 +148,7 @@
     close(true);
     if (it.kind === "host") showHostDetail(it.ip);
     else if (it.kind === "svc") showSvcDetail(it.id);
+    else if (it.kind === "feat") openLevelFeature(it.i);
     else if (it.kind === "more-hosts") {
       setTab("hosts"); setHostsTab("list");
       $("classFilter").value = ""; classFilterVal = "";
@@ -163,8 +178,9 @@
       box.innerHTML = `<div class="gs-empty">Type to search hosts and services: IP, alias, hostname, MAC, vendor, OS, notes, open ports, service name, port or URL.</div>`;
       return;
     }
-    const { hosts, svcs } = results(q);
-    $("spCount").textContent = `${hosts.length} host${hosts.length === 1 ? "" : "s"} · ${svcs.length} service${svcs.length === 1 ? "" : "s"}`;
+    const { hosts, svcs, feats } = results(q);
+    $("spCount").textContent = `${hosts.length} host${hosts.length === 1 ? "" : "s"} · ${svcs.length} service${svcs.length === 1 ? "" : "s"}`
+      + (feats.length ? ` · ${feats.length} feature${feats.length === 1 ? "" : "s"}` : "");
     let html = "";
     if (hosts.length) {
       html += `<section class="sp-group"><div class="gs-group">Hosts <span>${hosts.length}</span></div>`;
@@ -176,6 +192,7 @@
       svcs.forEach(s => { pageItems.push({ kind: "svc", id: s.id }); html += svcRow(s, q, pageItems.length - 1); });
       html += `</section>`;
     }
+    if (feats.length) html += `<section class="sp-group">${featGroup(feats, q, pageItems, Infinity)}</section>`;
     box.innerHTML = html || `<div class="gs-empty">No host or service matches “${escHtml(raw)}”.</div>`;
     box.querySelectorAll(".gs-item").forEach(el => { el.tabIndex = 0; el.setAttribute("role", "button"); });
   }
@@ -183,6 +200,7 @@
     const it = pageItems[i];
     if (!it) return;
     if (it.kind === "host") showHostDetail(it.ip);
+    else if (it.kind === "feat") openLevelFeature(it.i);
     else showSvcDetail(it.id);
   }
   window.renderSearchPage = renderPage;

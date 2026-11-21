@@ -9,6 +9,7 @@ import io
 import json
 import ipaddress
 import zipfile
+import copy
 import tempfile
 import sqlite3 as _sqlite3
 from datetime import datetime, timezone, timedelta
@@ -67,12 +68,36 @@ def startup():
             cfg["auth"]["setup_pending"] = True
             auth.ensure_secret(cfg)
             save_config(cfg)
+    start_level()   # decide the starting view level once, before anything is added
     # BOLTARR_DISABLE_LOOPS skips the background probe/scan loops — for a preview
     # instance with sample data (so it isn't marked all-down against fake IPs).
     if os.environ.get("BOLTARR_DISABLE_LOOPS", "").lower() not in ("1", "true", "yes"):
         monitor.start_monitor()
         liveness.start_liveness()
         scheduler.start_scheduler()
+
+
+VIEW_LEVELS = ("basic", "intermediate", "advanced")
+
+
+def start_level() -> str:
+    """The view level a browser with none of its own starts on (S-15). Decided
+    once and saved: an install with devices or networks already (an upgrade)
+    gets "advanced", so nothing changes for it; an empty one gets "basic"."""
+    cfg = get_config()
+    level = cfg["ui"].get("start_level")
+    if level in VIEW_LEVELS:
+        return level
+    with get_conn() as conn:
+        has_data = conn.execute("SELECT 1 FROM hosts UNION ALL SELECT 1 FROM subnets LIMIT 1").fetchone()
+    cfg["ui"]["start_level"] = "advanced" if has_data else "basic"
+    save_config(cfg)
+    return cfg["ui"]["start_level"]
+
+
+@app.get("/api/ui/start-level")
+def get_start_level():
+    return {"level": start_level()}
 
 
 @app.get("/api/version")
@@ -3141,15 +3166,29 @@ def update_statuspage_settings(data: StatusPageSettingsIn):
 
 
 @app.post("/api/statuspage/test")
-def test_statuspage_push():
-    ok, err = monitor.push_status()
+def test_statuspage_push(data: Optional[StatusPageSettingsIn] = None):
+    """Push now. With the on-screen settings posted, push with those without saving
+    them (S-15: a test never saves); the saved token is used only where it may go."""
+    cfg = None
+    if data is not None:
+        tmp = {"statuspage": copy.deepcopy(get_config()["statuspage"])}
+        _apply_statuspage(tmp, data)
+        cfg = tmp["statuspage"]
+    ok, err = monitor.push_status(cfg)
     return {"ok": ok, "error": err}
 
 
 @app.post("/api/settings/test")
-async def test_llm_connection():
+async def test_llm_connection(data: Optional[LLMSettingsIn] = None):
+    """⚡ Test AI. With the on-screen settings posted, test those without saving them
+    (S-15); the saved key is used only where it may go (F-16)."""
+    cfg = None
+    if data is not None:
+        tmp = {"llm": copy.deepcopy(get_llm_config())}
+        _apply_llm(tmp, data)
+        cfg = tmp["llm"]
     try:
-        models = await list_models()
+        models = await list_models(cfg)
         return {"ok": True, "models": models}
     except LLMError as e:
         return {"ok": False, "error": str(e)}

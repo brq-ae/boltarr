@@ -6,6 +6,7 @@
   <title>Boltarr</title>
   <link rel="icon" type="image/svg+xml" href="/img/BoltarrLogo.svg">
   <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/level.js"></script>
   <script src="/vendor/cytoscape.min.js"></script>
 </head>
 <body>
@@ -35,84 +36,28 @@
       <button class="sidebar-nav-item" data-tab="scans" data-click="setTab" data-args='["scans"]'>
         <span class="nav-icon">◷</span> Scans
       </button>
-      <button class="sidebar-nav-item" data-tab="sshkeys" data-click="setTab" data-args='["sshkeys"]'>
+      <button class="sidebar-nav-item" data-tab="sshkeys" data-lvl="a" data-click="setTab" data-args='["sshkeys"]'>
         <span class="nav-icon">🔑</span> SSH Keys
+      </button>
+      <button class="sidebar-nav-item" data-tab="settings" data-click="setTab" data-args='["settings"]' id="aiSettingsBtn">
+        <span class="nav-icon">⚙</span> Settings
+        <span id="aiStatusDot" class="ai-status-dot ai-status-none" title="AI: grey = not set up, green = set up"></span>
       </button>
     </nav>
 
     <div class="sidebar-spacer"></div>
 
-    <div class="sidebar-footer">
-      <button class="ai-settings-btn" id="aiSettingsBtn" data-click="openSettings">
-        <span id="aiStatusDot" class="ai-status-dot ai-status-none"></span>
-        ⚙ Settings
-      </button>
+    <!-- View level (S-15): changes only what you see -->
+    <div class="sidebar-level" role="group" aria-label="View level">
+      <div class="sidebar-level-label">View</div>
+      <div class="level-seg">
+        <button data-level-pick="basic" data-click="setViewLevel" data-args='["basic"]' title="The essentials: what's on my network, and is it working?">Basic</button>
+        <button data-level-pick="intermediate" data-click="setViewLevel" data-args='["intermediate"]' title="Adds tools for running a homelab: schedules, hierarchy, status page.">Intermediate</button>
+        <button data-level-pick="advanced" data-click="setViewLevel" data-args='["advanced"]' title="Everything, with every option.">Advanced</button>
+      </div>
     </div>
+
   </aside>
-
-<!-- Factory reset -->
-<div class="modal-overlay" id="factoryResetModal">
-  <div class="modal" style="max-width:460px">
-    <div class="modal-title" style="color:var(--red)">↺ Factory reset</div>
-    <p class="text-3" style="font-size:12px;line-height:1.6;margin:0 0 12px">
-      This permanently deletes <strong>all network data</strong> — hosts, ports, services, subnets, scans,
-      schedules, change history, uptime history, connections, VLANs, and SSH keys. It cannot be undone.
-    </p>
-    <div class="form-row">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
-        <input type="checkbox" id="resetKeepSettings" checked style="accent-color:var(--accent);width:14px;height:14px">
-        <span style="color:var(--text-2)">Keep settings <span style="color:var(--text-3)">(ntfy, status page, timezone, AI). Uncheck to reset everything to a fresh install.</span></span>
-      </label>
-    </div>
-    <div class="form-row">
-      <label>Type <code>DELETE</code> to confirm</label>
-      <input type="text" id="resetConfirm" placeholder="DELETE" class="mono" data-input="onResetConfirmInput" autocomplete="off">
-    </div>
-    <div class="modal-actions">
-      <button class="btn" data-click="closeFactoryReset">Cancel</button>
-      <button class="btn btn-danger" id="resetConfirmBtn" data-click="doFactoryReset" disabled>Reset</button>
-    </div>
-  </div>
-</div>
-
-<!-- Restore: check the backup, then confirm -->
-<div class="modal-overlay" id="restoreModal">
-  <div class="modal" style="max-width:480px">
-    <div class="modal-title">⬆ Restore from backup</div>
-    <div id="restoreUpload">
-      <p class="text-3" style="font-size:12px;margin:0 0 8px">Uploading and checking <span id="restoreFileName" class="mono"></span>… nothing is changed yet.</p>
-      <div class="restore-bar"><div id="restoreUploadBar"></div></div>
-      <div id="restoreUploadPct" class="text-3 mono" style="font-size:11px;margin-top:6px">0%</div>
-    </div>
-    <form id="restorePwBox" hidden>
-      <p style="font-size:12px;margin:0 0 10px">🔒 <span id="restorePwMsg">This backup is password-protected.</span></p>
-      <div class="form-row"><label for="restorePw">Backup password</label><input id="restorePw" type="password" autocomplete="off"></div>
-      <button class="btn btn-primary" type="submit" style="font-size:12px">Unlock</button>
-    </form>
-    <div id="restoreSummary" hidden>
-      <div class="restore-facts">
-        <div><label>Backup made</label><span id="restoreDate"></span></div>
-        <div><label>Boltarr version</label><span id="restoreVersion"></span></div>
-        <div><label>Includes settings</label><span id="restoreSettings"></span></div>
-        <div><label>Password-protected</label><span id="restoreProtected"></span></div>
-      </div>
-      <table class="restore-compare">
-        <thead><tr><th></th><th>Now</th><th>After restore</th></tr></thead>
-        <tbody id="restoreCompare"></tbody>
-      </table>
-      <div id="restoreNote" class="restore-note" hidden></div>
-      <div class="restore-warn">
-        <strong>Everything currently in Boltarr will be replaced</strong> by this backup. Background checks
-        pause for a few seconds, and the page reloads by itself when it's done. This can't be undone —
-        <a href="#" data-click="openBackupModal">download a backup of the current data</a> first if you might want it back.
-      </div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn" data-click="cancelRestore">Cancel</button>
-      <button class="btn btn-danger" id="restoreGoBtn" data-click="applyRestore" disabled>Restore now</button>
-    </div>
-  </div>
-</div>
 
 <!-- Restore: full-screen progress while it runs -->
 <div class="restore-overlay" id="restoreOverlay" hidden>
@@ -129,32 +74,6 @@
   </div>
 </div>
 
-<!-- Backup: optional password -->
-<div class="modal-overlay" id="backupModal" style="z-index:110">
-  <form class="modal" style="max-width:440px" id="backupForm">
-    <div class="modal-title">⬇ Download backup</div>
-    <p class="text-3" style="font-size:12px;line-height:1.55;margin:0 0 12px">
-      A backup holds your whole Boltarr: hosts, services, history and settings — including your ntfy and status-page tokens, AI key and login.
-    </p>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;margin-bottom:10px">
-      <input type="checkbox" id="backupProtect" checked style="accent-color:var(--accent);width:14px;height:14px" data-change="onBackupProtectChange">
-      <span>Protect with a password <span class="text-3">(recommended)</span></span>
-    </label>
-    <div id="backupPwRows">
-      <div class="form-row"><label for="backupPw">Password (8+ characters)</label><input id="backupPw" type="password" autocomplete="new-password"></div>
-      <div class="form-row"><label for="backupPw2">Repeat password</label><input id="backupPw2" type="password" autocomplete="new-password"></div>
-      <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
-        You'll need this password to restore. It can't be recovered — keep it somewhere safe. The file is a standard encrypted zip (7-Zip/WinRAR can open it too).
-      </p>
-    </div>
-    <div id="backupNoPwWarn" class="restore-warn" hidden>Without a password, anyone who gets this file can read your tokens and keys. Keep it private.</div>
-    <div class="login-error" id="backupErr" role="alert"></div>
-    <div class="modal-actions">
-      <button class="btn" type="button" data-click="closeBackupModal">Cancel</button>
-      <button class="btn btn-primary" type="submit" id="backupGoBtn">Download</button>
-    </div>
-  </form>
-</div>
 
   <!-- ── Top bar ────────────────────────────────────────────────────────────── -->
   <header class="topbar">
@@ -170,7 +89,7 @@
         <div class="gs-results" id="gsResults" role="listbox" hidden></div>
       </div>
     </div>
-    <button class="btn" data-click="toggleChat" title="Network assistant">💬 Chat</button>
+    <button class="btn" data-needs="ai" data-click="toggleChat" title="Network assistant">💬 Chat</button>
     <button class="btn" id="logoutBtn" data-click="logout" title="Log out" hidden>⎋ Log out</button>
   </header>
 
@@ -185,12 +104,12 @@
         <div class="graph-toolbar">
           <div class="svc-subtabs topo-subtabs">
             <button class="svc-subtab active" data-click="setTab" data-args='["topology"]'>Graph</button>
-            <button class="svc-subtab" data-click="setTab" data-args='["hierarchy"]'>Hierarchy</button>
+            <button class="svc-subtab" data-lvl="i" data-click="setTab" data-args='["hierarchy"]'>Hierarchy</button>
           </div>
-          <button class="btn" data-click="openNetworkAnalysis">⬡ Analyze Network</button>
-          <button class="btn" id="vlanBtn" data-click="openVlanPanel">◈ VLANs</button>
+          <button class="btn" data-needs="ai" data-click="openNetworkAnalysis">⬡ Analyze Network</button>
+          <button class="btn" id="vlanBtn" data-lvl="a" data-click="openVlanPanel">◈ VLANs</button>
           <button class="btn" id="connectBtn" data-click="toggleConnectMode">◎ Link</button>
-          <button class="btn" id="multiConnBtn" data-click="toggleMultiConnectMode">⊕ Multi-Link</button>
+          <button class="btn" id="multiConnBtn" data-lvl="a" data-click="toggleMultiConnectMode">⊕ Multi-Link</button>
           <button class="btn btn-primary" id="multiConfirmBtn" data-click="openMultiConnModal" style="display:none">Link (0)</button>
           <button class="btn" id="saveLayoutBtn" data-click="saveLayoutToDb">⊙ Save Layout</button>
           <span class="connect-hint" id="connectHint"></span>
@@ -238,7 +157,7 @@
         <div class="svc-toolbar">
           <div class="svc-subtabs">
             <button class="svc-subtab active" id="hostsTabBtn-list" data-click="setHostsTab" data-args='["list"]'>List</button>
-            <button class="svc-subtab" id="hostsTabBtn-iphistory" data-click="setHostsTab" data-args='["iphistory"]'>IP History</button>
+            <button class="svc-subtab" id="hostsTabBtn-iphistory" data-lvl="a" data-click="setHostsTab" data-args='["iphistory"]'>IP History</button>
           </div>
         </div>
         <div id="hosts-panel-list" class="hosts-sub">
@@ -267,13 +186,14 @@
               <label><input type="checkbox" data-col="notes" checked> Notes</label>
             </div>
           </div>
-          <div class="export-wrap">
+          <div class="export-wrap" data-more>
             <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
             <div class="col-menu">
               <button type="button" data-export="hosts" data-fmt="csv">CSV <span>spreadsheet</span></button>
               <button type="button" data-export="hosts" data-fmt="json">JSON <span>for scripts</span></button>
             </div>
           </div>
+          <div class="more-wrap"><button class="btn more-btn" data-click="toggleMoreMenu" title="More" aria-label="More">⋯</button><div class="col-menu"></div></div>
           <button class="btn btn-danger" id="hostsDeleteBtn" style="font-size:11px;padding:5px 11px;margin-left:auto;display:none" data-click="hostsDeleteSelected">Delete selected</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px" data-click="openAddHost">+ Add Host</button>
         </div>
@@ -304,13 +224,14 @@
             <select id="iphSubnet" class="search-input" style="max-width:220px;flex-shrink:0" data-change="loadIpHistory"></select>
             <input type="text" class="search-input" id="iphFilter" placeholder="Filter by IP, hostname, MAC…" data-input="renderIpHistory">
             <span class="host-count" id="iphCount"></span>
-            <div class="export-wrap">
+            <div class="export-wrap" data-more>
               <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
               <div class="col-menu">
                 <button type="button" data-export="iphistory" data-fmt="csv">CSV <span>spreadsheet</span></button>
                 <button type="button" data-export="iphistory" data-fmt="json">JSON <span>for scripts</span></button>
               </div>
             </div>
+            <div class="more-wrap"><button class="btn more-btn" data-click="toggleMoreMenu" title="More" aria-label="More">⋯</button><div class="col-menu"></div></div>
           </div>
           <div class="iph-chips" id="iphChips"></div>
           <div class="iph-note" id="iphNote"></div>
@@ -364,7 +285,7 @@
         <div class="svc-toolbar">
           <div class="svc-subtabs">
             <button class="svc-subtab active" id="scanTabBtn-run" data-click="setScanTab" data-args='["run"]'>Run</button>
-            <button class="svc-subtab" id="scanTabBtn-schedules" data-click="setScanTab" data-args='["schedules"]'>Schedules</button>
+            <button class="svc-subtab" id="scanTabBtn-schedules" data-lvl="i" data-click="setScanTab" data-args='["schedules"]'>Schedules</button>
             <button class="svc-subtab" id="scanTabBtn-history" data-click="setScanTab" data-args='["history"]'>Scan Log</button>
             <button class="svc-subtab" id="scanTabBtn-changes" data-click="setScanTab" data-args='["changes"]'>Changes</button>
           </div>
@@ -381,10 +302,10 @@
               <label>Profile</label>
               <div style="display:flex;gap:6px;flex:1">
                 <select id="scanProfile" data-change="applyScanProfile" style="flex:1"></select>
-                <button class="btn-icon" id="scanProfileDelete" data-click="deleteScanProfile" title="Delete profile" style="display:none;color:var(--text-3)">✕</button>
+                <button class="btn-icon" id="scanProfileDelete" data-lvl="a" data-click="deleteScanProfile" title="Delete profile" style="display:none;color:var(--text-3)">✕</button>
               </div>
             </div>
-            <div class="form-row">
+            <div class="form-row" data-lvl="i">
               <label>Ports</label>
               <div style="display:flex;gap:6px;flex-wrap:wrap;flex:1">
                 <select id="scanPorts" data-change="onScanFieldChange">
@@ -398,7 +319,7 @@
                 <input type="text" id="scanPortRange" placeholder="22,80,443,8000-8100" class="mono" style="flex:1;min-width:140px;display:none" data-input="updateScanPreview">
               </div>
             </div>
-            <div class="form-row">
+            <div class="form-row" data-lvl="i">
               <label>Options</label>
               <div class="scan-checks">
                 <label><input type="checkbox" id="scanSv" data-change="onScanFieldChange"> Service+version (-sV)</label>
@@ -407,7 +328,7 @@
                 <label><input type="checkbox" id="scanUdp" data-change="updateScanPreview"> UDP (-sU)</label>
               </div>
             </div>
-            <div class="form-row">
+            <div class="form-row" data-lvl="i">
               <label>Timing</label>
               <select id="scanTiming" data-change="updateScanPreview" style="max-width:220px">
                 <option value="T0">T0 — paranoid (slowest/stealth)</option>
@@ -418,24 +339,24 @@
                 <option value="T5">T5 — insane (fastest)</option>
               </select>
             </div>
-            <div class="form-row">
+            <div class="form-row" data-lvl="a">
               <label>Time limit per host <span style="color:var(--text-3);font-weight:400;text-transform:none">(minutes; 0 = no limit)</span></label>
               <input type="number" id="scanHostTimeout" value="15" min="0" max="1440" style="width:80px" data-input="updateScanPreview"
                      title="A host that takes longer is skipped (its ports are left as they were) and the scan carries on">
             </div>
-            <div class="form-row" id="scanScriptsRow">
+            <div class="form-row" id="scanScriptsRow" data-lvl="a">
               <label>NSE scripts <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
               <input type="text" id="scanScripts" placeholder="e.g. snmp-info,http-title,ssl-cert" class="mono" data-input="updateScanPreview">
             </div>
           </div>
 
-          <div class="scan-preview-wrap">
+          <div class="scan-preview-wrap" data-lvl="a">
             <div class="scan-preview-label">Command preview</div>
             <code id="scanPreview" class="scan-preview">nmap …</code>
           </div>
 
           <div class="scan-build-actions">
-            <button class="btn" data-click="saveScanProfile">＋ Save as profile</button>
+            <button class="btn" data-lvl="a" data-click="saveScanProfile">＋ Save as profile</button>
             <span style="flex:1"></span>
             <button class="btn btn-primary" id="scanRunBtn" data-click="runScanFromBuilder">▶ Run scan</button>
           </div>
@@ -461,7 +382,7 @@
           <div class="scans-toolbar" style="padding:10px 16px">
             <span style="font-size:11px;color:var(--text-3)" id="changesCount"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-danger" style="font-size:11px;padding:4px 10px" data-click="clearChanges">Clear all</button>
+            <button class="btn btn-danger" data-lvl="i" style="font-size:11px;padding:4px 10px" data-click="clearChanges">Clear all</button>
           </div>
           <div id="changesList" style="padding:0 16px 16px"></div>
         </div>
@@ -472,7 +393,7 @@
         <div class="svc-toolbar">
           <div class="svc-subtabs">
             <button class="svc-subtab active" id="svcTabBtn-list" data-click="setSvcTab" data-args='["list"]'>List</button>
-            <button class="svc-subtab" id="svcTabBtn-topology" data-click="setSvcTab" data-args='["topology"]'>Topology</button>
+            <button class="svc-subtab" id="svcTabBtn-topology" data-lvl="i" data-click="setSvcTab" data-args='["topology"]'>Topology</button>
           </div>
           <select id="svcHostFilter" class="search-input" style="max-width:170px;flex-shrink:0">
             <option value="">All hosts</option>
@@ -491,16 +412,17 @@
               <label><input type="checkbox" data-col="url" checked> URL</label>
             </div>
           </div>
-          <div class="export-wrap">
+          <div class="export-wrap" data-more>
             <button class="btn" data-export-btn style="font-size:11px;padding:5px 11px" title="Download the rows shown, all columns">⤓ Export ▾</button>
             <div class="col-menu">
               <button type="button" data-export="services" data-fmt="csv">CSV <span>spreadsheet</span></button>
               <button type="button" data-export="services" data-fmt="json">JSON <span>for scripts</span></button>
             </div>
           </div>
+          <div class="more-wrap"><button class="btn more-btn" data-click="toggleMoreMenu" title="More" aria-label="More">⋯</button><div class="col-menu"></div></div>
           <button class="btn btn-danger" id="svcDeleteBtn" style="font-size:11px;padding:5px 11px;flex-shrink:0;display:none" data-click="svcDeleteSelected">Delete selected</button>
-          <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openMaintModal" title="Plan maintenance ahead: no alerts while it runs, shown on the status page">🗓 Maintenance</button>
-          <button class="btn" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openBulkAddContainers">⊕ Bulk</button>
+          <button class="btn" id="svcMaintBtn" data-lvl="i" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openMaintModal" title="Plan maintenance ahead: no alerts while it runs, shown on the status page">🗓 Maintenance</button>
+          <button class="btn" data-lvl="i" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openBulkAddContainers">⊕ Bulk</button>
           <button class="btn btn-primary" style="font-size:11px;padding:5px 11px;flex-shrink:0" data-click="openAddService">+ Service</button>
         </div>
         <div id="svcMaintBanner" class="maint-banner" style="display:none" data-click="openMaintModal" title="Open planned maintenance"></div>
@@ -562,6 +484,551 @@
         </div>
       </div>
 
+      <!-- Settings page (S-15): tabs along the top like the other pages. Every field keeps
+           its id, so settings.js loads and saves them as before. One save bar at the bottom. -->
+      <div class="tab-panel" id="panel-settings">
+        <div class="svc-toolbar">
+          <div class="svc-subtabs set-subtabs">
+            <button class="svc-subtab active" id="setTabBtn-general" data-click="setSettingsTab" data-args='["general"]'>General</button>
+            <button class="svc-subtab" id="setTabBtn-alerts" data-click="setSettingsTab" data-args='["alerts"]'>Alerts</button>
+            <button class="svc-subtab" id="setTabBtn-monitoring" data-click="setSettingsTab" data-args='["monitoring"]'>Monitoring</button>
+            <button class="svc-subtab" id="setTabBtn-statuspage" data-click="setSettingsTab" data-args='["statuspage"]'>Status page</button>
+            <button class="svc-subtab" id="setTabBtn-ai" data-click="setSettingsTab" data-args='["ai"]'>AI</button>
+            <button class="svc-subtab" id="setTabBtn-security" data-click="setSettingsTab" data-args='["security"]'>Login &amp; Security</button>
+            <button class="svc-subtab" id="setTabBtn-data" data-click="setSettingsTab" data-args='["data"]'>Data</button>
+          </div>
+        </div>
+
+        <div class="set-page" id="settingsPage">
+
+        <!-- ── General ── -->
+        <div class="set-pane" id="set-pane-general">
+          <section class="set-card">
+            <h3 class="set-card-title">🌍 Timezone</h3>
+            <div class="form-row">
+              <label>Timezone</label>
+              <div style="display:flex;gap:8px;flex:1;align-items:center">
+                <select id="setTimezone" data-change="updateTzPreview" style="flex:1"></select>
+              </div>
+            </div>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:-6px 0 0">
+              Boltarr uses this for schedule times, quiet hours, the digest, and how times are shown. <span id="setTzPreview" style="color:var(--text-2)"></span>
+            </p>
+          </section>
+          <section class="set-card" data-nosave>
+            <h3 class="set-card-title">👁 View level</h3>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">How much Boltarr shows on screen. It only changes what you see: everything keeps working the same.
+              Saved on this browser only, and applies straight away.</p>
+            <div class="level-choices">
+              <button class="level-choice" data-level-pick="basic" data-click="setViewLevel" data-args='["basic"]'>
+                <b>Basic</b><span>The essentials: what's on my network, and is it working?</span></button>
+              <button class="level-choice" data-level-pick="intermediate" data-click="setViewLevel" data-args='["intermediate"]'>
+                <b>Intermediate</b><span>Adds tools for running a homelab: schedules, hierarchy, status page.</span></button>
+              <button class="level-choice" data-level-pick="advanced" data-click="setViewLevel" data-args='["advanced"]'>
+                <b>Advanced</b><span>Everything, with every option.</span></button>
+            </div>
+          </section>
+        </div>
+
+        <!-- ── Alerts ── -->
+        <div class="set-pane" id="set-pane-alerts" hidden>
+          <section class="set-card">
+            <h3 class="set-card-title">📱 Where alerts go (ntfy)</h3>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="setNtfyEnabled"> Enabled
+            </label>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              Boltarr sends alerts to your phone via <a href="https://ntfy.sh" target="_blank" style="color:var(--accent)">ntfy</a>.
+              Subscribe to your topic in the ntfy app to receive them.
+            </p>
+            <div class="form-row">
+              <label>Server</label>
+              <input id="setNtfyServer" data-input="secretMoveCheck" type="text" placeholder="https://ntfy.sh">
+            </div>
+            <div class="form-row">
+              <label>Topic</label>
+              <input id="setNtfyTopic" type="text" placeholder="my-secret-topic" class="mono">
+            </div>
+            <div class="form-row">
+              <label>Access token</label>
+              <input id="setNtfyToken" data-input="secretMoveCheck" type="password" placeholder="(optional — only if your ntfy needs a login)">
+            </div>
+            <label id="setNtfyMoveRow" class="secret-move" hidden>
+              <input type="checkbox" id="setNtfyMoveOk"> <span><b>Send my saved ntfy token to this new address.</b>
+              Your ntfy token is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
+            </label>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn btn-primary" data-click="testNotification">📲 Send test</button>
+              <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
+            </div>
+            <p id="setNtfyHealth" class="health-line" hidden></p>
+          </section>
+
+          <section class="set-card">
+            <h3 class="set-card-title">◈ Service alerts</h3>
+            <div class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Alert after service down for</label>
+              <input id="setAlertAfter" type="number" min="0" style="width:64px" value="5">
+              <span style="font-size:11px;color:var(--text-3)">minutes (0 = alert immediately)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="When a host is offline, its services' down-alerts are held — you get one host-offline alert instead of many">
+                <input type="checkbox" id="setSuppressHostDown"> Suppress service-down alerts when the host is offline
+              </label>
+            </div>
+            <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
+              How often services are checked is set under Monitoring → Service checks; an alert can't fire faster than one check.
+            </p>
+          </section>
+
+          <section class="set-card" data-fold-form>
+            <div class="set-card-head">
+              <h3 class="set-card-title">🔔 Device &amp; network alerts</h3>
+              <label><input type="checkbox" id="setCaEnabled"> Enabled</label>
+            </div>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              Which recorded changes push to ntfy, plus the scan summary and the daily digest. Needs ntfy set up (above). Changes are recorded under Monitoring → Changes history; everything stays in the Changes feed regardless.
+            </p>
+            <div class="form-row" data-fold="i" style="flex-wrap:wrap;gap:8px">
+              <label>Alert for</label>
+              <select id="setCaScope" style="max-width:220px">
+                <option value="static">Static hosts only</option>
+                <option value="dynamic">Dynamic hosts only</option>
+                <option value="all">All hosts (static + dynamic)</option>
+              </select>
+              <span style="font-size:11px;color:var(--text-3)">unknown-classified hosts never alert</span>
+            </div>
+            <div class="scan-checks" style="padding-left:2px">
+              <label><input type="checkbox" id="setCaHostNew"> New host</label>
+              <label><input type="checkbox" id="setCaPortOpened"> Port opened</label>
+              <label><input type="checkbox" id="setCaPortClosed"> Port closed</label>
+              <label><input type="checkbox" id="setCaMacChanged"> MAC changed</label>
+              <label><input type="checkbox" id="setCaHostnameChanged"> Hostname changed</label>
+              <label><input type="checkbox" id="setCaOffline"> Host offline</label>
+              <label><input type="checkbox" id="setCaOnline"> Host online</label>
+            </div>
+            <div class="scan-checks" data-fold="a" style="padding-left:2px">
+              <label title="A roaming device keeps its MAC across IPs/APs"><input type="checkbox" id="setCaIncludeMac"> Attach device MAC to alerts (offline/online, scan summary, digest)</label>
+              <label title="A host's extra IPs are pinged on their own. Untick to keep their offline/online in the Changes feed without sending alerts."><input type="checkbox" id="setCaIncludeAliases" data-fold-default="1"> Include alias IPs in offline/online alerts</label>
+            </div>
+            <div class="settings-sub">Scan summary &amp; daily digest</div>
+            <div class="scan-checks" style="padding-left:2px">
+              <label><input type="checkbox" id="setCaOnScan"> Summary after each scan</label>
+              <label><input type="checkbox" id="setCaDigest"> Daily digest at</label>
+              <input id="setCaDigestTime" type="time" value="08:00" style="width:110px">
+              <label title="Monitored services that were down in the last 24 hours, or are down now. Instant down/recovered alerts are set under Service alerts above."><input type="checkbox" id="setCaDigestServices"> Include service outages</label>
+            </div>
+            <div class="scan-checks" style="padding-left:2px">
+              <label data-needs="ai" title="Uses your AI server (Settings → AI). If it doesn't answer within 60 seconds, the digest is sent without the summary."><input type="checkbox" id="setCaDigestAi"> Add a short AI summary to the digest</label>
+              <select id="setCaDigestAiModel" data-needs="ai" title="Which AI model writes the summary" style="font-size:12px;max-width:200px"></select>
+              <button class="btn btn-primary" style="font-size:12px" data-click="previewDigest" title="Shows what the digest would say right now. Nothing is sent.">Preview digest</button>
+            </div>
+            <div id="digestPreview" class="digest-preview" hidden></div>
+            <div id="pastDigests"></div>
+          </section>
+
+          <section class="set-card">
+            <h3 class="set-card-title">🌙 Quiet hours</h3>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="setQuietEnabled" data-change="onQuietToggle"> Quiet hours (mute alerts)
+              </label>
+              <span id="setQuietRange" style="display:none;align-items:center;gap:6px">
+                <span style="font-size:11px;color:var(--text-3)">from</span>
+                <input id="setQuietStart" type="time" value="02:00">
+                <span style="font-size:11px;color:var(--text-3)">to</span>
+                <input id="setQuietEnd" type="time" value="05:00">
+              </span>
+            </div>
+            <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
+              During quiet hours (your local time) alerts are held. Anything still down when the window ends alerts you then;
+              devices going offline or online and services coming back are sent together in one summary.
+            </p>
+          </section>
+        </div>
+
+        <!-- ── Monitoring ── -->
+        <div class="set-pane" id="set-pane-monitoring" hidden>
+          <section class="set-card" data-fold-form>
+            <h3 class="set-card-title">◈ Service checks</h3>
+            <div class="form-row" data-fold="i" style="flex-wrap:wrap;gap:8px">
+              <label>Probe each service every</label>
+              <input id="setCheckSeconds" type="number" min="15" max="600" style="width:64px" value="60">
+              <span style="font-size:11px;color:var(--text-3)">seconds (15–600)</span>
+            </div>
+            <p class="text-3" data-fold="i" style="font-size:10px;line-height:1.5;margin:0">
+              How often monitored services are checked, and the width of one “1 hour” tick on the status page. Longer = lighter load but slower to notice an outage — detection is accurate to about ±this interval, and a blip shorter than it can be missed. The down-alert grace (Alerts → Service alerts) can’t fire faster than one probe.
+            </p>
+          </section>
+
+          <section class="set-card" data-fold-form>
+            <h3 class="set-card-title">📡 Device up/down (liveness)</h3>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="setLvEnabled"> Enabled
+            </label>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              A light background ping sweep marks each known host online/offline (the dot in the Hosts table). Offline/online transitions feed the Changes history below and the alerts on the Alerts tab.
+            </p>
+            <div class="form-row" data-fold="i" style="flex-wrap:wrap;gap:8px">
+              <label>Sweep every</label>
+              <input id="setLvInterval" type="number" min="1" style="width:64px" value="3">
+              <span style="font-size:11px;color:var(--text-3)">min · offline after</span>
+              <input id="setLvOfflineAfter" type="number" min="1" style="width:64px" value="3">
+              <span style="font-size:11px;color:var(--text-3)">missed sweeps</span>
+            </div>
+          </section>
+
+          <section class="set-card" data-fold-form>
+            <div class="set-card-head">
+              <h3 class="set-card-title">🔔 Changes history</h3>
+              <label><input type="checkbox" id="setCtEnabled"> Enabled</label>
+            </div>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              What each scan finds changed vs. before (new hosts, opened/closed ports, MAC/hostname changes), recorded to the Changes feed. Which of these also alert you is set on the Alerts tab.
+            </p>
+            <div class="scan-checks" data-fold="i" style="padding-left:2px">
+              <label><input type="checkbox" id="setCtHostNew" data-fold-default="1"> New host</label>
+              <label><input type="checkbox" id="setCtPortOpened" data-fold-default="1"> Port opened</label>
+              <label><input type="checkbox" id="setCtPortClosed" data-fold-default="1"> Port closed</label>
+              <label><input type="checkbox" id="setCtMacChanged" data-fold-default="1"> MAC changed</label>
+              <label><input type="checkbox" id="setCtHostnameChanged" data-fold-default="1"> Hostname changed</label>
+              <label><input type="checkbox" id="setCtOffline" data-fold-default="1"> Host offline</label>
+              <label><input type="checkbox" id="setCtOnline" data-fold-default="1"> Host online</label>
+            </div>
+            <div class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Keep history for</label>
+              <input id="setCtRetention" type="number" min="1" style="width:70px" value="90">
+              <span style="font-size:11px;color:var(--text-3)">days</span>
+            </div>
+          </section>
+
+          <section class="set-card" id="setIphCard" data-lvl="a">
+            <h3 class="set-card-title">🕓 IP History</h3>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              Hosts → IP History lists every static-range IP (outside the DHCP pool) and how long since it last answered. These decide when an unseen IP reads as stale (probably free) or gone (safe to reuse).
+            </p>
+            <div class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Stale after</label>
+              <input id="setIphStale" type="number" min="1" style="width:64px" value="30">
+              <span style="font-size:11px;color:var(--text-3)">days · gone after</span>
+              <input id="setIphGone" type="number" min="1" style="width:64px" value="60">
+              <span style="font-size:11px;color:var(--text-3)">days</span>
+            </div>
+          </section>
+        </div>
+
+        <!-- ── Status page ── -->
+        <div class="set-pane" id="set-pane-statuspage" hidden>
+          <section class="set-card">
+            <h3 class="set-card-title">🌐 Public status page</h3>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="setSpEnabled"> Enabled
+            </label>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              Boltarr pushes a sanitized status of services you mark "public" to a separate status app over your LAN.
+            </p>
+            <div class="form-row">
+              <label>Status app URL</label>
+              <input id="setSpUrl" data-input="secretMoveCheck" type="text" placeholder="http://192.168.1.20:12102">
+            </div>
+            <div class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Token</label>
+              <input id="setSpToken" data-input="secretMoveCheck" type="password" placeholder="shared secret" style="flex:1;min-width:160px">
+              <button class="btn" type="button" data-click="generateStatusToken" title="Generate a random token, then copy it into the status app's .env">Generate</button>
+            </div>
+            <label id="setSpMoveRow" class="secret-move" hidden>
+              <input type="checkbox" id="setSpMoveOk"> <span><b>Send my saved status page token to this new address.</b>
+              Your status page token is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
+            </label>
+            <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
+              The same token must be set in the status app's <code>.env</code> (<code>STATUS_TOKEN</code>).
+            </p>
+            <div class="form-row">
+              <label>Show "may be out of date" after</label>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input id="setSpStale" type="number" min="1" max="1440" style="width:80px"> <span class="text-3" style="font-size:11px">minutes without an update from Boltarr</span>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn btn-primary" data-click="testStatusPush">🌐 Push now</button>
+              <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
+            </div>
+            <p id="setSpHealth" class="health-line" hidden></p>
+          </section>
+        </div>
+
+        <!-- ── AI ── -->
+        <div class="set-pane" id="set-pane-ai" hidden>
+          <section class="set-card">
+            <h3 class="set-card-title">🤖 AI server</h3>
+            <p class="text-3" style="font-size:11px;line-height:1.6">
+              Settings are saved to <code>data/config.yaml</code>.<br>
+              Environment variables (<code>LLM_PROVIDER</code>, <code>LLM_BASE_URL</code>,
+              <code>LLM_API_KEY</code>, <code>LLM_MODEL</code>) override this file when set.
+            </p>
+            <div class="form-row">
+              <label>Provider</label>
+              <select id="setProvider" data-change="onSettingsProviderChange">
+                <option value="none">None — AI features disabled</option>
+                <option value="ollama">Ollama (local / self-hosted)</option>
+                <option value="openai">OpenAI-compatible API (OpenAI, LM Studio, Groq, Together…)</option>
+                <option value="anthropic">Anthropic (Claude API)</option>
+              </select>
+            </div>
+            <div id="setUrlRow" class="form-row" style="display:none">
+              <label>Base URL</label>
+              <input id="setBaseUrl" data-input="secretMoveCheck" type="text" placeholder="http://localhost:11434">
+            </div>
+            <div id="setKeyRow" class="form-row" style="display:none">
+              <label>API Key</label>
+              <input id="setApiKey" data-input="secretMoveCheck" type="password" placeholder="sk-…">
+            </div>
+            <label id="setKeyMoveRow" class="secret-move" hidden>
+              <input type="checkbox" id="setKeyMoveOk"> <span><b>Send my saved AI key to this new address.</b>
+              Your AI key is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
+            </label>
+            <div class="form-row">
+              <label>Default Model</label>
+              <input id="setModel" type="text" list="setModelList" autocomplete="off" title="Pick a model from your AI server, or type any name" placeholder="Pick from the list or type a name">
+              <datalist id="setModelList"></datalist>
+            </div>
+            <div class="form-2col">
+              <div class="form-row">
+                <label>Timeout&nbsp;(s)</label>
+                <input id="setTimeout" type="number" min="10" value="120">
+              </div>
+              <div class="form-row">
+                <label>Long timeout&nbsp;(s)</label>
+                <input id="setLongTimeout" type="number" min="30" value="600">
+              </div>
+            </div>
+            <div id="setCtxRow" class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Context&nbsp;(tokens)</label>
+              <input id="setNumCtx" type="number" style="width:90px" min="0" step="1024" value="8192" data-input="showCtxInfo">
+              <span class="text-3" style="font-size:11px">How much the model may read at once. Too small cuts off the chat's network notes; bigger uses more GPU memory. 0 = Ollama's default.</span>
+              <p class="settings-hint ctx-info" id="setCtxInfo" hidden></p>
+            </div>
+            <div id="setTestResult" class="settings-test-result" style="display:none"></div>
+            <button class="btn btn-primary" style="font-size:12px;align-self:flex-start" data-click="testLLMConnection">⚡ Test AI</button>
+          </section>
+
+          <section class="set-card">
+            <h3 class="set-card-title">🗂 AI history</h3>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">
+              Keeps earlier AI results — host Analyze, Analyze Network, Explain on outages and digest summaries —
+              so you can open them again under "Earlier", and a record of the chat's AI actions you did or cancelled.
+            </p>
+            <div class="scan-checks" style="padding-left:2px">
+              <label><input type="checkbox" id="setAiHistEnabled" data-change="aiHistoryChanged"> Save AI results</label>
+            </div>
+            <div class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Keep up to</label>
+              <input id="setAiHistKeep" type="number" style="width:70px" min="1" max="1000" value="10" data-input="aiHistoryChanged">
+              <span class="text-3" style="font-size:11px">per item</span>
+            </div>
+            <div class="form-row" style="flex-wrap:wrap;gap:8px">
+              <label>Delete after</label>
+              <input id="setAiHistDays" type="number" style="width:70px" min="0" max="3650" value="90" data-input="aiHistoryChanged">
+              <span class="text-3" style="font-size:11px">days (0 = no time limit)</span>
+            </div>
+            <div id="aiHistOffNote" class="ai-hist-note" hidden></div>
+            <div class="ai-hist-clean" data-nosave>
+              <button class="btn btn-primary" style="font-size:12px" data-click="askCleanAiHistory">🗑 Clean history</button>
+              <span id="aiHistCount" class="text-3" style="font-size:11px"></span>
+            </div>
+            <div id="aiHistConfirm" class="ai-hist-confirm" hidden data-nosave>
+              <span id="aiHistConfirmText">Delete all saved AI results? This can't be undone.</span>
+              <button class="btn btn-danger" style="font-size:12px" data-click="cleanAiHistory">Delete</button>
+              <button class="btn" style="font-size:12px" data-click="cancelCleanAiHistory">Cancel</button>
+            </div>
+            <div id="aiActionsLog"></div>
+          </section>
+        </div>
+
+        <!-- ── Login & Security ── -->
+        <div class="set-pane" id="set-pane-security" hidden>
+          <section class="set-card" id="setLoginSection">
+            <h3 class="set-card-title">🔒 Login</h3>
+            <!-- login off (an action: Turn on login) -->
+            <div id="loginOff" data-nosave>
+              <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 10px">
+                Login is <strong style="color:var(--text-2)">off</strong> — anyone who can reach Boltarr on your network can see and change everything. Set a password to require a login.
+              </p>
+              <div class="form-row"><label>Username</label><input id="loginNewUser" type="text" value="admin" autocomplete="username"></div>
+              <div class="form-row"><label>Password (8+ characters)</label><input id="loginNewPw" type="password" data-peek autocomplete="new-password"></div>
+              <div class="form-row"><label>Repeat password</label><input id="loginNewPw2" type="password" data-peek autocomplete="new-password"></div>
+              <button class="btn btn-primary" style="font-size:12px" data-click="enableLogin">Turn on login</button>
+            </div>
+            <!-- login on -->
+            <div id="loginOn" hidden>
+              <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 10px">
+                Login is <strong style="color:var(--green)">on</strong> for <span id="loginUserName" class="mono" style="color:var(--text-2)"></span>. Browsers stay logged in for 30 days.
+                Forgot it? Run <code>reset-password</code> in the container console.
+              </p>
+              <div class="set-group" data-nosave>
+                <div class="settings-sub">Change password</div>
+                <div class="form-row"><label>Current password</label><input id="loginCurPw" type="password" data-peek autocomplete="current-password"></div>
+                <div class="form-row"><label>New password</label><input id="loginChgPw" type="password" data-peek autocomplete="new-password"></div>
+                <div class="form-row"><label>Repeat new password</label><input id="loginChgPw2" type="password" data-peek autocomplete="new-password"></div>
+                <button class="btn btn-primary" style="font-size:12px;align-self:flex-start" data-click="changeLoginPassword">Change password</button>
+                <p class="text-3" style="font-size:11px;margin:-6px 0 0">Other browsers are logged out when you change it.</p>
+              </div>
+
+              <div id="loginProxyPart" data-lvl="a" style="display:contents">
+              <div class="settings-sub">Login service in front (optional)</div>
+              <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+                If Boltarr sits behind Authelia, Authentik or similar, it can trust that service's login so you only sign in once.
+                Only requests from the addresses below are trusted.
+              </p>
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px">
+                <input type="checkbox" id="loginTrustProxy" style="accent-color:var(--accent)"> Trust the login service
+              </label>
+              <div class="form-row"><label>Its IP address(es)</label><input id="loginProxies" type="text" class="mono" placeholder="172.18.0.5" data-input="loginProxyCheck"></div>
+              <p id="loginProxiesWarn" class="secret-move" hidden></p>
+              <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+                Use the login service's <b>own</b> address. A whole range (like <code>172.18.0.0/16</code>) trusts every device
+                or container in it to say who is logged in.
+              </p>
+              <div class="form-row"><label>User header</label><input id="loginProxyHeader" type="text" class="mono" placeholder="Remote-User"></div>
+              </div>
+
+              <div class="set-group" data-nosave>
+                <div class="settings-sub">Turn login off</div>
+                <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" data-peek autocomplete="current-password"></div>
+                <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" data-click="disableLogin">Turn off login</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="set-card" id="setSecuritySection" data-lvl="a">
+            <h3 class="set-card-title">🛡 Allowed dashboards</h3>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+              Other sites can't show Boltarr inside a frame — that stops click-trick attacks.
+              To embed Boltarr in a dashboard (Homarr, Organizr, Home Assistant…), add the dashboard's address here,
+              exactly as it appears in your browser's address bar. Several? Separate them with commas.
+            </p>
+            <div class="form-row"><label>Dashboard addresses</label><input id="setFrameOrigins" type="text" class="mono" placeholder="https://homarr.example, http://10.0.0.5:7575"></div>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 4px">
+              With login on, the dashboard should be on the same domain as Boltarr (e.g. both under <code>example.com</code>), otherwise browsers won't keep you logged in inside the frame.
+            </p>
+          </section>
+
+          <section class="set-card" data-nosave data-lvl="a">
+            <h3 class="set-card-title">🛡 Strict mode</h3>
+            <p class="text-3" id="cspModeText" style="font-size:11px;line-height:1.5;margin:0 0 8px">
+              Strict mode is on: your browser refuses to run code written into the page, so code slipped into a hostname or note can't run. Anything it blocks is listed here.
+            </p>
+            <div id="cspSummary" class="text-3" style="font-size:12px;margin-bottom:6px">—</div>
+            <div id="cspList" class="csp-list" hidden></div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button class="btn" style="font-size:12px" data-click="toggleCspList" id="cspListBtn">Show details</button>
+              <button class="btn btn-primary" style="font-size:12px" data-click="clearCspReports">Clear</button>
+            </div>
+          </section>
+        </div>
+
+        <!-- ── Data ── (each part acts straight away with its own button) -->
+        <div class="set-pane" id="set-pane-data" hidden data-nosave>
+          <form class="set-card" id="backupForm">
+            <h3 class="set-card-title">⬇ Backup</h3>
+            <p class="text-3" style="font-size:12px;line-height:1.55;margin:0">
+              A backup holds your whole Boltarr: hosts, services, history and settings — including your ntfy and status-page tokens, AI key and login.
+            </p>
+            <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="backupProtect" checked style="accent-color:var(--accent);width:14px;height:14px" data-change="onBackupProtectChange">
+              <span>Protect with a password <span class="text-3">(recommended)</span></span>
+            </label>
+            <div id="backupPwRows">
+              <div class="form-row"><label for="backupPw">Password (8+ characters)</label><input id="backupPw" type="password" autocomplete="new-password"></div>
+              <div class="form-row"><label for="backupPw2">Repeat password</label><input id="backupPw2" type="password" autocomplete="new-password"></div>
+              <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
+                You'll need this password to restore. It can't be recovered — keep it somewhere safe. The file is a standard encrypted zip (7-Zip/WinRAR can open it too).
+              </p>
+            </div>
+            <div id="backupNoPwWarn" class="restore-warn" hidden>Without a password, anyone who gets this file can read your tokens and keys. Keep it private.</div>
+            <div class="login-error" id="backupErr" role="alert"></div>
+            <button class="btn btn-primary" type="submit" id="backupGoBtn" style="align-self:flex-start">⬇ Download backup</button>
+          </form>
+
+          <section class="set-card">
+            <h3 class="set-card-title">⬆ Restore</h3>
+            <p class="text-3" style="font-size:12px;line-height:1.55;margin:0">
+              Replaces everything in Boltarr with a backup. Pick the file first: Boltarr checks it and shows what's in it — nothing changes until you press Restore now.
+            </p>
+            <div>
+              <button class="btn btn-primary" style="font-size:12px" data-click="pickRestoreFile" id="restorePickBtn">⬆ Choose backup file…</button>
+              <input type="file" id="restoreInput" accept=".zip" style="display:none" data-change="restoreBackupInput">
+            </div>
+            <div id="restoreBox" class="restore-box" hidden>
+              <div id="restoreUpload">
+                <p class="text-3" style="font-size:12px;margin:0 0 8px">Uploading and checking <span id="restoreFileName" class="mono"></span>… nothing is changed yet.</p>
+                <div class="restore-bar"><div id="restoreUploadBar"></div></div>
+                <div id="restoreUploadPct" class="text-3 mono" style="font-size:11px;margin-top:6px">0%</div>
+              </div>
+              <form id="restorePwBox" hidden>
+                <p style="font-size:12px;margin:0 0 10px">🔒 <span id="restorePwMsg">This backup is password-protected.</span></p>
+                <div class="form-row"><label for="restorePw">Backup password</label><input id="restorePw" type="password" autocomplete="off"></div>
+                <button class="btn btn-primary" type="submit" style="font-size:12px">Unlock</button>
+              </form>
+              <div id="restoreSummary" hidden>
+                <div class="restore-facts">
+                  <div><label>Backup made</label><span id="restoreDate"></span></div>
+                  <div><label>Boltarr version</label><span id="restoreVersion"></span></div>
+                  <div><label>Includes settings</label><span id="restoreSettings"></span></div>
+                  <div><label>Password-protected</label><span id="restoreProtected"></span></div>
+                </div>
+                <table class="restore-compare">
+                  <thead><tr><th></th><th>Now</th><th>After restore</th></tr></thead>
+                  <tbody id="restoreCompare"></tbody>
+                </table>
+                <div id="restoreNote" class="restore-note" hidden></div>
+                <div class="restore-warn">
+                  <strong>Everything currently in Boltarr will be replaced</strong> by this backup. Background checks
+                  pause for a few seconds, and the page reloads by itself when it's done. This can't be undone —
+                  <a href="#" data-click="focusBackup">download a backup of the current data</a> first if you might want it back.
+                </div>
+              </div>
+              <div class="restore-actions">
+                <button class="btn" data-click="cancelRestore">Cancel</button>
+                <button class="btn btn-danger" id="restoreGoBtn" data-click="applyRestore" disabled>Restore now</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="set-card set-danger" data-lvl="a">
+            <h3 class="set-card-title">⚠ Danger zone</h3>
+            <div class="settings-sub" style="margin-top:0;padding-top:0;border-top:none">Reset all uptime</div>
+            <p class="text-3" style="font-size:12px;line-height:1.55;margin:0">
+              Clears every outage record for all services and devices and restarts their uptime percentages from now. Your hosts and services stay.
+            </p>
+            <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" data-click="resetAllUptime">↺ Reset all uptime</button>
+
+            <div class="settings-sub">Factory reset</div>
+            <p class="text-3" style="font-size:12px;line-height:1.6;margin:0">
+              This permanently deletes <strong>all network data</strong> — hosts, ports, services, subnets, scans,
+              schedules, change history, uptime history, connections, VLANs, and SSH keys. It cannot be undone.
+            </p>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
+              <input type="checkbox" id="resetKeepSettings" checked style="accent-color:var(--accent);width:14px;height:14px">
+              <span style="color:var(--text-2)">Keep settings <span style="color:var(--text-3)">(ntfy, status page, timezone, AI). Uncheck to reset everything to a fresh install.</span></span>
+            </label>
+            <div class="form-row" style="margin:0">
+              <label>Type <code>DELETE</code> to confirm</label>
+              <input type="text" id="resetConfirm" placeholder="DELETE" class="mono" data-input="onResetConfirmInput" autocomplete="off" style="max-width:220px">
+            </div>
+            <button class="btn btn-danger" id="resetConfirmBtn" data-click="doFactoryReset" disabled style="align-self:flex-start">↺ Factory reset</button>
+          </section>
+        </div>
+
+        </div><!-- /set-page -->
+
+        <div class="set-savebar" id="settingsSaveBar" hidden>
+          <span class="set-savebar-msg">You have unsaved changes</span>
+          <button class="btn" data-click="undoSettings" title="Put back what's saved">Undo</button>
+          <button class="btn btn-primary" data-click="saveSettings">Save</button>
+        </div>
+      </div>
+
       <!-- Search page (from the top-bar search: "See all results") -->
       <div class="tab-panel" id="panel-search">
         <div class="table-toolbar">
@@ -578,7 +1045,7 @@
           <div class="hierarchy-toolbar">
           <div class="svc-subtabs topo-subtabs">
             <button class="svc-subtab" data-click="setTab" data-args='["topology"]'>Graph</button>
-            <button class="svc-subtab active" data-click="setTab" data-args='["hierarchy"]'>Hierarchy</button>
+            <button class="svc-subtab active" data-lvl="i" data-click="setTab" data-args='["hierarchy"]'>Hierarchy</button>
           </div>
             <button class="btn" data-click="loadHierarchy">↻ Recalculate</button>
             <button class="btn" data-click="printPage">⎙ Print / PDF</button>
@@ -599,8 +1066,9 @@
         <div style="display:flex;gap:4px;align-items:center;min-width:0">
           <select id="chatModel" style="font-size:11px;padding:4px 7px;max-width:120px;min-width:0;background:var(--surface2);border:1px solid var(--border);color:var(--text-2);border-radius:var(--radius-sm)"></select>
           <button class="btn-ghost chat-hbtn" id="chatNew" title="New chat (clears this conversation)">＋</button>
-          <button class="btn-ghost chat-hbtn" id="chatCopyAll" title="Copy the whole conversation">⧉</button>
-          <button class="btn-ghost chat-hbtn" id="chatDownload" title="Download the conversation (.md)">⤓</button>
+          <button class="btn-ghost chat-hbtn" id="chatCopyAll" data-more="⧉ Copy whole chat" title="Copy the whole conversation">⧉</button>
+          <button class="btn-ghost chat-hbtn" id="chatDownload" data-more="⤓ Download chat (.md)" title="Download the conversation (.md)">⤓</button>
+          <div class="more-wrap"><button class="btn-ghost chat-hbtn more-btn" data-click="toggleMoreMenu" title="More" aria-label="More">⋯</button><div class="col-menu"></div></div>
           <button class="btn-ghost chat-hbtn chat-wide-btn" id="chatWide" title="Wider chat">⤢</button>
           <button class="btn-ghost" data-click="toggleChat" style="font-size:16px;padding:2px 6px">×</button>
         </div>
@@ -650,7 +1118,7 @@
 <!-- Add / edit subnet -->
 <!-- Scan schedule editor -->
 <div class="modal-overlay" id="scheduleModal">
-  <div class="modal">
+  <div class="modal" data-fold-form>
     <div class="modal-title" id="scheduleModalTitle">New schedule</div>
     <input type="hidden" id="schedEditId" value="">
     <div class="form-row">
@@ -716,8 +1184,8 @@
       </div>
     </div>
 
-    <div class="sidebar-divider" style="margin:6px 0"></div>
-    <div class="form-row" style="flex-wrap:wrap;gap:8px">
+    <div class="sidebar-divider" style="margin:6px 0" data-fold="a"></div>
+    <div class="form-row" data-fold="a" style="flex-wrap:wrap;gap:8px">
       <label>Active window <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
       <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap">
         <span style="font-size:12px;color:var(--text-3)">only run between</span>
@@ -726,7 +1194,7 @@
         <input type="time" id="schedWinEnd" style="width:120px">
       </div>
     </div>
-    <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
+    <p class="text-3" data-fold="a" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
       Leave blank to run any time. Outside this window a due scan is silently skipped until it reopens (crosses midnight fine, e.g. 22:00–06:00). Doesn't affect Run now or liveness.
     </p>
 
@@ -736,13 +1204,13 @@
         <span style="color:var(--text-2)">Enabled</span>
       </label>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="a">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="schedSilent" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">🔕 Silent: record changes, send no alert</span>
       </label>
     </div>
-    <p class="text-3" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
+    <p class="text-3" data-fold="a" style="font-size:11px;line-height:1.5;margin:-4px 0 0">
       Changes still show in the Changes tab and in the daily digest. Applies to Run now too.
     </p>
 
@@ -853,7 +1321,7 @@
 </div>
 
 <div class="modal-overlay" id="editModal">
-  <div class="modal">
+  <div class="modal" data-fold-form>
     <div class="modal-title">Edit Host</div>
     <input type="hidden" id="editIp">
     <div class="form-2col">
@@ -894,7 +1362,7 @@
       <label>Notes</label>
       <textarea id="editNotes" placeholder="Anything useful about this device…"></textarea>
     </div>
-    <div class="form-2col">
+    <div class="form-2col" data-fold="i">
       <div class="form-row">
         <label>Port Count</label>
         <input type="number" id="editPortCount" min="1" value="1" placeholder="1">
@@ -906,7 +1374,7 @@
         </label>
       </div>
     </div>
-    <div class="form-2col">
+    <div class="form-2col" data-fold="i">
       <div class="form-row">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400;padding-top:18px">
           <input type="checkbox" id="editIsDns" style="accent-color:#4a9ae0;width:14px;height:14px">
@@ -920,11 +1388,11 @@
         </label>
       </div>
     </div>
-    <div class="form-row" id="editDhcpPoolRow" style="display:none">
+    <div class="form-row" data-fold="i" id="editDhcpPoolRow" style="display:none">
       <label>DHCP Pool <span style="color:var(--text-3);font-weight:400;text-transform:none">(e.g. 192.168.1.100-192.168.1.254)</span></label>
       <input type="text" id="editDhcpPool" placeholder="192.168.1.100-192.168.1.254" class="mono">
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="a">
       <label>Classification <span style="color:var(--text-3);font-weight:400;text-transform:none">(static / dynamic)</span></label>
       <select id="editStaticOverride">
         <option value="">Auto (from subnet DHCP range)</option>
@@ -932,35 +1400,35 @@
         <option value="dynamic">Force dynamic</option>
       </select>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="i">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editNoMacAlert" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">Don't alert on MAC change for this host</span>
       </label>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="i">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editNoOfflineAlert" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">Don't alert when this host goes offline/online <span style="color:var(--text-3)">(still monitored)</span></span>
       </label>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="a">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editNoDhcpWarn" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">Don't show DHCP warnings for this host <span style="color:var(--text-3)">(e.g. it has a DHCP reservation)</span></span>
       </label>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="i" data-needs="sp">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editPublic" data-change="onEditPublicToggle" style="accent-color:var(--accent);width:14px;height:14px">
         <span style="color:var(--text-2)">Show on public status page <span style="color:var(--text-3)">(only the name, up/down &amp; uptime — never the IP)</span></span>
       </label>
     </div>
-    <div class="form-row" id="editPublicNameRow" style="display:none">
+    <div class="form-row" data-fold="i" id="editPublicNameRow" style="display:none">
       <label>Public name</label>
       <input type="text" id="editPublicName" placeholder="e.g. Home Server (shown publicly instead of the IP)">
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="i">
       <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:400">
         <input type="checkbox" id="editTierL1" style="accent-color:var(--accent);width:14px;height:14px">
         <span><strong style="color:var(--text)">Gateway (Level 1)</strong> — root of network hierarchy</span>
@@ -1035,7 +1503,7 @@
 
 <!-- Service modal (add + edit) -->
 <div class="modal-overlay" id="serviceModal">
-  <div class="modal">
+  <div class="modal" data-fold-form>
     <div class="modal-title" id="svcModalTitle">Add Service</div>
     <input type="hidden" id="svcEditId">
 
@@ -1056,7 +1524,7 @@
         <label>Service Name</label>
         <input type="text" id="svcName" placeholder="e.g. Plex, OpenWebUI">
       </div>
-      <div class="form-row">
+      <div class="form-row" data-fold="i" data-fold-ignore>
         <label>Status <span id="svcStatusAuto" style="color:var(--text-3);font-weight:400;text-transform:none" hidden>(set automatically while monitored)</span></label>
         <select id="svcStatus">
           <option value="unknown">Unknown</option>
@@ -1070,12 +1538,12 @@
         <label>Port <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional)</span></label>
         <input type="number" id="svcPort" placeholder="8080" class="mono" data-input="autoFillSvcUrlModal">
       </div>
-      <div class="form-row">
+      <div class="form-row" data-fold="i">
         <label>Protocol</label>
         <select id="svcProto"><option value="tcp">TCP</option><option value="udp">UDP</option></select>
       </div>
     </div>
-    <div class="form-row">
+    <div class="form-row" data-fold="i">
       <label>Monitor check <span style="color:var(--text-3);font-weight:400;text-transform:none">(how it's probed)</span></label>
       <select id="svcCheckType" data-change="svcCheckTypeChanged">
         <option value="http">HTTP(S) — request a URL</option>
@@ -1083,7 +1551,7 @@
         <option value="icmp">Ping (ICMP) — is the IP reachable</option>
       </select>
     </div>
-    <div class="form-row" id="svcTargetRow">
+    <div class="form-row" data-fold="a" id="svcTargetRow">
       <label>Monitor target IP <span style="color:var(--text-3);font-weight:400;text-transform:none">(defaults to the host)</span></label>
       <input type="text" id="svcContainerIp" class="mono" placeholder="e.g. 192.168.1.42 — the container's own IP">
     </div>
@@ -1091,7 +1559,7 @@
       <label>URL <span style="color:var(--text-3);font-weight:400;text-transform:none">(used by HTTP check)</span></label>
       <input type="text" id="svcUrl" placeholder="http://192.168.1.10:8080" data-input="svcUrlTyped">
     </div>
-    <div class="form-row" id="svcCodesRow">
+    <div class="form-row" data-fold="a" id="svcCodesRow">
       <label>Accepted replies <span style="color:var(--text-3);font-weight:400;text-transform:none">(optional; empty = any reply below 500 is up)</span> <button type="button" class="hint-link" data-click="openCodesHelp">hints</button></label>
       <input type="text" id="svcCodes" class="mono" maxlength="100" placeholder="e.g. 200-299 or 200,404">
     </div>
@@ -1102,14 +1570,14 @@
     <div class="form-2col">
       <div class="form-row">
         <label>Monitor</label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:32px">
-          <input type="checkbox" id="svcModalMonitored" data-change="svcModalMonitorToggled"> <span style="font-size:12px">Monitor this service</span>
+        <label class="form-check">
+          <input type="checkbox" id="svcModalMonitored" data-change="svcModalMonitorToggled"> <span>Monitor this service</span>
         </label>
       </div>
-      <div class="form-row">
+      <div class="form-row" data-needs="sp">
         <label>Public status page</label>
-        <label style="display:flex;align-items:center;gap:7px;cursor:pointer;height:32px">
-          <input type="checkbox" id="svcModalPublic" data-change="svcModalPublicToggled"> <span style="font-size:12px">Show publicly</span>
+        <label class="form-check">
+          <input type="checkbox" id="svcModalPublic" data-change="svcModalPublicToggled"> <span>Show publicly</span>
         </label>
       </div>
     </div>
@@ -1397,412 +1865,6 @@
   </div>
 </div>
 
-<!-- ── AI Settings Modal ─────────────────────────────────────────────────────── -->
-<div class="modal-overlay" id="settingsModal" data-click="closeSettings" data-self>
-  <div class="modal" style="width:500px;max-width:95%">
-    <div class="modal-header">
-      <span>⚙ Settings</span>
-      <button class="icon-btn" data-click="closeSettings">✕</button>
-    </div>
-    <div class="modal-body">
-      <details class="settings-section" open>
-        <summary>🌍 General</summary>
-        <div class="acc-body">
-      <div class="form-row">
-        <label>Timezone</label>
-        <div style="display:flex;gap:8px;flex:1;align-items:center">
-          <select id="setTimezone" data-change="updateTzPreview" style="flex:1"></select>
-        </div>
-      </div>
-      <p class="text-3" style="font-size:11px;line-height:1.5;margin:-6px 0 0">
-        Boltarr uses this for schedule times, quiet hours, the digest, and how times are shown. <span id="setTzPreview" style="color:var(--text-2)"></span>
-      </p>
-
-      </div></details>
-      <details class="settings-section" id="setLoginSection">
-        <summary>🔒 Login</summary>
-        <div class="acc-body">
-          <!-- login off -->
-          <div id="loginOff">
-            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 10px">
-              Login is <strong style="color:var(--text-2)">off</strong> — anyone who can reach Boltarr on your network can see and change everything. Set a password to require a login.
-            </p>
-            <div class="form-row"><label>Username</label><input id="loginNewUser" type="text" value="admin" autocomplete="username"></div>
-            <div class="form-row"><label>Password (8+ characters)</label><input id="loginNewPw" type="password" data-peek autocomplete="new-password"></div>
-            <div class="form-row"><label>Repeat password</label><input id="loginNewPw2" type="password" data-peek autocomplete="new-password"></div>
-            <button class="btn btn-primary" style="font-size:12px" data-click="enableLogin">Turn on login</button>
-          </div>
-          <!-- login on -->
-          <div id="loginOn" hidden>
-            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 10px">
-              Login is <strong style="color:var(--green)">on</strong> for <span id="loginUserName" class="mono" style="color:var(--text-2)"></span>. Browsers stay logged in for 30 days.
-              Forgot it? Run <code>reset-password</code> in the container console.
-            </p>
-            <div class="settings-sub">Change password</div>
-            <div class="form-row"><label>Current password</label><input id="loginCurPw" type="password" data-peek autocomplete="current-password"></div>
-            <div class="form-row"><label>New password</label><input id="loginChgPw" type="password" data-peek autocomplete="new-password"></div>
-            <div class="form-row"><label>Repeat new password</label><input id="loginChgPw2" type="password" data-peek autocomplete="new-password"></div>
-            <button class="btn" style="font-size:12px" data-click="changeLoginPassword">Change password</button>
-            <p class="text-3" style="font-size:11px;margin:6px 0 0">Other browsers are logged out when you change it.</p>
-
-            <div class="settings-sub">Login service in front (optional)</div>
-            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
-              If Boltarr sits behind Authelia, Authentik or similar, it can trust that service's login so you only sign in once.
-              Only requests from the addresses below are trusted.
-            </p>
-            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-bottom:8px">
-              <input type="checkbox" id="loginTrustProxy" style="accent-color:var(--accent)"> Trust the login service
-            </label>
-            <div class="form-row"><label>Its IP address(es)</label><input id="loginProxies" type="text" class="mono" placeholder="172.18.0.5" data-input="loginProxyCheck"></div>
-            <p id="loginProxiesWarn" class="secret-move" hidden></p>
-            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
-              Use the login service's <b>own</b> address. A whole range (like <code>172.18.0.0/16</code>) trusts every device
-              or container in it to say who is logged in.
-            </p>
-            <div class="form-row"><label>User header</label><input id="loginProxyHeader" type="text" class="mono" placeholder="Remote-User"></div>
-            <button class="btn" style="font-size:12px" data-click="saveLoginProxy">Save</button>
-
-            <div class="settings-sub">Turn login off</div>
-            <div class="form-row"><label>Password</label><input id="loginOffPw" type="password" data-peek autocomplete="current-password"></div>
-            <button class="btn btn-danger" style="font-size:12px" data-click="disableLogin">Turn off login</button>
-          </div>
-        </div>
-      </details>
-      <details class="settings-section" id="setSecuritySection">
-        <summary>🛡 Security</summary>
-        <div class="acc-body">
-          <div class="settings-sub" style="margin-top:0">Allowed dashboards</div>
-          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 8px">
-            Other sites can't show Boltarr inside a frame — that stops click-trick attacks.
-            To embed Boltarr in a dashboard (Homarr, Organizr, Home Assistant…), add the dashboard's address here,
-            exactly as it appears in your browser's address bar. Several? Separate them with commas.
-          </p>
-          <div class="form-row"><label>Dashboard addresses</label><input id="setFrameOrigins" type="text" class="mono" placeholder="https://homarr.example, http://10.0.0.5:7575"></div>
-          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0 0 4px">
-            With login on, the dashboard should be on the same domain as Boltarr (e.g. both under <code>example.com</code>), otherwise browsers won't keep you logged in inside the frame.
-          </p>
-
-          <div class="settings-sub">Strict mode</div>
-          <p class="text-3" id="cspModeText" style="font-size:11px;line-height:1.5;margin:0 0 8px">
-            Strict mode is on: your browser refuses to run code written into the page, so code slipped into a hostname or note can't run. Anything it blocks is listed here.
-          </p>
-          <div id="cspSummary" class="text-3" style="font-size:12px;margin-bottom:6px">—</div>
-          <div id="cspList" class="csp-list" hidden></div>
-          <div style="display:flex;gap:6px;margin-top:6px">
-            <button class="btn" style="font-size:12px" data-click="toggleCspList" id="cspListBtn">Show details</button>
-            <button class="btn" style="font-size:12px" data-click="clearCspReports">Clear</button>
-          </div>
-        </div>
-      </details>
-      <details class="settings-section">
-        <summary>🤖 AI</summary>
-        <div class="acc-body">
-      <p class="text-3" style="font-size:11px;line-height:1.6">
-        Settings are saved to <code>data/config.yaml</code>.<br>
-        Environment variables (<code>LLM_PROVIDER</code>, <code>LLM_BASE_URL</code>,
-        <code>LLM_API_KEY</code>, <code>LLM_MODEL</code>) override this file when set.
-      </p>
-      <div class="form-row">
-        <label>Provider</label>
-        <select id="setProvider" data-change="onSettingsProviderChange">
-          <option value="none">None — AI features disabled</option>
-          <option value="ollama">Ollama (local / self-hosted)</option>
-          <option value="openai">OpenAI-compatible API (OpenAI, LM Studio, Groq, Together…)</option>
-          <option value="anthropic">Anthropic (Claude API)</option>
-        </select>
-      </div>
-      <div id="setUrlRow" class="form-row" style="display:none">
-        <label>Base URL</label>
-        <input id="setBaseUrl" data-input="secretMoveCheck" type="text" placeholder="http://localhost:11434">
-      </div>
-      <div id="setKeyRow" class="form-row" style="display:none">
-        <label>API Key</label>
-        <input id="setApiKey" data-input="secretMoveCheck" type="password" placeholder="sk-…">
-      </div>
-      <label id="setKeyMoveRow" class="secret-move" hidden>
-        <input type="checkbox" id="setKeyMoveOk"> <span><b>Send my saved AI key to this new address.</b>
-        Your AI key is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
-      </label>
-      <div class="form-row">
-        <label>Default Model</label>
-        <input id="setModel" type="text" list="setModelList" autocomplete="off" title="Pick a model from your AI server, or type any name" placeholder="Pick from the list or type a name">
-        <datalist id="setModelList"></datalist>
-      </div>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Timeout&nbsp;(s)</label>
-        <input id="setTimeout" type="number" style="width:70px" min="10" value="120">
-        <label style="margin-left:12px">Long timeout&nbsp;(s)</label>
-        <input id="setLongTimeout" type="number" style="width:80px" min="30" value="600">
-      </div>
-      <div id="setCtxRow" class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Context&nbsp;(tokens)</label>
-        <input id="setNumCtx" type="number" style="width:90px" min="0" step="1024" value="8192" data-input="showCtxInfo">
-        <span class="text-3" style="font-size:11px">How much the model may read at once. Too small cuts off the chat's network notes; bigger uses more GPU memory. 0 = Ollama's default.</span>
-        <p class="settings-hint ctx-info" id="setCtxInfo" hidden></p>
-      </div>
-      <div id="setTestResult" class="settings-test-result" style="display:none"></div>
-      <button class="btn" style="font-size:12px;align-self:flex-start" data-click="testLLMConnection">⚡ Test AI</button>
-
-      <div class="settings-sub">AI history</div>
-      <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">
-        Keeps earlier AI results — host Analyze, Analyze Network, Explain on outages and digest summaries —
-        so you can open them again under "Earlier", and a record of the chat's AI actions you did or cancelled.
-      </p>
-      <div class="scan-checks" style="padding-left:2px">
-        <label><input type="checkbox" id="setAiHistEnabled" data-change="aiHistoryChanged"> Save AI results</label>
-      </div>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Keep up to</label>
-        <input id="setAiHistKeep" type="number" style="width:70px" min="1" max="1000" value="10" data-input="aiHistoryChanged">
-        <span class="text-3" style="font-size:11px">per item</span>
-        <label style="margin-left:12px">Delete after</label>
-        <input id="setAiHistDays" type="number" style="width:70px" min="0" max="3650" value="90" data-input="aiHistoryChanged">
-        <span class="text-3" style="font-size:11px">days (0 = no time limit)</span>
-      </div>
-      <div id="aiHistOffNote" class="ai-hist-note" hidden></div>
-      <div class="ai-hist-clean">
-        <button class="btn" style="font-size:12px" data-click="askCleanAiHistory">🗑 Clean history</button>
-        <span id="aiHistCount" class="text-3" style="font-size:11px"></span>
-      </div>
-      <div id="aiHistConfirm" class="ai-hist-confirm" hidden>
-        <span id="aiHistConfirmText">Delete all saved AI results? This can't be undone.</span>
-        <button class="btn btn-danger" style="font-size:12px" data-click="cleanAiHistory">Delete</button>
-        <button class="btn" style="font-size:12px" data-click="cancelCleanAiHistory">Cancel</button>
-      </div>
-      <div id="aiActionsLog"></div>
-      </div></details>
-      <details class="settings-section">
-        <summary>📱 Notifications (ntfy)</summary>
-        <div class="acc-body">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="setNtfyEnabled"> Enabled
-        </label>
-      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Boltarr sends alerts to your phone via <a href="https://ntfy.sh" target="_blank" style="color:var(--accent)">ntfy</a>.
-        Subscribe to your topic in the ntfy app to receive them.
-      </p>
-      <div class="form-row">
-        <label>Server</label>
-        <input id="setNtfyServer" data-input="secretMoveCheck" type="text" placeholder="https://ntfy.sh">
-      </div>
-      <div class="form-row">
-        <label>Topic</label>
-        <input id="setNtfyTopic" type="text" placeholder="my-secret-topic" class="mono">
-      </div>
-      <div class="form-row">
-        <label>Access token</label>
-        <input id="setNtfyToken" data-input="secretMoveCheck" type="password" placeholder="(optional — only if your ntfy needs a login)">
-      </div>
-      <label id="setNtfyMoveRow" class="secret-move" hidden>
-        <input type="checkbox" id="setNtfyMoveOk"> <span><b>Send my saved ntfy token to this new address.</b>
-        Your ntfy token is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
-      </label>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Probe each service every</label>
-        <input id="setCheckSeconds" type="number" min="15" max="600" style="width:64px" value="60">
-        <span style="font-size:11px;color:var(--text-3)">seconds (15–600)</span>
-      </div>
-      <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
-        How often monitored services are checked, and the width of one “1 hour” tick on the status page. Longer = lighter load but slower to notice an outage — detection is accurate to about ±this interval, and a blip shorter than it can be missed. The down-alert grace above can’t fire faster than one probe.
-      </p>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Alert after service down for</label>
-        <input id="setAlertAfter" type="number" min="0" style="width:64px" value="5">
-        <span style="font-size:11px;color:var(--text-3)">minutes (0 = alert immediately)</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer" title="When a host is offline, its services' down-alerts are held — you get one host-offline alert instead of many">
-          <input type="checkbox" id="setSuppressHostDown"> Suppress service-down alerts when the host is offline
-        </label>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="setQuietEnabled" data-change="onQuietToggle"> Quiet hours (mute alerts)
-        </label>
-        <span id="setQuietRange" style="display:none;align-items:center;gap:6px">
-          <span style="font-size:11px;color:var(--text-3)">from</span>
-          <input id="setQuietStart" type="time" value="02:00">
-          <span style="font-size:11px;color:var(--text-3)">to</span>
-          <input id="setQuietEnd" type="time" value="05:00">
-        </span>
-      </div>
-      <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
-        During quiet hours (your local time) alerts are held. Anything still down when the window ends alerts you then;
-        devices going offline or online and services coming back are sent together in one summary.
-      </p>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn" data-click="testNotification">📲 Send test</button>
-        <div id="setNtfyTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
-      </div>
-      <p id="setNtfyHealth" class="health-line" hidden></p>
-
-      </div></details>
-      <details class="settings-section">
-        <summary>🌐 Public status page</summary>
-        <div class="acc-body">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="setSpEnabled"> Enabled
-        </label>
-      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Boltarr pushes a sanitized status of services you mark "public" to a separate status app over your LAN.
-      </p>
-      <div class="form-row">
-        <label>Status app URL</label>
-        <input id="setSpUrl" data-input="secretMoveCheck" type="text" placeholder="http://192.168.1.20:12102">
-      </div>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Token</label>
-        <input id="setSpToken" data-input="secretMoveCheck" type="password" placeholder="shared secret" style="flex:1;min-width:160px">
-        <button class="btn" type="button" data-click="generateStatusToken" title="Generate a random token, then copy it into the status app's .env">Generate</button>
-      </div>
-      <label id="setSpMoveRow" class="secret-move" hidden>
-        <input type="checkbox" id="setSpMoveOk"> <span><b>Send my saved status page token to this new address.</b>
-        Your status page token is hidden, so it isn't sent to a new address unless you tick this — or type it again. It stays saved either way.</span>
-      </label>
-      <p class="text-3" style="font-size:10px;line-height:1.5;margin:0">
-        The same token must be set in the status app's <code>.env</code> (<code>STATUS_TOKEN</code>).
-      </p>
-      <div class="form-row">
-        <label>Show "may be out of date" after</label>
-        <div style="display:flex;align-items:center;gap:6px">
-          <input id="setSpStale" type="number" min="1" max="1440" style="width:80px"> <span class="text-3" style="font-size:11px">minutes without an update from Boltarr</span>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button class="btn" data-click="testStatusPush">🌐 Push now</button>
-        <div id="setSpTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
-      </div>
-      <p id="setSpHealth" class="health-line" hidden></p>
-
-      </div></details>
-      <details class="settings-section">
-        <summary>📡 Liveness</summary>
-        <div class="acc-body">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-          <input type="checkbox" id="setLvEnabled"> Enabled
-        </label>
-      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        A light background ping sweep marks each known host online/offline (the dot in the Hosts table). Offline/online transitions feed Change tracking &amp; alerts above.
-      </p>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Sweep every</label>
-        <input id="setLvInterval" type="number" min="1" style="width:64px" value="3">
-        <span style="font-size:11px;color:var(--text-3)">min · offline after</span>
-        <input id="setLvOfflineAfter" type="number" min="1" style="width:64px" value="3">
-        <span style="font-size:11px;color:var(--text-3)">missed sweeps</span>
-      </div>
-
-      </div></details>
-      <details class="settings-section">
-        <summary>🕓 IP History</summary>
-        <div class="acc-body">
-      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Hosts → IP History lists every static-range IP (outside the DHCP pool) and how long since it last answered. These decide when an unseen IP reads as stale (probably free) or gone (safe to reuse).
-      </p>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Stale after</label>
-        <input id="setIphStale" type="number" min="1" style="width:64px" value="30">
-        <span style="font-size:11px;color:var(--text-3)">days · gone after</span>
-        <input id="setIphGone" type="number" min="1" style="width:64px" value="60">
-        <span style="font-size:11px;color:var(--text-3)">days</span>
-      </div>
-
-      </div></details>
-      <details class="settings-section">
-        <summary>🔔 Changes</summary>
-        <div class="acc-body">
-      <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Everything is recorded to the Changes feed; alerts are the subset that push to ntfy.</p>
-      <div class="acc-subhead">Record
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;font-weight:400">
-          <input type="checkbox" id="setCtEnabled"> Enabled
-        </label>
-      </div>
-      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        What each scan finds changed vs. before (new hosts, opened/closed ports, MAC/hostname changes).
-      </p>
-      <div class="scan-checks" style="padding-left:2px">
-        <label><input type="checkbox" id="setCtHostNew"> New host</label>
-        <label><input type="checkbox" id="setCtPortOpened"> Port opened</label>
-        <label><input type="checkbox" id="setCtPortClosed"> Port closed</label>
-        <label><input type="checkbox" id="setCtMacChanged"> MAC changed</label>
-        <label><input type="checkbox" id="setCtHostnameChanged"> Hostname changed</label>
-        <label><input type="checkbox" id="setCtOffline"> Host offline</label>
-        <label><input type="checkbox" id="setCtOnline"> Host online</label>
-      </div>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Keep history for</label>
-        <input id="setCtRetention" type="number" min="1" style="width:70px" value="90">
-        <span style="font-size:11px;color:var(--text-3)">days</span>
-      </div>
-
-      <div class="acc-subhead" style="margin-top:12px">Alerts
-        <label style="margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;font-weight:400">
-          <input type="checkbox" id="setCaEnabled"> Enabled
-        </label>
-      </div>
-      <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-        Which recorded changes push to ntfy. Needs Notifications set up. Everything stays in the feed regardless.
-      </p>
-      <div class="form-row" style="flex-wrap:wrap;gap:8px">
-        <label>Alert for</label>
-        <select id="setCaScope" style="max-width:220px">
-          <option value="static">Static hosts only</option>
-          <option value="dynamic">Dynamic hosts only</option>
-          <option value="all">All hosts (static + dynamic)</option>
-        </select>
-        <span style="font-size:11px;color:var(--text-3)">unknown-classified hosts never alert</span>
-      </div>
-      <div class="scan-checks" style="padding-left:2px">
-        <label><input type="checkbox" id="setCaHostNew"> New host</label>
-        <label><input type="checkbox" id="setCaPortOpened"> Port opened</label>
-        <label><input type="checkbox" id="setCaPortClosed"> Port closed</label>
-        <label><input type="checkbox" id="setCaMacChanged"> MAC changed</label>
-        <label><input type="checkbox" id="setCaHostnameChanged"> Hostname changed</label>
-        <label><input type="checkbox" id="setCaOffline"> Host offline</label>
-        <label><input type="checkbox" id="setCaOnline"> Host online</label>
-      </div>
-      <div class="scan-checks" style="padding-left:2px">
-        <label title="A roaming device keeps its MAC across IPs/APs"><input type="checkbox" id="setCaIncludeMac"> Attach device MAC to alerts (offline/online, scan summary, digest)</label>
-        <label title="A host's extra IPs are pinged on their own. Untick to keep their offline/online in the Changes feed without sending alerts."><input type="checkbox" id="setCaIncludeAliases"> Include alias IPs in offline/online alerts</label>
-      </div>
-      <div class="scan-checks" style="padding-left:2px">
-        <label><input type="checkbox" id="setCaOnScan"> Summary after each scan</label>
-        <label><input type="checkbox" id="setCaDigest"> Daily digest at</label>
-        <input id="setCaDigestTime" type="time" value="08:00" style="width:110px">
-        <label title="Monitored services that were down in the last 24 hours, or are down now. Instant down/recovered alerts are set in 📱 Notifications."><input type="checkbox" id="setCaDigestServices"> Include service outages</label>
-      </div>
-      <div class="scan-checks" style="padding-left:2px">
-        <label title="Uses your AI server (Settings → AI). If it doesn't answer within 60 seconds, the digest is sent without the summary."><input type="checkbox" id="setCaDigestAi"> Add a short AI summary to the digest</label>
-        <select id="setCaDigestAiModel" title="Which AI model writes the summary" style="font-size:12px;max-width:200px"></select>
-        <button class="btn" style="font-size:12px" data-click="previewDigest" title="Shows what the digest would say right now. Nothing is sent.">Preview digest</button>
-      </div>
-      <div id="digestPreview" class="digest-preview" hidden></div>
-      <div id="pastDigests"></div>
-      </div></details>
-
-      <details class="settings-section">
-        <summary>🗄 Data</summary>
-        <div class="acc-body">
-          <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">Backup downloads a zip of the database + settings, optionally protected with a password (it includes your tokens and keys). Restore replaces everything with a backup. Factory reset permanently wipes all network data — use with care.</p>
-          <div style="display:flex;gap:6px">
-            <button class="btn" style="font-size:12px" data-click="downloadBackup">⬇ Backup</button>
-            <button class="btn" style="font-size:12px" data-click="pickRestoreFile">⬆ Restore</button>
-            <input type="file" id="restoreInput" accept=".zip" style="display:none" data-change="restoreBackupInput">
-          </div>
-          <button class="btn" style="font-size:12px;align-self:flex-start" data-click="resetAllUptime">↺ Reset all uptime</button>
-          <button class="btn btn-danger" style="font-size:12px;align-self:flex-start" data-click="openFactoryReset">↺ Factory reset</button>
-        </div>
-      </details>
-    </div>
-    <div class="modal-actions">
-      <span id="settingsApplied" class="settings-applied" hidden>Saved ✓</span>
-      <button class="btn" data-click="closeSettings">Cancel</button>
-      <button class="btn" data-click="applySettings" title="Save and keep this window open">Apply</button>
-      <button class="btn btn-primary" data-click="saveSettings" title="Save and close">Save</button>
-    </div>
-  </div>
-</div>
-
 <!-- Service detail panel -->
 <div class="svc-detail-panel" id="svcDetailPanel">
   <div class="panel-resize-grip" title="Drag to resize"></div>
@@ -1858,7 +1920,7 @@
       </div>
       <button class="btn-ghost btn-pause" id="svcDetailPauseBtn" data-click="svcDetailPause" hidden><span class="pause-ico"></span>Pause…</button>
     </div>
-    <div class="svc-detail-field">
+    <div class="svc-detail-field" data-needs="sp">
       <label>Public status page</label>
       <label class="mon-switch" style="height:26px;text-transform:none;font-weight:400;font-size:11px;letter-spacing:0" title="Show this service on the public status page (requires Monitor on)">
         <input type="checkbox" class="switch-input" id="svcDetailPublic" data-change="toggleSvcPublicName"><span class="mon-switch-track"><span class="mon-switch-knob"></span></span>
@@ -1961,6 +2023,7 @@
 <script src="/js/chat.js"></script>
 <script src="/js/peek.js"></script>
 <script src="/js/app/core.js"></script>
+<script src="/js/app/levels.js"></script>
 <script src="/js/app/hosts.js"></script>
 <script src="/js/app/host-detail.js"></script>
 <script src="/js/app/scans.js"></script>

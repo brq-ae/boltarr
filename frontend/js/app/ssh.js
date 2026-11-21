@@ -8,6 +8,7 @@ let sshKeyVisible = new Set();
 
 async function loadSshKeys() {
   sshKeys = await api("GET", "/api/ssh-keys");
+  levelInUse("sshkeys", sshKeys.length > 0);
   renderSshKeys();
 }
 
@@ -120,6 +121,7 @@ async function loadHostSshSection(ip) {
     api("GET", `/api/hosts/${ip}/ssh-access`),
     api("GET", `/api/ssh-keys`),
   ]);
+  markSshTabInUse(ip, access.length > 0);
 
   const el = document.getElementById("dtab-ssh");
   if (!el) return;

@@ -70,6 +70,19 @@ for (const [type, attr] of [["click", "data-click"], ["change", "data-change"], 
   });
 }
 
+// Escape closes the window on top, the same way its own Cancel / close button does
+// (so each window's tidy-up still runs). Boxes that use Escape themselves (an
+// inline edit, the search box) have already handled it.
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape" || e.defaultPrevented) return;
+  const open = document.querySelectorAll(".modal-overlay.open");
+  const top = open[open.length - 1];
+  const close = top && top.querySelector('[data-click^="close"]');
+  if (!close) return;
+  e.preventDefault();
+  close.click();
+});
+
 // ── API ───────────────────────────────────────────────────────────────────────
 
 // Every same-origin request carries X-Boltarr (the server refuses changes
@@ -160,6 +173,7 @@ async function loadSubnets() {
   subnets = await api("GET", "/api/subnets");
   window.subnets = subnets;
   hiddenSubnets = new Set(subnets.filter(s => s.map_hidden).map(s => s.id));   // saved per subnet
+  levelInUse("dhcp", subnets.some(s => s.dhcp_start && s.dhcp_end));
   renderSubnetList();
   loadSubnetSummary();
 }
@@ -400,17 +414,21 @@ function aiMeta(x) {
 
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 
-const TAB_TITLES = { topology: "Topology", hosts: "Hosts", subnets: "Subnets", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys", search: "Search" };
+const TAB_TITLES = { topology: "Topology", hosts: "Hosts", subnets: "Subnets", scans: "Scans", hierarchy: "Topology", services: "Services", sshkeys: "SSH Keys", settings: "Settings", search: "Search" };
 // Hierarchy is a sub-tab of Topology (Graph | Hierarchy): its own panel, but the
 // nav highlights Topology, and Topology reopens whichever view was used last.
 const NAV_TAB = { hierarchy: "topology" };
 let lastTopoView = "topology";
 
 function openTopology() {
-  setTab(lastTopoView);
+  const hier = document.querySelector('#panel-topology .svc-subtab[data-args=\'["hierarchy"]\']');
+  setTab(lastTopoView === "hierarchy" && isLevelHidden(hier) ? "topology" : lastTopoView);
 }
 
 function setTab(name) {
+  if (name !== "settings" && !settingsLeaveOk()) return;   // unsaved Settings changes: ask first
+  const wasOn = document.getElementById("panel-" + name)?.classList.contains("active");
+  if (!wasOn) window.endLevelFound?.();   // a feature opened from search shows only for that visit
   if (name === "topology" || name === "hierarchy") lastTopoView = name;
   const nav = NAV_TAB[name] || name;
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
@@ -420,6 +438,8 @@ function setTab(name) {
   document.getElementById("panel-" + name).classList.add("active");
   document.querySelector(`.sidebar-nav-item[data-tab="${nav}"]`)?.classList.add("active");
   document.querySelector(`.bottom-nav-btn[data-tab="${nav}"]`)?.classList.add("active");
+  levelVisit(document.querySelector(`.sidebar-nav-item[data-tab="${nav}"]`));
+  if (name === "hierarchy") levelVisit(document.querySelector("#panel-hierarchy .svc-subtab.active"));
 
   const title = document.getElementById("topbarTitle");
   if (title) title.textContent = TAB_TITLES[name] || name;
@@ -431,6 +451,7 @@ function setTab(name) {
   if (name === "services")  loadServicesTab();
   if (name === "sshkeys")   loadSshKeys();
   if (name === "subnets")   loadSubnetSummary();
+  if (name === "settings" && !wasOn) loadSettings();   // clicking Settings again keeps your unsaved changes
   if (name === "search")    window.renderSearchPage?.();
 
   // Live monitor dots only need refreshing while the Services tab is open

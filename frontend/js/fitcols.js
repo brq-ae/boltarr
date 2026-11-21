@@ -7,8 +7,8 @@
 // those widths; the "flex" column takes whatever is left. Cells stay on one line
 // and end in "…"; hovering a cut-off cell shows its full text.
 //
-// State per browser: the existing hidden-columns lists (Columns ▾ checkboxes) plus
-// a pinned list. Auto-hidden columns are only a display state, never saved.
+// State per browser: the existing hidden-columns lists (Columns ▾ checkboxes, with
+// the view level's defaults: app/levels.js) plus a pinned list. Auto-hidden columns are only a display state, never saved.
 
 (function () {
   const TABLES = {
@@ -40,7 +40,7 @@
     if (!wrap || !wrap.clientWidth) return;            // tab not visible: refit when it shows
     const cs = getComputedStyle(wrap);
     const avail = wrap.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-    const hidden = load(cfg.hiddenKey), pinned = load(cfg.pinKey);
+    const hidden = window.hiddenColsFor ? hiddenColsFor(id) : load(cfg.hiddenKey), pinned = load(cfg.pinKey);
     const shown = Object.keys(cfg.cols).filter(k => !hidden.includes(k));
     let need = shown.reduce((a, k) => a + cfg.cols[k][1], 0);
     const auto = [];

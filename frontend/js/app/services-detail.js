@@ -254,6 +254,11 @@ function renderDepsModal(svcId) {
       available.map(s => `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.hostname || s.ip)})</option>`).join("");
 }
 
+// The service panel lists dependencies too: redraw it if it's open
+function _refreshPanelDeps() {
+  if (svcDetailId != null && document.getElementById("svcDetailPanel").classList.contains("open")) renderSvcDetailDeps(svcDetailId);
+}
+
 async function addSvcDep() {
   const fromId = parseInt(document.getElementById("depsModalSvcId").value);
   const toId   = parseInt(document.getElementById("depsAddSelect").value);
@@ -261,7 +266,9 @@ async function addSvcDep() {
   try {
     const dep = await api("POST", "/api/service-dependencies", { from_service_id: fromId, to_service_id: toId });
     allDependencies.push(dep);
+    levelInUse("deps", true);
     renderDepsModal(fromId);
+    _refreshPanelDeps();
     if (currentSvcTab === "topology") renderSvcTopology();
   } catch (e) { alert("Error: " + e.message); }
 }
@@ -269,7 +276,9 @@ async function addSvcDep() {
 async function removeSvcDep(depId, svcId) {
   await api("DELETE", `/api/service-dependencies/${depId}`);
   allDependencies = allDependencies.filter(d => d.id !== depId);
+  levelInUse("deps", allDependencies.length > 0);
   renderDepsModal(svcId);
+  _refreshPanelDeps();
   if (currentSvcTab === "topology") renderSvcTopology();
 }
 
@@ -322,6 +331,7 @@ function showSvcDetail(id, fresh = false) {
   setSvcDetailMonState(s);
 
   document.getElementById("svcDetailPublic").checked = !!s.public;
+  needsInUse(document.getElementById("svcDetailPublic"), s.public);
   document.getElementById("svcDetailPublicName").value = s.public_name || "";
   document.getElementById("svcDetailPublicNameRow").style.display = s.public ? "" : "none";
 
@@ -518,8 +528,8 @@ function renderSvcDetailDeps(svcId) {
       return `<span class="dep-chip incoming">← ${escHtml(src ? src.name : d.from_service_id)}</span>`;
     }),
   ];
-  const hint = `<span style="font-size:11px;color:var(--text-3)">Manage dependencies from the Topology view.</span>`;
-  container.innerHTML = chips.length ? chips.join("") + `<div style="flex-basis:100%">${hint}</div>` : hint;
+  const btn = `<button class="btn-ghost" data-click="openManageDeps" data-args="[${svcId}]">⊕ Dependencies</button>`;
+  container.innerHTML = chips.length ? chips.join("") + `<div style="flex-basis:100%">${btn}</div>` : btn;
 }
 
 // ── Bulk add containers ───────────────────────────────────────────────────────
@@ -669,7 +679,7 @@ registerActions({
   resetAllUptime, resetSvcUptime, showSvcDetail, hideSvcDetail, saveSvcDetail, deleteSvcDetail,
   cycleSvcDetailStatus, toggleSvcMonitor, toggleSvcPublicName, updateSvcDetailUrlBtn,
   openBulkAddContainers, bulkSelectAll, bulkAddContainers, toggleBulkChip,
-  addSvcDep, removeSvcDep, closeDepsModal, toggleLinkHostsForm, saveHostLink, deleteSelectedHostLink,
+  addSvcDep, removeSvcDep, closeDepsModal, openManageDeps, toggleLinkHostsForm, saveHostLink, deleteSelectedHostLink,
   svcDetailPause,
   editSvcDetail: () => openEditService(svcDetailId),
   closeBulkAdd:  () => document.getElementById("bulkAddModal").classList.remove("open"),
