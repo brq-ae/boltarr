@@ -528,6 +528,11 @@
                 <b>Advanced</b><span>Everything, with every option.</span></button>
             </div>
           </section>
+          <section class="set-card" data-nosave>
+            <h3 class="set-card-title">👋 Welcome</h3>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">The window new installs see first: timezone, view level and your network.</p>
+            <button class="btn" style="align-self:flex-start" data-click="openWelcome">Show the welcome again</button>
+          </section>
         </div>
 
         <!-- ── Alerts ── -->
@@ -1246,6 +1251,41 @@
     <div class="modal-actions">
       <button class="btn" data-click="closeAddSubnet">Cancel</button>
       <button class="btn btn-primary" id="subnetSaveBtn" data-click="saveSubnet">Add Subnet</button>
+    </div>
+  </div>
+</div>
+
+<!-- Welcome (U-01): a brand-new install's first window -->
+<div class="modal-overlay" id="welcomeModal">
+  <div class="modal welcome">
+    <div class="modal-title">👋 Welcome to Boltarr</div>
+    <p class="welcome-lead">Boltarr maps and watches your home network: what's on it, and is it working. Three quick choices and you're ready to scan.</p>
+    <div class="form-row">
+      <label for="welcomeTz">Your timezone</label>
+      <select id="welcomeTz"></select>
+    </div>
+    <div class="form-row">
+      <label>How much to show <span class="welcome-sub">(change it any time under View)</span></label>
+      <div class="level-choices">
+        <button class="level-choice" data-level-pick="basic" data-click="setViewLevel" data-args='["basic"]'>
+          <b>Basic</b><span>The essentials: what's on my network, and is it working?</span></button>
+        <button class="level-choice" data-level-pick="intermediate" data-click="setViewLevel" data-args='["intermediate"]'>
+          <b>Intermediate</b><span>Adds tools for running a homelab: schedules, hierarchy, status page.</span></button>
+        <button class="level-choice" data-level-pick="advanced" data-click="setViewLevel" data-args='["advanced"]'>
+          <b>Advanced</b><span>Everything, with every option.</span></button>
+      </div>
+    </div>
+    <div class="form-row">
+      <label for="welcomeNet">Your network <button type="button" class="hint-link" data-click="toggleWelcomeNetHelp" aria-label="What is this?">(?)</button></label>
+      <input type="text" id="welcomeNet" class="mono" placeholder="e.g. 192.168.1.0/24">
+      <p class="welcome-help" id="welcomeNetHelp" hidden>The range of addresses Boltarr will scan to find your devices. We filled it in from the network
+        Boltarr itself is on, so most people can leave it as it is. <b>192.168.1.0/24</b> means every address from 192.168.1.1 to
+        192.168.1.254. Change it only if your devices are on a different network. You can add more networks later on the Subnets page.</p>
+    </div>
+    <div class="modal-actions welcome-actions">
+      <a class="welcome-wiki" href="https://github.com/brq-ae/boltarr/wiki" target="_blank" rel="noopener">📖 Learn how to use Boltarr</a>
+      <button class="btn-ghost" data-click="skipWelcome">Skip</button>
+      <button class="btn btn-primary" id="welcomeStartBtn" data-click="welcomeStart">Add my network</button>
     </div>
   </div>
 </div>
@@ -2036,6 +2076,7 @@
 <script src="/js/app/subnets.js"></script>
 <script src="/js/app/settings.js"></script>
 <script src="/js/app/ssh.js"></script>
+<script src="/js/app/welcome.js"></script>
 <script src="/js/app/boot.js"></script>
 <script src="/js/fitcols.js"></script>
 <script src="/js/search.js"></script>

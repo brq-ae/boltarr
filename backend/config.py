@@ -142,6 +142,7 @@ _DEFAULTS: dict = {
     # had devices or networks (an upgrade) starts on "advanced", an empty one on "basic".
     "ui": {
         "start_level": "",         # basic | intermediate | advanced; "" = not decided yet
+        "welcome_done": False,     # the welcome window (U-01) was finished or skipped
     },
 }
 

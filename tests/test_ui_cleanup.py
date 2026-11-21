@@ -76,7 +76,7 @@ def test_column_fit_script_loaded(client):
 
 
 APP_FILES = ["core", "levels", "hosts", "host-detail", "scans", "services", "services-detail", "maintenance",
-             "explain", "ai-actions", "topology", "subnets", "settings", "ssh", "boot"]
+             "explain", "ai-actions", "topology", "subnets", "settings", "ssh", "welcome", "boot"]
 
 
 def test_app_split_files_load_in_order(client):

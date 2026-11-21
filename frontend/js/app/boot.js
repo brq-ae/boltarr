@@ -11,7 +11,7 @@ async function initAiStatus() {
   } catch (_) {}
 }
 
-document.addEventListener("DOMContentLoaded", () => { boot(); initAiStatus(); initViewLevel(); });
+document.addEventListener("DOMContentLoaded", () => { boot(); initAiStatus(); initViewLevel(); initWelcome(); });
 
 
 // ── Login ─────────────────────────────────────────────────────────────────────

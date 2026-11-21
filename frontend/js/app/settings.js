@@ -14,8 +14,8 @@ const PROVIDER_KEY_PLACEHOLDER = {
   anthropic: "sk-ant-…",
 };
 
-function populateTimezones() {
-  const sel = document.getElementById("setTimezone");
+// Fills a timezone list (Settings, or the welcome window when given)
+function populateTimezones(sel = document.getElementById("setTimezone")) {
   if (!sel || sel.dataset.filled) return;
   let zones = [];
   try { zones = Intl.supportedValuesOf("timeZone"); } catch { zones = []; }

@@ -1,0 +1,23 @@
+# GitHub Pages for boltarr.net: shows the README as a dark page (no file list).
+# A proper landing page comes later (planner R-23).
+theme: jekyll-theme-midnight
+title: Boltarr
+description: Self-hosted network dashboard. See what's on your network, and whether it's working.
+show_downloads: false
+
+# Only the README and its docs are published; the code stays on GitHub
+exclude:
+  - backend
+  - frontend
+  - statuspage
+  - templates
+  - tests
+  - data
+  - scripts
+  - Dockerfile
+  - docker-compose.yml
+  - docker-compose.ollama.yml
+  - requirements.txt
+  - requirements-dev.txt
+  - run.sh
+  - VERSION

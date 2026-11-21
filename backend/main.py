@@ -8,6 +8,7 @@ import time
 import io
 import json
 import ipaddress
+import socket
 import zipfile
 import copy
 import tempfile
@@ -98,6 +99,65 @@ def start_level() -> str:
 @app.get("/api/ui/start-level")
 def get_start_level():
     return {"level": start_level()}
+
+
+# ── Welcome window (U-01) ────────────────────────────────────────────────────
+# Shown once on a brand-new install (no networks or devices yet), never on an
+# upgrade. Finished or skipped is saved here, so other browsers don't show it.
+
+def _ip4(hex_le: str) -> int:
+    """An address from /proc/net/route (hex, little-endian) as an int."""
+    return int.from_bytes(bytes.fromhex(hex_le), "little")
+
+
+def suggest_network() -> Optional[str]:
+    """The network Boltarr's machine sits on, e.g. "192.168.1.0/24", to pre-fill
+    the welcome window. With host networking this is the home network. Wider
+    than /24 is narrowed to the /24 around this machine (a /16 takes hours to
+    scan). None when it can't be told (no route, Docker's own bridge)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))         # picks the outgoing address; sends nothing
+            ip = ipaddress.IPv4Address(s.getsockname()[0])
+    except OSError:
+        return None
+    if ip.is_loopback or ip.is_link_local or ip in ipaddress.IPv4Network("172.17.0.0/16"):
+        return None
+    best = None
+    try:
+        with open("/proc/net/route") as f:
+            next(f)
+            for line in f:
+                cols = line.split()
+                if len(cols) < 8:
+                    continue
+                dest, mask = _ip4(cols[1]), _ip4(cols[7])
+                if mask and (int(ip) & mask) == dest:
+                    prefix = bin(mask).count("1")
+                    if best is None or prefix > best:
+                        best = prefix
+    except (OSError, ValueError):
+        best = None
+    prefix = 24 if best is None or best < 24 else min(best, 30)
+    return str(ipaddress.IPv4Network(f"{ip}/{prefix}", strict=False))
+
+
+@app.get("/api/ui/welcome")
+def get_welcome():
+    cfg = get_config()
+    with get_conn() as conn:
+        has_data = conn.execute("SELECT 1 FROM hosts UNION ALL SELECT 1 FROM subnets LIMIT 1").fetchone()
+    return {"show": not cfg["ui"].get("welcome_done") and not has_data,
+            "network": suggest_network(),
+            "timezone": cfg.get("general", {}).get("timezone", "")}
+
+
+@app.post("/api/ui/welcome/done")
+def welcome_done():
+    cfg = get_config()
+    cfg["ui"]["welcome_done"] = True
+    save_config(cfg)
+    return {"ok": True}
 
 
 @app.get("/api/version")
