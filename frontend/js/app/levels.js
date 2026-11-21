@@ -411,6 +411,7 @@ const LEVEL_FEATURES = [
   { name: "Allowed dashboards", words: "frame embed iframe homepage dashboard", at: "#setSecuritySection", go: () => _goSetting("#setSecuritySection") },
   { name: "Strict mode", words: "csp security blocked reports", at: "#cspListBtn", go: () => _goSetting("#cspListBtn") },
   { name: "Danger zone", words: "delete everything reset wipe", at: ".set-danger", go: () => _goSetting(".set-danger") },
+  { name: "Telegram alerts", words: "telegram bot chat notifications alerts phone", at: "#setTgCard", go: () => _goSetting("#setTgCard") },
   { name: "Alert for static or dynamic devices", words: "device alerts scope all hosts", at: "#setCaScope", go: () => _goSetting("#setCaScope") },
   { name: "Attach device MAC to alerts", words: "mac alerts roaming", at: "#setCaIncludeMac", go: () => _goSetting("#setCaIncludeMac") },
   { name: "Alerts for alias IPs", words: "extra ips alias offline online", at: "#setCaIncludeAliases", go: () => _goSetting("#setCaIncludeAliases") },

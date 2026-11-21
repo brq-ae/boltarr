@@ -21,7 +21,7 @@ A practical guide to operating Boltarr day-to-day. For installation, see the
 9. [Search & export](#search--export)
 10. [Services](#services)
 11. [Service monitor (uptime)](#service-monitor-uptime)
-12. [Notifications (ntfy)](#notifications-ntfy)
+12. [Notifications (ntfy and Telegram)](#notifications-ntfy-and-telegram)
 13. [Public status page](#public-status-page)
 14. [SSH key management](#ssh-key-management)
 15. [AI assistant](#ai-assistant)
@@ -333,7 +333,7 @@ Alerts are configured under Settings → Alerts (below).
 
 ---
 
-## Notifications (ntfy)
+## Notifications (ntfy and Telegram)
 
 Boltarr sends push notifications via [ntfy](https://ntfy.sh) — the public
 `ntfy.sh` or your own self-hosted server.
@@ -364,8 +364,24 @@ time). During it, alerts are held — but anything still down when the window
 3am buzz or a silent night. Devices going offline or online and services coming
 back are sent together in one summary.
 
-**Delivery:** an alert counts as sent only once ntfy accepts it; failures are
-retried for a few rounds, and Settings shows the last notification error.
+**Telegram:** the same alerts can also go to a Telegram chat, sent by your own
+bot. Set it up in ⚙ **Settings → Alerts → ✈️ Where alerts go (Telegram)**:
+
+- Create a bot with **@BotFather** (`/newbot`) and copy its **bot token**.
+- Open your bot and press **Start**, then in Boltarr paste the token and press
+  **🔎 Find my chat ID**.
+- **📲 Send test**, then tick **Enabled** and **Save**.
+
+Boltarr only sends; it never reads your chat (except once, for Find my chat
+ID). The token is hidden once saved and kept out of logs and error messages.
+
+> **Privacy:** messages to a Telegram bot are **not end-to-end encrypted** —
+> Telegram can read your alerts (device names, IPs and, if those alerts are on,
+> open ports) and keeps them until you delete them. For alerts that never leave
+> your network, use self-hosted ntfy.
+
+**Delivery:** an alert counts as sent once ntfy or Telegram accepts it; failures
+are retried for a few rounds, and Settings shows each channel's last error.
 
 ---
 

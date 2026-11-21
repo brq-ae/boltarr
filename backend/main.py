@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .database import init_db, get_conn, MigrationError
 from .scanner import start_scan, scan_jobs, cancel_scan, start_probe, build_command, check_opts, check_target, ScanOptionError, ScanBusy
-from .config import get_config, get_llm_config, get_notifications_config, save_config, invalidate_config_cache, get_timezone
+from .config import get_config, get_llm_config, get_notifications_config, get_telegram_config, save_config, invalidate_config_cache, get_timezone
 from . import notify
 from . import monitor
 from . import liveness
@@ -1780,7 +1780,8 @@ def monitor_health():
     """F-27: the last ntfy send and status-page push, for Settings."""
     with get_conn() as conn:
         held = conn.execute("SELECT COUNT(*) FROM alert_queue").fetchone()[0]
-    return {"notify": notify.health(), "push": monitor.push_health(), "held_alerts": held}
+    return {"notify": notify.health(), "telegram": notify.health("telegram"),
+            "push": monitor.push_health(), "held_alerts": held}
 
 
 # ── Planned maintenance (R-22) ────────────────────────────────────────────────
@@ -2904,6 +2905,12 @@ class NotificationSettingsIn(BaseModel):
     move_secret:          Optional[bool] = None   # F-16, see _guard_secret_move
 
 
+class TelegramIn(BaseModel):
+    enabled: Optional[bool] = None
+    token:   Optional[str]  = None     # the masked placeholder = keep the saved one
+    chat_id: Optional[str]  = None
+
+
 class StatusPageSettingsIn(BaseModel):
     enabled: Optional[bool] = None
     url:     Optional[str]  = None
@@ -2930,12 +2937,15 @@ def get_settings():
     ntfy["quiet_end"]     = mon.get("quiet_end", "")
     ntfy["suppress_when_host_down"] = mon.get("suppress_when_host_down", True)
 
+    tg = dict(cfg["telegram"])
+    tg["token"] = _MASKED if tg.get("token") else ""
+
     sp = dict(cfg["statuspage"])
     sp["token"] = _MASKED if sp.get("token") else ""
     ca = dict(cfg["change_alerts"])
     ca.pop("last_digest", None)   # runtime state, not a user setting
     return {"general": dict(cfg["general"]),
-            "llm": llm, "notifications": ntfy, "statuspage": sp,
+            "llm": llm, "notifications": ntfy, "telegram": tg, "statuspage": sp,
             "change_tracking": dict(cfg["change_tracking"]),
             "change_alerts": ca,
             "liveness": dict(cfg["liveness"]),
@@ -3123,6 +3133,34 @@ class SecurityIn(BaseModel):
     frame_origins: Optional[str] = None
 
 
+_TG_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{30,}$")
+_TG_CHAT_RE = re.compile(r"^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$")
+
+
+def _tg_token(data: TelegramIn, saved: str) -> str:
+    """The token to use: a newly typed one (checked), else the saved one."""
+    if data.token is None or data.token == _MASKED:
+        return saved or ""
+    t = data.token.strip()
+    if t and not _TG_TOKEN_RE.match(t):
+        raise HTTPException(422, "That doesn't look like a bot token. It looks like 123456789:ABC… (from @BotFather).")
+    return t
+
+
+def _apply_telegram(cfg: dict, data: TelegramIn):
+    tg = cfg.setdefault("telegram", {})
+    token = _tg_token(data, tg.get("token", ""))
+    chat = (data.chat_id if data.chat_id is not None else tg.get("chat_id", "")) or ""
+    chat = str(chat).strip()
+    if chat and not _TG_CHAT_RE.match(chat):
+        raise HTTPException(422, "Chat ID should be a number (e.g. 123456789, or -100… for a group). Use Find my chat ID.")
+    if data.enabled and not (token and chat):
+        raise HTTPException(422, "Telegram needs a bot token and a chat ID before it can be switched on.")
+    if data.enabled is not None: tg["enabled"] = data.enabled
+    tg["token"] = token
+    tg["chat_id"] = chat
+
+
 def _apply_security(cfg: dict, data: SecurityIn):
     if data.frame_origins is not None:
         try:
@@ -3136,6 +3174,7 @@ class AllSettingsIn(BaseModel):
     general:         Optional[GeneralIn]              = None
     llm:             Optional[LLMSettingsIn]          = None
     notifications:   Optional[NotificationSettingsIn] = None
+    telegram:        Optional[TelegramIn]             = None
     statuspage:      Optional[StatusPageSettingsIn]   = None
     change_tracking: Optional[ChangeTrackingIn]       = None
     liveness:        Optional[LivenessIn]             = None
@@ -3147,6 +3186,7 @@ class AllSettingsIn(BaseModel):
 
 _SECTION_APPLY = {
     "general": _apply_general, "llm": _apply_llm, "notifications": _apply_notifications,
+    "telegram": _apply_telegram,
     "statuspage": _apply_statuspage, "change_tracking": _apply_change_tracking,
     "liveness": _apply_liveness, "ip_history": _apply_ip_history, "ai_history": _apply_ai_history,
     "change_alerts": _apply_change_alerts, "security": _apply_security,
@@ -3215,6 +3255,30 @@ def test_notification(data: NotificationSettingsIn):
         tags=["white_check_mark"],
     )
     return {"ok": ok, "error": err}
+
+
+@app.post("/api/notifications/telegram/test")
+def test_telegram(data: TelegramIn):
+    """Send a test with the on-screen Telegram settings, without saving them.
+    The token only ever goes to Telegram, so a saved one can be used as is."""
+    saved = get_telegram_config()
+    token = _tg_token(data, saved.get("token", ""))
+    chat = str(data.chat_id if data.chat_id is not None else saved.get("chat_id", "")).strip()
+    ok, err = notify.telegram_send_with(
+        {"token": token, "chat_id": chat},
+        title="Boltarr",
+        message="Test notification — your Boltarr alerts are working.",
+        tags=["white_check_mark"],
+    )
+    return {"ok": ok, "error": err}
+
+
+@app.post("/api/notifications/telegram/find-chat")
+def telegram_find_chat(data: TelegramIn):
+    """Find my chat ID: the newest chat that messaged the bot."""
+    token = _tg_token(data, get_telegram_config().get("token", ""))
+    ok, res = notify.telegram_find_chat(token)
+    return {"ok": True, **res} if ok else {"ok": False, "error": res}
 
 
 @app.put("/api/settings/statuspage")

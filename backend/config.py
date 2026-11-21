@@ -39,6 +39,13 @@ _DEFAULTS: dict = {
         "topic": "",          # the ntfy topic (channel) to publish to
         "token": "",          # optional ntfy access token, if the server needs auth
     },
+    # Telegram alerts (S-24): the same alerts as ntfy, sent to a chat by your own bot.
+    # Boltarr only sends; it never reads the chat (except "Find my chat ID", on request).
+    "telegram": {
+        "enabled": False,
+        "token": "",          # the bot token from @BotFather (secret; hidden in Settings)
+        "chat_id": "",        # where alerts go: your chat with the bot, or a group
+    },
     # Service-monitor behaviour.
     "monitoring": {
         # How often each monitored service is probed, in seconds. Also drives the
@@ -185,6 +192,7 @@ def _load_config() -> dict:
         "general": dict(_DEFAULTS["general"]),
         "llm": dict(_DEFAULTS["llm"]),
         "notifications": dict(_DEFAULTS["notifications"]),
+        "telegram": dict(_DEFAULTS["telegram"]),
         "monitoring": dict(_DEFAULTS["monitoring"]),
         "statuspage": dict(_DEFAULTS["statuspage"]),
         "liveness": dict(_DEFAULTS["liveness"]),
@@ -205,6 +213,8 @@ def _load_config() -> dict:
             cfg["llm"].update({k: v for k, v in raw["llm"].items() if v is not None})
         if "notifications" in raw:
             cfg["notifications"].update({k: v for k, v in raw["notifications"].items() if v is not None})
+        if "telegram" in raw:
+            cfg["telegram"].update({k: v for k, v in raw["telegram"].items() if v is not None})
         if "monitoring" in raw:
             cfg["monitoring"].update({k: v for k, v in raw["monitoring"].items() if v is not None})
         if "statuspage" in raw:
@@ -253,6 +263,14 @@ def _load_config() -> dict:
             cfg["notifications"][cfg_key] = val
     if os.environ.get("NTFY_ENABLED"):
         cfg["notifications"]["enabled"] = os.environ["NTFY_ENABLED"].lower() in ("1", "true", "yes", "on")
+
+    # Telegram env overrides
+    for env_key, cfg_key in {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat_id"}.items():
+        val = os.environ.get(env_key)
+        if val:
+            cfg["telegram"][cfg_key] = val
+    if os.environ.get("TELEGRAM_ENABLED"):
+        cfg["telegram"]["enabled"] = os.environ["TELEGRAM_ENABLED"].lower() in ("1", "true", "yes", "on")
 
     if os.environ.get("MONITOR_ALERT_MINUTES"):
         try:
@@ -324,6 +342,10 @@ def get_liveness_config() -> dict:
 
 def get_notifications_config() -> dict:
     return get_config()["notifications"]
+
+
+def get_telegram_config() -> dict:
+    return get_config()["telegram"]
 
 
 def get_timezone():

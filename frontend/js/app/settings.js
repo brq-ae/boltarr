@@ -97,7 +97,7 @@ async function loadSettings() {
   _resetDataTab();
   renderLoginSettings();
   try {
-    const { general, llm, notifications, statuspage, change_tracking, change_alerts, liveness, ip_history, ai_history, security } = await api("GET", "/api/settings");
+    const { general, llm, notifications, telegram, statuspage, change_tracking, change_alerts, liveness, ip_history, ai_history, security } = await api("GET", "/api/settings");
     document.getElementById("setFrameOrigins").value = (security && security.frame_origins) || "";
     loadCspReports();
     populateTimezones();
@@ -139,6 +139,12 @@ async function loadSettings() {
     if (n.quiet_end)   document.getElementById("setQuietEnd").value   = n.quiet_end;
     onQuietToggle();
     document.getElementById("setNtfyTestResult").style.display = "none";
+
+    const tg = telegram || {};
+    document.getElementById("setTgEnabled").checked = !!tg.enabled;
+    document.getElementById("setTgToken").value     = tg.token   || "";
+    document.getElementById("setTgChat").value      = tg.chat_id || "";
+    for (const id of ["setTgTestResult", "setTgFindResult"]) document.getElementById(id).style.display = "none";
 
     const sp = statuspage || {};
     document.getElementById("setSpEnabled").checked = !!sp.enabled;
@@ -288,6 +294,7 @@ function _rememberSecrets(saved) {
     _SECRET_ORIG.ntfyKey = saved.notifications.token || "";
     set("setNtfyToken", saved.notifications.token);
   }
+  if (saved.telegram) set("setTgToken", saved.telegram.token);
   if (saved.statuspage) {
     _SECRET_ORIG.sp = (saved.statuspage.url || "").trim();
     _SECRET_ORIG.spKey = saved.statuspage.token || "";
@@ -446,6 +453,13 @@ function _ntfyPayload() {
     move_secret: _moveSecret("ntfy"),
   };
 }
+function _tgPayload() {
+  return {
+    enabled: document.getElementById("setTgEnabled").checked,
+    token:   document.getElementById("setTgToken").value.trim(),
+    chat_id: document.getElementById("setTgChat").value.trim(),
+  };
+}
 function _spPayload() {
   return {
     enabled: document.getElementById("setSpEnabled").checked,
@@ -501,6 +515,7 @@ async function saveSettings() {
       general:         generalPayload,
       llm:             payload,
       notifications:   _ntfyPayload(),
+      telegram:        _tgPayload(),
       statuspage:      _spPayload(),
       change_tracking: ctPayload,
       liveness:        lvPayload,
@@ -588,6 +603,41 @@ async function testNotification() {
     resultEl.textContent = "✗ " + e.message;
   }
   loadMonitorHealth();
+}
+
+// S-24: Telegram (Settings → Alerts)
+function _resultLine(id, ok, text) {
+  const el = document.getElementById(id);
+  el.style.display = "";
+  el.className = "settings-test-result" + (ok === true ? " ok" : ok === false ? " err" : "");
+  el.textContent = text;
+}
+
+async function testTelegram() {
+  _resultLine("setTgTestResult", null, "Sending…");
+  try {
+    const r = await api("POST", "/api/notifications/telegram/test", _tgPayload());
+    _resultLine("setTgTestResult", r.ok, r.ok ? "✓ Sent — check Telegram" : "✗ " + (r.error || "failed"));
+  } catch (e) {
+    _resultLine("setTgTestResult", false, "✗ " + e.message);
+  }
+  loadMonitorHealth();
+}
+
+async function findTelegramChat() {
+  _resultLine("setTgFindResult", null, "Looking…");
+  try {
+    const r = await api("POST", "/api/notifications/telegram/find-chat", _tgPayload());
+    if (!r.ok) return _resultLine("setTgFindResult", false, "✗ " + (r.error || "failed"));
+    const chat = document.getElementById("setTgChat");
+    chat.value = r.chat_id;
+    chat.dispatchEvent(new Event("input", { bubbles: true }));   // counts as an unsaved change
+    const found = r.type === "private" ? `your chat${r.name ? ` with ${r.name}` : ""}`
+      : `the ${r.type === "channel" ? "channel" : "group"}${r.name ? ` "${r.name}"` : ""}`;
+    _resultLine("setTgFindResult", true, `✓ Found ${found}. Send a test, then Save.`);
+  } catch (e) {
+    _resultLine("setTgFindResult", false, "✗ " + e.message);
+  }
 }
 
 // ── AI history (Settings → AI) ───────────────────────────────────────────────
@@ -739,6 +789,7 @@ async function loadMonitorHealth() {
   };
   const held = d.held_alerts ? `${d.held_alerts} alert${d.held_alerts > 1 ? "s" : ""} waiting to be sent` : "";
   show("setNtfyHealth", _healthText(d.notify, "send"), held);
+  show("setTgHealth", _healthText(d.telegram, "send"));
   show("setSpHealth", _healthText(d.push, "push"));
 }
 
@@ -998,7 +1049,7 @@ registerActions({
   openSettings, setSettingsTab, undoSettings, previewDigest,
   saveSettings: () => saveSettings(), updateTzPreview, toggleCspList, clearCspReports,
   aiHistoryChanged, askCleanAiHistory, cancelCleanAiHistory, cleanAiHistory,
-  onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification, showCtxInfo,
+  onSettingsProviderChange, testLLMConnection, onQuietToggle, testNotification, testTelegram, findTelegramChat, showCtxInfo,
   generateStatusToken, testStatusPush, secretMoveCheck,
   onResetConfirmInput, doFactoryReset, focusBackup,
   onBackupProtectChange, cancelRestore, applyRestore, closeRestoreOverlay,

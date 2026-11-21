@@ -569,6 +569,33 @@
             <p id="setNtfyHealth" class="health-line" hidden></p>
           </section>
 
+          <section class="set-card" id="setTgCard">
+            <h3 class="set-card-title">✈️ Where alerts go (Telegram)</h3>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="setTgEnabled"> Enabled
+            </label>
+            <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
+              The same alerts as ntfy, sent to a Telegram chat by your own bot. Boltarr only sends; it never reads your chat, except once, when you press Find my chat ID.
+              <a href="https://github.com/brq-ae/boltarr/wiki/Notifications#telegram" target="_blank" rel="noopener" style="color:var(--accent)">How to set it up</a>
+            </p>
+            <p class="tg-privacy">⚠ Alerts sent to Telegram pass through Telegram's servers and are <b>not end-to-end encrypted</b>: Telegram can read them and keeps them until you delete them. They include device names, IP addresses and, if those alerts are on, open ports. For alerts that never leave your network, use self-hosted ntfy.</p>
+            <div class="form-row">
+              <label>Bot token</label>
+              <input id="setTgToken" type="password" class="mono" autocomplete="off" placeholder="123456789:ABC… from @BotFather">
+            </div>
+            <div class="form-row">
+              <label>Chat ID</label>
+              <input id="setTgChat" type="text" class="mono" autocomplete="off" placeholder="send your bot a message, then Find" style="flex:1">
+              <button class="btn" data-click="findTelegramChat">🔎 Find my chat ID</button>
+            </div>
+            <div id="setTgFindResult" class="settings-test-result" style="display:none;margin:0"></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <button class="btn btn-primary" data-click="testTelegram">📲 Send test</button>
+              <div id="setTgTestResult" class="settings-test-result" style="display:none;margin:0;flex:1"></div>
+            </div>
+            <p id="setTgHealth" class="health-line" hidden></p>
+          </section>
+
           <section class="set-card">
             <h3 class="set-card-title">◈ Service alerts</h3>
             <div class="form-row" style="flex-wrap:wrap;gap:8px">
@@ -592,7 +619,7 @@
               <label><input type="checkbox" id="setCaEnabled"> Enabled</label>
             </div>
             <p class="text-3" style="font-size:11px;line-height:1.6;margin:0">
-              Which recorded changes push to ntfy, plus the scan summary and the daily digest. Needs ntfy set up (above). Changes are recorded under Monitoring → Changes history; everything stays in the Changes feed regardless.
+              Which recorded changes send an alert, plus the scan summary and the daily digest. Needs ntfy or Telegram set up (above). Changes are recorded under Monitoring → Changes history; everything stays in the Changes feed regardless.
             </p>
             <div class="form-row" data-fold="i" style="flex-wrap:wrap;gap:8px">
               <label>Alert for</label>
@@ -937,7 +964,7 @@
           <form class="set-card" id="backupForm">
             <h3 class="set-card-title">⬇ Backup</h3>
             <p class="text-3" style="font-size:12px;line-height:1.55;margin:0">
-              A backup holds your whole Boltarr: hosts, services, history and settings — including your ntfy and status-page tokens, AI key and login.
+              A backup holds your whole Boltarr: hosts, services, history and settings — including your ntfy, Telegram and status-page tokens, AI key and login.
             </p>
             <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer">
               <input type="checkbox" id="backupProtect" checked style="accent-color:var(--accent);width:14px;height:14px" data-change="onBackupProtectChange">
@@ -1015,7 +1042,7 @@
             </p>
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
               <input type="checkbox" id="resetKeepSettings" checked style="accent-color:var(--accent);width:14px;height:14px">
-              <span style="color:var(--text-2)">Keep settings <span style="color:var(--text-3)">(ntfy, status page, timezone, AI). Uncheck to reset everything to a fresh install.</span></span>
+              <span style="color:var(--text-2)">Keep settings <span style="color:var(--text-3)">(ntfy, Telegram, status page, timezone, AI). Uncheck to reset everything to a fresh install.</span></span>
             </label>
             <div class="form-row" style="margin:0">
               <label>Type <code>DELETE</code> to confirm</label>

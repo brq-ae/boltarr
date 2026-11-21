@@ -26,7 +26,8 @@ A self-hosted network dashboard for mapping, monitoring, and analyzing your loca
 
 **Watch it**
 - **Change tracking** — records what each scan finds different (new hosts, opened/closed ports, MAC/hostname changes), with a retention window
-- **Change alerts** — ntfy notifications as a per-scan summary and/or a daily digest; scope by host classification (static / dynamic / all) with per-host opt-outs
+- **Alerts on your phone** — via **ntfy** (public or self-hosted) and/or **Telegram** (your own bot). Telegram messages aren't end-to-end encrypted; for alerts that never leave your network, use self-hosted ntfy
+- **Change alerts** — notifications as a per-scan summary and/or a daily digest; scope by host classification (static / dynamic / all) with per-host opt-outs
 - **Host liveness & uptime** — a light background ping tier marks hosts online/offline, tracks uptime %/outages, alerts on transitions, and links service outages to a down host (one alert instead of a flood)
 - **Services registry** — track running services per host, with a services topology and dependencies
 - **Service uptime monitor** — **HTTP(S), TCP or Ping (ICMP)** checks with an overridable target, every 15–600 s; 5xx replies count as down, with an optional **Accepted replies** list per service. **Pause** with a reason and an end time (shown as Maintenance). Alerts have a grace period and quiet hours; failed notifications are retried and shown in Settings
@@ -217,7 +218,7 @@ App starts at **http://localhost:12100**
 
 All data is stored in `data/`:
 - `boltarr.db` — SQLite database (hosts, ports, connections, VLANs, scan history)
-- `config.yaml` — all settings, including your AI key, ntfy and status page tokens and the login (written by the UI, or copy from `config.yaml.example`)
+- `config.yaml` — all settings, including your AI key, ntfy, Telegram and status page tokens and the login (written by the UI, or copy from `config.yaml.example`)
 
 Mount `./data` as a Docker volume to persist data across container restarts (done automatically in the provided compose files).
 

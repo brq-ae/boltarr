@@ -2263,6 +2263,8 @@ table.fit-cols .port-list, table.fit-cols .svc-port-status { flex-wrap: nowrap; 
 /* F-27: last send / push result under Notifications and Status page */
 .health-line { font-size: 11px; color: var(--text-3); margin: 0; }
 .health-line.bad { color: var(--red, #e5534b); }
+.tg-privacy { font-size: 11px; line-height: 1.6; margin: 0; padding: 8px 10px; border-radius: 6px;
+  border: 1px solid oklch(78% 0.15 75 / .35); background: oklch(78% 0.15 75 / .08); color: var(--text-2); }
 
 /* Pause button: two drawn bars (the ⏸ emoji is tiny/grey on some systems) */
 .pause-ico {
