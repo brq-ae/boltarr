@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if page.url == "/" %}Boltarr — self-hosted network dashboard{% else %}{{ page.title | default: "Boltarr" }} · Boltarr{% endif %}</title>
+  <meta name="description" content="{{ site.description }}">
+  <meta property="og:title" content="Boltarr">
+  <meta property="og:description" content="{{ site.description }}">
+  <meta property="og:image" content="{{ '/docs/images/readme-main.png' | absolute_url }}">
+  <link rel="icon" href="{{ '/frontend/img/BoltarrLogo.svg' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="{{ '/' | relative_url }}">
+      <img src="{{ '/frontend/img/BoltarrLogo.svg' | relative_url }}" alt="" width="28" height="28">Boltarr
+    </a>
+    <nav>
+      <a href="https://github.com/brq-ae/boltarr/wiki">Wiki</a>
+      <a href="https://github.com/brq-ae/boltarr/releases">Releases</a>
+      <a href="https://hub.docker.com/r/brqae/boltarr">Docker Hub</a>
+      <a class="gh" href="https://github.com/brq-ae/boltarr">GitHub</a>
+    </nav>
+  </header>
+  <main class="content">
+    {{ content }}
+  </main>
+  <footer class="foot">
+    Boltarr is open source under the Apache 2.0 license ·
+    <a href="https://github.com/brq-ae/boltarr">Source on GitHub</a>
+  </footer>
+  <script src="{{ '/assets/js/site.js' | relative_url }}"></script>
+</body>
+</html>

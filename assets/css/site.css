@@ -1,0 +1,53 @@
+/* boltarr.net — the README as a page, in Boltarr's own colors */
+:root {
+  --bg: oklch(9% 0.025 250); --surface: oklch(13% 0.028 250); --surface2: oklch(17% 0.028 250);
+  --border: oklch(26% 0.022 250); --text: oklch(92% 0.006 240); --text-2: oklch(68% 0.007 240);
+  --text-3: oklch(46% 0.007 240); --accent: oklch(82% 0.17 85);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body { margin: 0; background: var(--bg); color: var(--text-2);
+  font: 16px/1.65 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px max(16px, calc((100% - 960px) / 2)); background: oklch(9% 0.025 250 / .92);
+  backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 9px; color: var(--accent); font-weight: 700; font-size: 18px; }
+.brand:hover { text-decoration: none; }
+.top nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; }
+.top nav a { color: var(--text-2); }
+.top nav a:hover { color: var(--text); text-decoration: none; }
+.top nav a.gh { color: var(--accent); }
+
+.content { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; }
+.content > p[align="center"]:first-child { margin: 8px 0 0; }   /* the README's own logo */
+h1, h2, h3, h4 { color: var(--text); line-height: 1.25; margin: 1.8em 0 .6em; }
+h1 { font-size: 2.2rem; margin-top: .4em; }
+h2 { font-size: 1.5rem; padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.15rem; }
+strong { color: var(--text); }
+img { max-width: 100%; height: auto; border-radius: 8px; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+blockquote { margin: 1em 0; padding: .6em 1em; border-left: 3px solid var(--accent);
+  background: var(--surface); border-radius: 0 8px 8px 0; color: var(--text-2); }
+blockquote p { margin: .3em 0; }
+.note-label { color: var(--accent); font-weight: 700; font-size: .8em; text-transform: uppercase; letter-spacing: .06em; }
+code { font: .88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--surface2);
+  color: var(--text); padding: .15em .4em; border-radius: 5px; }
+pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+  overflow-x: auto; line-height: 1.5; }
+pre code { background: none; padding: 0; font-size: .86em; }
+.highlight, .highlighter-rouge { background: none; }
+table { display: block; overflow-x: auto; border-collapse: collapse; margin: 1em 0; font-size: .94em; }
+th, td { border: 1px solid var(--border); padding: 7px 12px; text-align: left; }
+th { background: var(--surface2); color: var(--text); }
+tr:nth-child(even) td { background: var(--surface); }
+ul, ol { padding-left: 1.4em; }
+li { margin: .25em 0; }
+
+.foot { max-width: 960px; margin: 0 auto; padding: 24px 16px 40px; border-top: 1px solid var(--border);
+  font-size: 13px; color: var(--text-3); text-align: center; }
+@media (max-width: 560px) { body { font-size: 15px; } h1 { font-size: 1.8rem; } .top nav { gap: 12px; } }

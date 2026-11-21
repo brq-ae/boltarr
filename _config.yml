@@ -1,14 +1,17 @@
-# GitHub Pages for boltarr.net: shows the README as a dark page (no file list).
+# GitHub Pages for boltarr.net: the README as a page in Boltarr's own look
+# (_layouts/default.html + assets/css/site.css; no file list).
 # A proper landing page comes later (planner R-23).
-theme: jekyll-theme-midnight
 title: Boltarr
 description: Self-hosted network dashboard. See what's on your network, and whether it's working.
-show_downloads: false
 
 # Only the README and its docs are published; the code stays on GitHub
 exclude:
   - backend
-  - frontend
+  - frontend/css
+  - frontend/js
+  - frontend/vendor
+  - frontend/index.html
+  - frontend/login.html
   - statuspage
   - templates
   - tests
