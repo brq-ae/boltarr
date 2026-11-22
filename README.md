@@ -71,6 +71,9 @@ create an admin login (you can skip it and set one later in **Settings → Login
 Images are also tagged with their version (e.g. `brqae/boltarr:0.27.0`) if you want
 to stay on one version or go back to an earlier one.
 
+**Runs on Intel/AMD and 64-bit ARM** (Raspberry Pi 3, 4 and 5 with a 64-bit system,
+ARM NAS boxes). Docker picks the right image by itself.
+
 **Why host networking?** Boltarr scans your LAN with nmap (host discovery, MAC
 addresses, the liveness ping tier). Docker's default **bridge** network sandboxes
 the container, so nmap can't reach your LAN — you'd get no host discovery, no MAC
