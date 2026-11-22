@@ -1,0 +1,54 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Boltarr version
+      description: Shown next to the Boltarr name, top left.
+      placeholder: e.g. 0.30.1
+    validations:
+      required: true
+  - type: dropdown
+    id: runs-on
+    attributes:
+      label: Where does it run?
+      options:
+        - Docker on Linux
+        - Raspberry Pi / other ARM board
+        - Synology
+        - QNAP
+        - TrueNAS
+        - Unraid
+        - ZimaOS / CasaOS
+        - Portainer / Dockge / OpenMediaVault
+        - Proxmox LXC
+        - Bare metal / run.sh
+        - Other (say below)
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Docker: run `sudo docker logs boltarr --tail 50` and paste the output. Remove anything private (IP addresses, names) first."
+      render: shell
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      placeholder: e.g. Firefox on Windows
