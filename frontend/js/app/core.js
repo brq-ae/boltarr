@@ -136,24 +136,33 @@ function apiErrorText(text) {
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function boot() {
-  // The AI model list can be slow (it asks the AI provider), so it loads in the
-  // background instead of holding up the first screen.
-  loadModels();
-  await Promise.all([loadAppTz(), loadSubnets(), loadHosts(), loadServicesData(), loadVlans(), loadScanProfiles()]);
-  renderHostsTable();
-  await loadScans();
-  setTab("topology");          // draws the graph (once)
+  // Hooked up first, so they work while start-up is still loading (F-43)
   document.getElementById("backupForm").addEventListener("submit", doBackup);
   document.getElementById("restorePwBox").addEventListener("submit", e => {
     e.preventDefault();
     _checkRestoreFile(document.getElementById("restorePw").value);
   });
-  showRestoredBanner();
-  loadLoginState();
-  api("GET", "/api/version").then(d => {
-    const el = document.getElementById("appVersion");
-    if (el && d.version) el.textContent = "v" + d.version;
-  }).catch(() => {});
+  // The AI model list can be slow (it asks the AI provider), so it loads in the
+  // background instead of holding up the first screen.
+  loadModels();
+  try {
+    await Promise.all([loadAppTz(), loadSubnets(), loadHosts(), loadServicesData(), loadVlans(), loadScanProfiles()]);
+    renderHostsTable();
+    await loadScans();
+    // The page opens on Topology. Draw the map now that the data is in, but only if you are
+    // still there: never pull you off a page you picked while this loaded (F-43).
+    if (document.getElementById("panel-topology").classList.contains("active")) loadGraph();
+  } catch (_) {
+    // One failed load must not leave the page half started (F-44)
+    showToast("Couldn't load everything. Refresh the page to try again.", 10000);
+  } finally {
+    showRestoredBanner();
+    loadLoginState();
+    api("GET", "/api/version").then(d => {
+      const el = document.getElementById("appVersion");
+      if (el && d.version) el.textContent = "v" + d.version;
+    }).catch(() => {});
+  }
 }
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────

@@ -793,17 +793,20 @@ async function loadMonitorHealth() {
   show("setSpHealth", _healthText(d.push, "push"));
 }
 
-function showToast(msg) {
+// ms: how long it stays; give errors longer so they can be read (F-44)
+function showToast(msg, ms = 2500) {
   let t = document.getElementById("_toast");
   if (!t) {
     t = document.createElement("div");
     t.id = "_toast";
     t.className = "toast";
+    t.setAttribute("role", "status");   // screen readers announce each message
     document.body.appendChild(t);
   }
   t.textContent = msg;
   t.classList.add("toast-show");
-  setTimeout(() => t.classList.remove("toast-show"), 2500);
+  clearTimeout(t._hide);
+  t._hide = setTimeout(() => t.classList.remove("toast-show"), ms);
 }
 
 

@@ -1,0 +1,8 @@
+{
+  "name": "boltarr-browser-checks",
+  "private": true,
+  "description": "Browser checks for Boltarr's pages (jsdom, no server needed). Run: npm ci && node run_all.js",
+  "dependencies": {
+    "jsdom": "24.1.3"
+  }
+}

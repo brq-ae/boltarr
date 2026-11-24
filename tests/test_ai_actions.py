@@ -102,6 +102,54 @@ def test_run_checks_again(client, lab):
     assert not r["ok"] and "no host" in r["error"]
 
 
+def test_action_list_is_fixed():
+    """F-39: adding an action (e.g. a delete) must be a deliberate change to this test."""
+    assert set(ai_actions.ACTIONS) == {"open_host", "open_service", "explain", "set_note", "set_host",
+                                       "scan", "probe", "pause_monitor", "resume_monitor"}
+    assert {k for k, a in ai_actions.ACTIONS.items() if "run" in a} == {
+        "set_note", "set_host", "scan", "probe", "pause_monitor", "resume_monitor"}
+
+
+def test_do_it_applies_the_check_only_rules(client, lab, monkeypatch):
+    """F-39: rules that live only in the check must also stop Do it (run checks again)."""
+    from backend import scanner
+    # set_note: same note as now
+    r = _run(client, {"do": "set_note", "host": f"{NET}.2", "note": "old note"})
+    assert not r["ok"] and "already has that note" in r["error"]
+    # probe: the Quick profile never looks at ports
+    started = []
+    monkeypatch.setattr(scanner, "start_probe", lambda *a, **k: started.append(a))
+    monkeypatch.setattr(scanner, "start_scan", lambda *a, **k: started.append(a))
+    r = _run(client, {"do": "probe", "host": f"{NET}.2", "profile": "Quick"})
+    assert not r["ok"] and "only finds hosts" in r["error"]
+    # probe: already being probed
+    monkeypatch.setattr(scanner, "probe_running", lambda ip: True)
+    r = _run(client, {"do": "probe", "host": f"{NET}.2", "profile": "Standard"})
+    assert not r["ok"] and "already being probed" in r["error"]
+    # scan: another scan is running
+    client.post("/api/subnets", json={"name": "Demo F-39", "cidr": f"{NET}.0/24"})
+    monkeypatch.setattr(scanner, "scan_busy", lambda: True)
+    with get_conn() as conn:
+        runs = conn.execute("SELECT COUNT(*) FROM scan_runs").fetchone()[0]
+    r = _run(client, {"do": "scan", "subnet": f"{NET}.0/24", "profile": "Quick"})
+    assert not r["ok"] and "Another scan is running" in r["error"]
+    assert started == []                                           # nothing was started
+    with get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM scan_runs").fetchone()[0] == runs
+        conn.execute("DELETE FROM subnets WHERE cidr=?", (f"{NET}.0/24",))
+        conn.commit()
+    # pause / resume: only when it makes sense (no real check or status push)
+    from backend import monitor
+    monkeypatch.setattr(monitor, "check_now", lambda sid: None)
+    monkeypatch.setattr(monitor, "push_status", lambda: None)
+    assert _run(client, {"do": "pause_monitor", "service": "Demo SMB"})["ok"]
+    r = _run(client, {"do": "pause_monitor", "service": "Demo SMB"})
+    assert not r["ok"] and "isn't being monitored" in r["error"]
+    assert _run(client, {"do": "resume_monitor", "service": "Demo SMB"})["ok"]
+    r = _run(client, {"do": "resume_monitor", "service": "Demo SMB"})
+    assert not r["ok"] and "already being monitored" in r["error"]
+
+
 def test_chat_prompt_teaches_the_marker(client, lab):
     p = ai_actions.prompt_section()
     assert "[[action {" in p and "ALWAYS starts with [[action" in p and all(k in p for k in ai_actions.ACTIONS)

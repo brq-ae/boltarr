@@ -124,7 +124,12 @@ def test_early_backup_still_restores(client, tmp_path):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("boltarr.db", db.read_bytes())
-    chk = client.post("/api/restore/check", files={"file": ("early.zip", buf.getvalue())})
-    assert chk.status_code == 200, chk.text
-    assert client.post(f"/api/restore/{chk.json()['token']}").status_code == 200
-    assert "10.7.0.1" in {h["ip"] for h in client.get("/api/hosts").json()}
+    before = client.get("/api/backup").content      # the shared test database, put back after (F-39)
+    try:
+        chk = client.post("/api/restore/check", files={"file": ("early.zip", buf.getvalue())})
+        assert chk.status_code == 200, chk.text
+        assert client.post(f"/api/restore/{chk.json()['token']}").status_code == 200
+        assert "10.7.0.1" in {h["ip"] for h in client.get("/api/hosts").json()}
+    finally:
+        back = client.post("/api/restore/check", files={"file": ("before.zip", before)})
+        assert client.post(f"/api/restore/{back.json()['token']}").status_code == 200

@@ -69,10 +69,14 @@ def test_hosts_list_is_one_ports_query(client, monkeypatch):
 
 
 def test_topology_graph_still_renders(client):
+    # Own data, so it also passes when run on its own (F-39)
+    client.post("/api/hosts", json={"ip": "10.2.1.21"})
+    for p in (22, 80):
+        client.post("/api/hosts/10.2.1.21/ports", json={"port": p, "service": f"s{p}"})
     r = client.get("/api/graph")
     assert r.status_code == 200
     nodes = {n["data"]["ip"]: n["data"] for n in r.json()["nodes"] if "ip" in n["data"]}
-    assert nodes["10.2.0.21"]["open_ports"] == 2
+    assert nodes["10.2.1.21"]["open_ports"] == 2
 
 
 def test_ip_sort_key_is_numeric_and_puts_non_addresses_last():

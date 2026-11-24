@@ -19,3 +19,6 @@ data/config.yaml
 
 .env
 .DS_Store
+
+# Browser check packages (tests/js)
+node_modules/

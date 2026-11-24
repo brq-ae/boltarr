@@ -63,7 +63,7 @@ def test_subnet_and_host_addresses_are_checked(client):
     assert client.post("/api/hosts", json={"ip": "-oN/tmp/x"}).status_code == 422
 
 
-def test_scan_thread_refuses_bad_saved_values_without_running_nmap(monkeypatch):
+def test_scan_thread_refuses_bad_saved_values_without_running_nmap(client, monkeypatch):   # client = database ready
     ran = []
     monkeypatch.setattr(scanner, "_run_nmap", lambda args, job: ran.append(args))
     with get_conn() as conn:

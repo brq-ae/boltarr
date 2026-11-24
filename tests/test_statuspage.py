@@ -117,7 +117,7 @@ def test_status_page_keeps_per_item_incidents_and_cutoff(sp):
 
 def test_boltarr_sends_keyed_incidents_per_item(client):
     with get_conn() as conn:
-        hid = conn.execute("INSERT INTO hosts (ip, hostname) VALUES ('10.9.0.1', 'sp-host')").lastrowid
+        hid = conn.execute("INSERT INTO hosts (ip, hostname) VALUES ('10.9.200.1', 'sp-host')").lastrowid   # own IP (F-39)
         sid = conn.execute("""INSERT INTO services (host_id, name, public, monitored, monitor_status)
                               VALUES (?, 'sp-web', 1, 1, 'up')""", (hid,)).lastrowid
         # 12 short outages: the item list holds the newest 10
@@ -135,9 +135,11 @@ def test_boltarr_sends_keyed_incidents_per_item(client):
         starts = [i["start"] for i in item["incidents"]]
         assert starts == sorted(starts, reverse=True)           # newest first
         assert all(i.get("key") for i in p["incidents"])
-        assert "10.9.0.1" not in json.dumps(p)                  # still no IPs
+        assert "10.9.200.1" not in json.dumps(p)                # still no IPs
     finally:
         with get_conn() as conn:
+            conn.execute("DELETE FROM monitor_events WHERE service_id=?", (sid,))
+            conn.execute("DELETE FROM services WHERE id=?", (sid,))
             conn.execute("DELETE FROM hosts WHERE id=?", (hid,))
             conn.commit()
 

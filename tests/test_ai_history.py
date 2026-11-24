@@ -19,6 +19,7 @@ def iso(dt):
 @pytest.fixture
 def lab(client, monkeypatch):
     """A demo host with one finished service outage, and a fake AI."""
+    ai_history.clean()                 # start empty: other tests save AI results too (F-39)
     now = datetime.now(timezone.utc).replace(microsecond=0)
     start = now - timedelta(hours=2)
     with get_conn() as conn:

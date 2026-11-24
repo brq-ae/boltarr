@@ -123,10 +123,75 @@ def test_no_inline_code_anywhere():
         if f.suffix == ".html":
             assert not re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", text), f.name
     # every action named in the page is registered by some app file
-    js = "".join((fe / "js" / "app" / f"{f}.js").read_text() for f in APP_FILES)
-    reg = "".join(re.findall(r"registerActions\((.*?)\);\n", js, re.S))
-    for name in set(re.findall(r'data-(?:click|change|input)="([A-Za-z]+)"', html + js)):
-        assert re.search(rf"\b{name}\b", reg), name
+    registered = _registered_actions(fe)
+    for name in set(re.findall(r'data-(?:click|change|input)="([A-Za-z_$][\w$]*)"', html + "".join(
+            (fe / "js" / "app" / f"{f}.js").read_text() for f in APP_FILES))):
+        assert name in registered, name
+
+
+# Scripts index.html loads before and with the app files, in order (F-39)
+_PAGE_JS = ["graph", "markdown", "export", "chat", "peek"]
+
+
+def _top_level_entries(body):
+    """Split the inside of an object literal at its top-level commas."""
+    parts, depth, cur, quote = [], 0, "", None
+    for ch in body:
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "\"'`":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(cur)
+            cur = ""
+            continue
+        cur += ch
+    parts.append(cur)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _registered_actions(fe):
+    """{name: file} for every registerActions({...}) entry. A shorthand entry
+    (`saveHost,`) must name a function defined in that file or one loaded before
+    it, or the page breaks at load (F-39: the old check only looked for the word)."""
+    import re
+    order = [fe / "js" / f"{f}.js" for f in _PAGE_JS] + [fe / "js" / "app" / f"{f}.js" for f in APP_FILES]
+    defined, names = set(), {}
+    for path in order:
+        text = path.read_text()
+        defined |= set(re.findall(r"(?:^|\n)\s*(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(", text))
+        defined |= set(re.findall(r"(?:^|\n)(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=", text))
+        for m in re.finditer(r"registerActions\(\{", text):
+            i, depth = m.end(), 1
+            while depth:
+                depth += {"{": 1, "}": -1}.get(text[i], 0)
+                i += 1
+            body = re.sub(r"//[^\n]*", "", text[m.end():i - 1])
+            for entry in _top_level_entries(body):
+                key = re.match(r"([A-Za-z_$][\w$]*)\s*(:)?", entry)
+                assert key, (path.name, entry)
+                if not key.group(2):
+                    assert key.group(1) in defined, f"{path.name}: {key.group(1)} isn't defined in it or before it"
+                names[key.group(1)] = path.name
+        # registerActions(Object.fromEntries(["a", "b"].map(...))): looked up on window when clicked
+        for m in re.finditer(r"registerActions\(Object\.fromEntries\(\[(.*?)\]", text, re.S):
+            for n in re.findall(r"[\"']([A-Za-z_$][\w$]*)[\"']", m.group(1)):
+                assert n in defined, f"{path.name}: {n} isn't defined in it or before it"
+                names[n] = path.name
+    return names
+
+
+def test_registered_actions_are_real_functions():
+    """F-39: every registered action resolves, and the page's buttons all have one."""
+    import pathlib
+    fe = pathlib.Path(__file__).resolve().parent.parent / "frontend"
+    reg = _registered_actions(fe)
+    assert len(reg) > 100                                   # the parser really found them
+    assert {"saveSubnet", "deleteHost", "aiActionDo", "printPage"} <= set(reg)
 
 
 def test_every_element_id_is_unique():

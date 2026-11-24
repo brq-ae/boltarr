@@ -1,5 +1,18 @@
 """F-03: the Settings dialog saves every section in one all-or-nothing request."""
+import pytest
+
 from backend import config
+
+
+@pytest.fixture(autouse=True)
+def _keep_settings(client, data_dir):
+    """These tests rewrite Settings: put config.yaml back after each one, so the
+    tests that run later still see the defaults (F-39: alerts were left off)."""
+    path = data_dir / "config.yaml"
+    before = path.read_bytes()
+    yield
+    path.write_bytes(before)
+    config.invalidate_config_cache()
 
 
 def _all(**over):
