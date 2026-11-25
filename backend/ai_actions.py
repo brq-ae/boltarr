@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from .config import get_timezone
 from .database import get_conn
+from . import host_fields
 
 # The browser (ai-actions.js) finds the suggestions in a reply and sends each one
 # here as text: '{json}' or 'word {json}' (the word from a '[[word {...}]]' slip,
@@ -38,7 +39,7 @@ class ActionError(ValueError):
 # ── Finding things ───────────────────────────────────────────────────────────
 
 def _host(conn, ref) -> dict:
-    """A host by IP or exact hostname (any case)."""
+    """A host by IP, exact hostname or the short name shown (any case)."""
     ref = str(ref or "").strip()
     if not ref:
         raise ActionError("No host given.")
@@ -46,6 +47,9 @@ def _host(conn, ref) -> dict:
     if r:
         return dict(r)
     rows = conn.execute("SELECT * FROM hosts WHERE lower(hostname)=lower(?)", (ref,)).fetchall()
+    if not rows:   # the short name the app shows: "phone-1" for "phone-1.lan.example.com" (S-27)
+        rows = [r for r in conn.execute("SELECT * FROM hosts WHERE lower(hostname) LIKE lower(?) || '.%'", (ref,))
+                if host_fields.display_name(r["hostname"], r["hostname_set"]).lower() == ref.lower()]
     if len(rows) == 1:
         return dict(rows[0])
     if rows:
@@ -71,7 +75,8 @@ def _service(conn, name, host_ref=None) -> dict:
 
 
 def _label(h: dict) -> str:
-    return f"{h['hostname']} ({h['ip']})" if h.get("hostname") else h["ip"]
+    name = host_fields.display_name(h.get("hostname"), h.get("hostname_set"))   # as the app shows it (S-27)
+    return f"{name} ({h['ip']})" if name else h["ip"]
 
 
 def _svc_label(s: dict) -> str:

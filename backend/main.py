@@ -564,6 +564,37 @@ def subnets_summary():
              "schedules": scheds.get(s["id"], 0)} for s in subnets]
 
 
+@app.get("/api/subnets/{subnet_id}/own-hosts")
+def subnet_own_hosts(subnet_id: int):
+    """Devices that would go with this subnet if you delete it too (S-33): the IP is in
+    this subnet, and neither it nor any of the device's other addresses is in another subnet."""
+    with get_conn() as conn:
+        nets = {}
+        for s in conn.execute("SELECT id, cidr FROM subnets"):
+            try:
+                nets[s["id"]] = ipaddress.ip_network(s["cidr"], strict=False)
+            except ValueError:
+                pass
+        if subnet_id not in nets:
+            raise HTTPException(404, "Subnet not found")
+        others = [n for sid, n in nets.items() if sid != subnet_id]
+        aliases = {}
+        for a in conn.execute("SELECT host_id, ip FROM host_aliases"):
+            aliases.setdefault(a["host_id"], []).append(a["ip"])
+
+        def in_net(ip, net):
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                return False                  # node-… placeholders
+            return addr.version == net.version and addr in net
+
+        ips = [h["ip"] for h in conn.execute("SELECT id, ip FROM hosts")
+               if in_net(h["ip"], nets[subnet_id])
+               and not any(in_net(ip, n) for ip in [h["ip"], *aliases.get(h["id"], [])] for n in others)]
+    return {"ips": ips}
+
+
 @app.delete("/api/subnets/{subnet_id}")
 def delete_subnet(subnet_id: int):
     with get_conn() as conn:
@@ -601,7 +632,8 @@ def subnet_ip_history(subnet_id: int):
             pool = None
 
         hosts = {h["ip"]: dict(h) for h in conn.execute(
-            "SELECT id, ip, mac, hostname, vendor, device_type, online, first_seen, last_seen FROM hosts")}
+            "SELECT id, ip, mac, hostname, hostname_set, vendor, device_type, online, first_seen, last_seen FROM hosts")}
+        host_fields.add_display_names(list(hosts.values()), out="display_name")
         by_id = {h["id"]: h for h in hosts.values()}
         aliases = {a["ip"]: (by_id.get(a["host_id"]), dict(a)) for a in conn.execute(
             "SELECT host_id, ip, online, last_seen FROM host_aliases")}
@@ -644,7 +676,7 @@ def subnet_ip_history(subnet_id: int):
             else:
                 status = "gone"
             row.update({"status": status, "days": days, "host_ip": h["ip"],
-                        "hostname": h.get("hostname"), "mac": h.get("mac"), "vendor": h.get("vendor"),
+                        "hostname": h.get("hostname"), "display_name": h.get("display_name"), "mac": h.get("mac"), "vendor": h.get("vendor"),
                         "device_type": h.get("device_type"), "online": h.get("online"),
                         "first_seen": h.get("first_seen"), "last_seen": h.get("last_seen")})
         counts[row["status"]] += 1
@@ -1084,6 +1116,7 @@ def list_hosts():
             h["aliases"]    = [a["ip"] for a in h["alias_info"]]
             h["classification"] = classify_host(h["ip"], subnets, h.get("static_override"))
             h["dhcp_warnings"]  = dhcp.get(h["ip"], [])
+        host_fields.add_display_names(hosts, out="display_name")   # the name to show (S-27)
     return JSONResponse(hosts)      # plain rows: skip FastAPI's slower generic encoder
 
 
@@ -1257,6 +1290,7 @@ def get_host(ip: str):
         ]
         host["aliases"] = _get_aliases(conn, host["id"])
         host["alias_info"] = _get_alias_info(conn, host["id"])
+        host["display_name"] = host_fields.display_name(host["hostname"], host["hostname_set"])
         return host
 
 
@@ -1379,7 +1413,7 @@ def update_host(ip: str, data: HostUpdate):
             monitor.push_status()
         except Exception:
             pass
-    return dict(row)
+    return host_fields.add_display_names([dict(row)], out="display_name")[0]
 
 
 class HostRenameReq(BaseModel):
@@ -1641,12 +1675,12 @@ def list_all_services():
         pass
     with get_conn() as conn:
         rows = conn.execute("""
-            SELECT s.*, h.ip, h.hostname, h.online AS host_online
+            SELECT s.*, h.ip, h.hostname, h.hostname_set AS host_hostname_set, h.online AS host_online
             FROM services s
             JOIN hosts h ON s.host_id = h.id
             ORDER BY h.ip, s.name
         """).fetchall()
-        out = [dict(r) for r in rows]
+        out = host_fields.add_display_names([dict(r) for r in rows], flag="host_hostname_set", out="host_display_name")
     for s in out:      # F-29: monitoring on but nothing to check -> "Not set up"
         s["monitor_not_set_up"] = bool(s["monitored"]) and not monitor.has_target(s)
     return out
@@ -1667,11 +1701,11 @@ def add_service(ip: str, data: ServiceIn):
         )
         conn.commit()
         row = conn.execute("""
-            SELECT s.*, h.ip, h.hostname FROM services s
+            SELECT s.*, h.ip, h.hostname, h.hostname_set AS host_hostname_set FROM services s
             JOIN hosts h ON s.host_id = h.id
             WHERE s.id = last_insert_rowid()
         """).fetchone()
-        return dict(row)
+        return host_fields.add_display_names([dict(row)], flag="host_hostname_set", out="host_display_name")[0]
 
 
 @app.put("/api/services/{svc_id}")
@@ -1705,10 +1739,10 @@ def update_service(svc_id: int, data: ServiceUpdate):
         _update_row(conn, "services", "id", svc_id, fields)
         conn.commit()
         row = conn.execute("""
-            SELECT s.*, h.ip, h.hostname FROM services s
+            SELECT s.*, h.ip, h.hostname, h.hostname_set AS host_hostname_set FROM services s
             JOIN hosts h ON s.host_id = h.id WHERE s.id=?
         """, (svc_id,)).fetchone()
-        return dict(row)
+        return host_fields.add_display_names([dict(row)], flag="host_hostname_set", out="host_display_name")[0]
 
 
 class MonitorToggleIn(BaseModel):
@@ -2984,7 +3018,8 @@ class LivenessIn(BaseModel):
 
 
 class GeneralIn(BaseModel):
-    timezone: Optional[str] = None
+    timezone:    Optional[str]  = None
+    short_names: Optional[bool] = None
 
 
 class ChangeAlertsIn(BaseModel):
@@ -3021,6 +3056,8 @@ def _apply_general(cfg: dict, data: GeneralIn):
     g = cfg.setdefault("general", {})
     if data.timezone is not None:
         g["timezone"] = data.timezone
+    if data.short_names is not None:
+        g["short_names"] = data.short_names
 
 
 def _apply_llm(cfg: dict, data: LLMSettingsIn):
@@ -3421,10 +3458,11 @@ def get_graph():
 
         nodes = []
         open_by = _rows_by_host(conn, "SELECT host_id, port, service FROM ports WHERE state='open'")
+        host_fields.add_display_names(hosts, out="display_name")
         for h in hosts:
             ports = open_by.get(h["id"], [])
             synthetic = h["ip"].startswith("node-")
-            label = h.get("hostname") or ("" if synthetic else h["ip"])
+            label = h["display_name"] or ("" if synthetic else h["ip"])
             nodes.append({
                 "data": {
                     "id": h["ip"],

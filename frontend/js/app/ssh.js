@@ -100,15 +100,14 @@ async function addSshKey() {
     await api("POST", "/api/ssh-keys", { name, public_key });
     document.getElementById("sshKeyName").value = "";
     document.getElementById("sshKeyValue").value = "";
-    await loadSshKeys();
-    showToast("Key added");
+    await refreshAfterSave(async () => { await loadSshKeys(); showToast("Key added"); });
   } catch (e) {
     showToast("Failed to add key: " + (e.message || "invalid format"));
   }
 }
 
 async function deleteSshKey(id) {
-  if (!confirm("Remove this key? It will also remove all host access assignments for it.")) return;
+  if (!await askConfirm("Remove this key?", { text: "It will also remove all host access assignments for it.", button: "Remove", danger: true })) return;
   await api("DELETE", `/api/ssh-keys/${id}`);
   await loadSshKeys();
   showToast("Key removed");
@@ -181,7 +180,7 @@ async function addHostSshAccess(ip) {
   if (!ssh_key_id || !username) return showToast("Select a key and enter a username");
   try {
     await api("POST", `/api/hosts/${ip}/ssh-access`, { ssh_key_id, username });
-    await loadHostSshSection(ip);
+    await refreshAfterSave(() => loadHostSshSection(ip));
   } catch (e) {
     showToast("Already assigned");
   }

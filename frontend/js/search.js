@@ -22,7 +22,7 @@
 
   // Lower = better: exact IP / name, then starts-with, then anywhere.
   function hostRank(h, q) {
-    const ip = (h.ip || "").toLowerCase(), name = (h.hostname || "").toLowerCase();
+    const ip = (h.ip || "").toLowerCase(), name = (h.hostname || "").toLowerCase();   // the full name: "phone-1" still matches
     if (ip === q || name === q || (h.aliases || []).includes(q)) return 0;
     if (ip.startsWith(q) || name.startsWith(q)) return 1;
     if (ip.includes(q) || name.includes(q)) return 2;
@@ -52,7 +52,7 @@
 
   function results(q) {
     const hosts = allHosts.filter(h => hostMatches(h, q))
-      .sort((a, b) => hostRank(a, q) - hostRank(b, q) || cmpIp(a.ip, b.ip) || (a.hostname || "").localeCompare(b.hostname || ""));
+      .sort((a, b) => hostRank(a, q) - hostRank(b, q) || cmpIp(a.ip, b.ip) || hostName(a).localeCompare(hostName(b)));
     const svcs = allServices.filter(s => svcMatches(s, q))
       .sort((a, b) => svcRank(a, q) - svcRank(b, q) || (a.name || "").localeCompare(b.name || ""));
     const feats = window.levelFeatureMatches ? levelFeatureMatches(q) : [];
@@ -62,8 +62,8 @@
   // One result row, shared by the drop-down and the Search page.
   function hostRow(h, q, i, page) {
     const synthetic = String(h.ip).startsWith("node-");
-    const title = synthetic ? `${mark(h.hostname || "(no IP)", q)} <span class="gs-dim">no IP</span>`
-      : `<span class="mono">${mark(h.ip, q)}</span>${h.hostname ? ` · <span${netNameAttr(h)}>${mark(h.hostname, q)}</span>` : ""}`;
+    const title = synthetic ? `${mark(hostName(h) || "(no IP)", q)} <span class="gs-dim">no IP</span>`
+      : `<span class="mono">${mark(h.ip, q)}</span>${hostName(h) ? ` · <span${netNameAttr(h)}>${mark(hostName(h), q)}</span>` : ""}`;
     const meta = page && h.device_type ? `<span class="tag tag-${escHtml(h.device_type)}">${escHtml(h.device_type)}</span>` : "";
     return `<div class="gs-item" role="option" data-i="${i}">${synthetic ? "" : livenessDot(h.online)}
       <div class="gs-text"><div class="gs-title">${title}</div><div class="gs-why">${hostWhy(h, q)}</div></div>${meta}</div>`;
@@ -79,7 +79,7 @@
     return html;
   }
   function svcRow(s, q, i) {
-    const where = `${mark(s.ip, q)}${s.port ? ":" + mark(String(s.port), q) : ""}${s.hostname ? " · " + mark(s.hostname, q) : ""}`;
+    const where = `${mark(s.ip, q)}${s.port ? ":" + mark(String(s.port), q) : ""}${svcHostName(s) ? " · " + mark(svcHostName(s), q) : ""}`;
     return `<div class="gs-item" role="option" data-i="${i}">${svcIconHTML(s.name, 18)}
       <div class="gs-text"><div class="gs-title">${mark(s.name, q)}</div><div class="gs-why mono">${where}</div></div></div>`;
   }

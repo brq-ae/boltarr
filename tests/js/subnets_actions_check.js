@@ -1,5 +1,5 @@
 // v0.24.0 Subnets page (S-16): rows, pool bar, hosts link + filter chip, map toggle saved,
-// Scan → Stop on the row, ⋮ menu (Edit, Show on map, IP History, Delete with confirm).
+// Scan → Stop on the row, ⋮ menu (Edit, Show on map, IP History, Delete with its window: S-33 tick box for its devices).
 const BOLTARR = require("path").resolve(__dirname, "../..");   // the repo root (tests/js/..)
 const { JSDOM, VirtualConsole } = require("jsdom");
 const fs = require("fs");
@@ -19,6 +19,7 @@ const SUBNETS = [{ id: 1, name: "lab", cidr: "10.9.0.0/24", description: "Main t
   { id: 2, name: "cams", cidr: "10.8.0.0/24", map_hidden: 1 }];
 const SUMMARY = [{ id: 1, hosts: 2, online: 1, pool: { used: 3, size: 4, pct: 75 }, last_scan: { started_at: "2026-01-01 00:00:00", completed_at: "2026-01-01 00:01:00", status: "completed", hosts_found: 5 }, running_run_id: null, schedules: 2 },
   { id: 2, hosts: 0, online: 0, pool: null, last_scan: null, running_run_id: 77, schedules: 0 }];
+let OWN = ["10.9.0.20", "10.9.0.30"], refuseDelete = false;   // S-33: devices only in subnet 1; the server says no
 const IPH = { counts: { in_use: 0, recent: 0, stale: 0, gone: 0, never: 0 }, subnet: { cidr: "10.9.0.0/24" }, has_pool: true, stale_days: 30, gone_days: 90, ips: [] };
 const VLANS = [{ id: 3, vlan_id: 30, name: "iot", color: "#888888" }];
 const SVCS = [{ id: 1, name: "Proxmox", ip: "10.9.0.20", host_id: 1, port: 8006, protocol: "tcp", status: "up", url: "http://10.9.0.20:8006", monitored: 0 }];
@@ -52,6 +53,8 @@ const dom = new JSDOM(html, { runScripts: "dangerously", pretendToBeVisual: true
         : u.includes("/api/settings") ? j({ llm: { configured: false } })
         : u.includes("/api/auth/status") ? j({ enabled: false })
         : u.includes("/api/version") ? j({ version: "x" })
+        : /\/api\/subnets\/\d+$/.test(u) && m === "DELETE" && refuseDelete ? new w.Response(JSON.stringify({ detail: "demo refused" }), { status: 400, headers: { "content-type": "application/json" } })
+        : u.includes("/own-hosts") ? j({ ips: OWN })
         : u.endsWith("/api/subnets/summary") ? j(SUMMARY)
         : u.endsWith("/api/subnets") ? j(SUBNETS)
         : u.includes("/ip-history") ? j(IPH)
@@ -132,13 +135,38 @@ const w = dom.window, d = w.document;
   clickEl(row(1).querySelector(".svc-kebab")); clickEl(menu().querySelector('[data-click="subnetMenuIpHistory"]')); await sleep(100);
   check(q("#hosts-panel-iphistory").style.display === "" && q("#iphSubnet").value === "1", `IP History opens on this subnet (${q("#iphSubnet").value})`);
   w.setTab("subnets"); await sleep(50);
-  let asked = ""; w.confirm = m => { asked = m; return false; };
-  sent.length = 0; clickEl(row(1).querySelector(".svc-kebab")); clickEl(menu().querySelector('[data-click="subnetMenuDelete"]')); await sleep(30);
-  check(/Delete subnet "lab"/.test(asked) && /hosts stay/i.test(asked) && /2 scan schedules/.test(asked), `Delete asks first, naming the subnet and its 2 schedules`);
-  check(!sent.some(s => s[0] === "DELETE") && row(1), "Cancel keeps it");
-  w.confirm = () => true;
-  clickEl(row(1).querySelector(".svc-kebab")); clickEl(menu().querySelector('[data-click="subnetMenuDelete"]')); await sleep(50);
-  check(sent.some(s => s[0] === "DELETE" && s[1] === "/api/subnets/1") && !row(1), "OK deletes it and the row goes");
+  // Delete (S-33): a window; the devices stay unless you tick the box
+  const box = () => q("#delSubnetHosts"), btn = () => q("#delSubnetBtn"), win = () => q("#delSubnetModal");
+  const openDel = async id => { clickEl(row(id).querySelector(".svc-kebab")); clickEl(q(`#svcmenu-sub${id}`).querySelector('[data-click="subnetMenuDelete"]')); await sleep(50); };
+  sent.length = 0; await openDel(1);
+  check(win().classList.contains("open") && /Delete subnet "lab"/.test(q("#delSubnetTitle").textContent)
+    && /2 scan schedules/.test(q("#delSubnetText").textContent) && /devices stay/i.test(q("#delSubnetText").textContent),
+    "Delete opens a window naming the subnet, its 2 schedules, and that devices stay");
+  check(!q("#delSubnetHostsRow").hidden && /Also delete the 2 devices only in this subnet/.test(q("#delSubnetHostsLabel").textContent) && !box().checked,
+    `tick box offers the 2 devices, off by default ("${q("#delSubnetHostsLabel").textContent}")`);
+  check(btn().textContent === "Delete subnet", "button says Delete subnet");
+  box().checked = true; box().dispatchEvent(new w.Event("change", { bubbles: true }));
+  check(btn().textContent === "Delete subnet and 2 devices", `ticking it names the devices on the button ("${btn().textContent}")`);
+  d.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); await sleep(20);
+  check(!win().classList.contains("open") && !sent.some(s => s[0] === "DELETE") && row(1), "Escape cancels: nothing deleted");
+  await openDel(1);
+  check(!box().checked && btn().textContent === "Delete subnet", "reopening starts unticked again");
+  refuseDelete = true; let alerts = []; w.alert = m => alerts.push(String(m));
+  box().checked = true; box().dispatchEvent(new w.Event("change", { bubbles: true }));
+  clickEl(btn()); await sleep(50);
+  check(alerts.some(a => /Error: demo refused/.test(a)) && win().classList.contains("open") && !sent.some(s => s[1] === "/api/hosts") && row(1),
+    "server refuses: Error shown, window stays, devices untouched");
+  refuseDelete = false; sent.length = 0; alerts = [];
+  clickEl(btn()); await sleep(100);
+  const hostDel = sent.find(s => s[0] === "DELETE" && s[1] === "/api/hosts");
+  check(sent.some(s => s[0] === "DELETE" && s[1] === "/api/subnets/1") && !row(1) && !win().classList.contains("open"), "Delete removes the subnet and closes the window");
+  check(hostDel && JSON.stringify(hostDel[2].ips) === JSON.stringify(OWN) && !alerts.length, `ticked: exactly its 2 devices deleted too (${hostDel && JSON.stringify(hostDel[2])})`);
+  check(/Deleted the subnet and 2 devices/.test((q("#_toast") || {}).textContent || ""), "a message says what was deleted");
+  // A subnet with no devices of its own: no tick box; unticked delete leaves devices alone
+  OWN = []; sent.length = 0; await openDel(2);
+  check(q("#delSubnetHostsRow").hidden, "no devices of its own: no tick box");
+  clickEl(btn()); await sleep(80);
+  check(sent.some(s => s[1] === "/api/subnets/2") && !sent.some(s => s[1] === "/api/hosts"), "deleting it leaves all devices alone");
 
   const inl = [...d.querySelectorAll("#panel-subnets *")].filter(x => [...x.attributes].some(a => /^on/.test(a.name)));
   check(!inl.length, "no inline handlers on the page");

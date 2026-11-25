@@ -1064,6 +1064,9 @@ tbody td {
   padding: 20px;
 }
 .modal-overlay.open { display: flex; }
+.ask-overlay { z-index: 110; }   /* on top of the window that asked (S-34) */
+.ask-text { font-size: 13px; color: var(--text-2); margin: 0 0 14px; white-space: pre-line; }
+.ask-text:empty { display: none; }
 
 .modal {
   background: var(--surface);

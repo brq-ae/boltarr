@@ -53,7 +53,7 @@ async function welcomeStart() {
     }
     if (cidr && !subnets.some(s => s.cidr === cidr)) {
       await api("POST", "/api/subnets", { name: "My network", cidr });
-      await loadSubnets();
+      await refreshAfterSave(loadSubnets);
     }
   } catch (e) {
     btn.disabled = false;

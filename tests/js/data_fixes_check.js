@@ -151,7 +151,7 @@ const click = el => el.dispatchEvent(new w.MouseEvent("click", { bubbles: true }
     ? new w.Response(JSON.stringify({ ok: true, deleted: 1, kept_running: 1 }), { headers: { "content-type": "application/json" } })
     : realFetch(u, o);
   card(2).querySelector(".scan-checkbox").checked = true; card(4).querySelector(".scan-checkbox").checked = true;
-  await w.scansDeleteSelected(); await sleep(20);
+  const delSel = w.scansDeleteSelected(); $("askOk").click(); await delSel; await sleep(20);   // answer Boltarr's window (S-34)
   check(shown.some(m => /1 running scan was kept — stop it first/.test(m)), "bulk delete: running scan kept, toast says so");
   w.fetch = realFetch;
 

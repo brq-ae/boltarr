@@ -72,10 +72,15 @@ const w = dom.window, d = w.document;
   d.querySelector('[data-click="setSettingsTab"][data-args=\'["alerts"]\']').click();
   d.getElementById("setAlertAfter").dispatchEvent(new w.Event("input", { bubbles: true }));
   check(!bar.hidden, "a change shows the save bar");
-  w.confirm = () => false; w.setTab("hosts");
-  check(d.getElementById("panel-settings").classList.contains("active"), "leaving with unsaved changes asks; No stays");
-  w.confirm = () => true; w.setTab("hosts"); await sleep(80);
-  check(d.getElementById("panel-hosts").classList.contains("active"), "Yes leaves");
+  const ask = d.getElementById("askModal");   // Boltarr's own window, not the browser's (S-34)
+  w.setTab("hosts"); await sleep(10);
+  check(ask.classList.contains("open") && /unsaved changes/.test(d.getElementById("askTitle").textContent)
+    && d.activeElement === d.getElementById("askCancel"), "leaving with unsaved changes asks in Boltarr's window, starting on Cancel");
+  d.getElementById("askCancel").click(); await sleep(10);
+  check(!ask.classList.contains("open") && d.getElementById("panel-settings").classList.contains("active") && !bar.hidden, "Cancel stays, changes kept");
+  w.setTab("hosts"); await sleep(10);
+  d.getElementById("askOk").click(); await sleep(80);
+  check(d.getElementById("panel-hosts").classList.contains("active"), "Leave without saving leaves");
   w.setTab("settings"); await sleep(80);
   check(bar.hidden, "coming back starts clean");
   let undo = spy("testLLMConnection");
@@ -100,7 +105,9 @@ const w = dom.window, d = w.document;
   check(ev.defaultPrevented && d.activeElement === d.getElementById("backupPw"), "backup link goes to Backup and doesn't follow href=#");
 
   // SSH keys page + kebab menu
-  w.setTab("sshkeys"); await sleep(80);
+  w.setTab("sshkeys"); await sleep(10);
+  if (ask.classList.contains("open")) d.getElementById("askOk").click();   // the provider change above left Settings unsaved
+  await sleep(80);
   check(d.querySelectorAll(".ssh-key-row").length === 1, "SSH keys list renders");
   d.querySelector('[data-click="toggleSshKeyView"]').click(); await sleep(20);
   check(d.getElementById("sshkprev-7").textContent.includes("AAAA laptop"), "👁 shows the full key (id passed via data-args)");

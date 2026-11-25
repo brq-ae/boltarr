@@ -50,6 +50,7 @@ async function loadAppTz() {
 
 let currentSettingsTab = "general";
 let settingsDirty = false;
+let _shortNamesSaved = true;   // Short names as last loaded/saved: a change redraws every name (S-27)
 
 function openSettings() { setTab("settings"); }
 
@@ -72,12 +73,17 @@ function _onSettingsEdit(e) {
   _setDirty(true);
 }
 
-// Leaving the page (another tab, or closing the browser tab) with changes not saved asks first
-function settingsLeaveOk() {
+// Leaving the page (another tab, or closing the browser tab) with changes not saved asks first.
+// Asking waits for an answer, so this says "not now" and runs leave() if you choose to leave (S-34).
+function settingsLeaveOk(leave) {
   if (!settingsDirty || !document.getElementById("panel-settings").classList.contains("active")) return true;
-  if (!confirm("You have unsaved changes in Settings. Leave without saving them?")) return false;
-  loadSettings();                            // put the saved values back for next time
-  return true;
+  askConfirm("You have unsaved changes in Settings", { text: "Leave without saving them?", button: "Leave without saving", danger: true })
+    .then(ok => {
+      if (!ok) return;
+      loadSettings();                        // put the saved values back (and the page no longer counts as changed)
+      leave();
+    });
+  return false;
 }
 
 function undoSettings() { loadSettings(); showToast("Changes undone"); }
@@ -103,6 +109,7 @@ async function loadSettings() {
     populateTimezones();
     APP_TZ = (general && general.timezone) || "";
     document.getElementById("setTimezone").value = APP_TZ;
+    document.getElementById("setShortNames").checked = _shortNamesSaved = general?.short_names !== false;
     updateTzPreview();
     document.getElementById("setProvider").value     = llm.provider || "none";
     document.getElementById("setBaseUrl").value      = llm.base_url || "";
@@ -508,7 +515,8 @@ async function saveSettings() {
     digest_ai:        document.getElementById("setCaDigestAi").checked,
     digest_ai_model:  document.getElementById("setCaDigestAiModel").value,
   };
-  const generalPayload = { timezone: document.getElementById("setTimezone").value };
+  const generalPayload = { timezone: document.getElementById("setTimezone").value,
+                           short_names: document.getElementById("setShortNames").checked };
   try {
     // One request: the server checks every section and saves all or nothing
     const saved = await api("PUT", "/api/settings/all", {
@@ -535,15 +543,19 @@ async function saveSettings() {
       return;                           // the save bar stays, so they can be fixed and saved
     }
     _setDirty(false);
-    loadAiHistory();
-    await loadModels();
+    refreshAfterSave(loadAiHistory);
+    await refreshAfterSave(loadModels);
     updateAiStatusDot(payload.provider !== "none");
     setFeatureReady("sp", !!saved.statuspage?.enabled);
     // times may now render in a different zone — refresh the visible time views
-    if (document.getElementById("scan-panel-history")?.style.display !== "none") loadScans();
-    if (document.getElementById("scan-panel-changes")?.style.display !== "none") loadChanges();
-    if (document.getElementById("scan-panel-schedules")?.style.display !== "none") loadSchedules();
-    if (currentHostsTab === "iphistory" && document.getElementById("panel-hosts").classList.contains("active")) loadIpHistory();
+    if (document.getElementById("scan-panel-history")?.style.display !== "none") refreshAfterSave(loadScans);
+    if (document.getElementById("scan-panel-changes")?.style.display !== "none") refreshAfterSave(loadChanges);
+    if (document.getElementById("scan-panel-schedules")?.style.display !== "none") refreshAfterSave(loadSchedules);
+    if (currentHostsTab === "iphistory" && document.getElementById("panel-hosts").classList.contains("active")) refreshAfterSave(loadIpHistory);
+    if (generalPayload.short_names !== _shortNamesSaved) {   // every device name may look different now (S-27)
+      _shortNamesSaved = generalPayload.short_names;
+      refreshAfterSave(async () => { await Promise.all([loadHosts(), loadServicesData()]); renderHostsTable(); await loadGraph(); });
+    }
     showToast("Settings saved");
   } catch (e) {
     alert("Settings not saved — nothing was changed.\n\n" + e.message);
@@ -721,7 +733,7 @@ async function cleanAiHistory() {
       net.innerHTML = `<div style="padding:20px 0;font-size:12px;color:var(--text-3);text-align:center">Click "Run Analysis" to analyze the full network with AI.</div>`;
     }
     showToast(`Deleted ${deleted} saved AI result${deleted === 1 ? "" : "s"}`);
-    loadAiHistory();
+    refreshAfterSave(loadAiHistory);
   } catch (e) { showToast("Clean history failed: " + e.message); }
 }
 

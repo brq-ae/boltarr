@@ -79,12 +79,14 @@ async function saveField(ip, field, value) {
   const h = allHosts.find(x => x.ip === ip);
   const prev = h ? h[field] : null;
   if (h) h[field] = value;             // optimistic ('' shows as —)
+  if (h && field === "hostname") delete h.display_name;   // shown as typed until the server says (S-27)
   renderHostsTable();
   const payload = { [field]: value };   // the server changes only the fields sent
   try {
     const saved = await api("PUT", `/api/hosts/${ip}`, payload);
     if (h && saved) {                  // what was really kept: an empty name goes back to the network's (F-20)
-      for (const k of [field, "net_hostname", "net_vendor", "net_os"]) if (k in saved) h[k] = saved[k];
+      for (const k of [field, "net_hostname", "net_vendor", "net_os", "display_name"]) if (k in saved) h[k] = saved[k];
+      if (field === "hostname" && !("display_name" in saved)) delete h.display_name;
       renderHostsTable();
       if (field === "hostname") refreshDetailName(h);   // the open panel shows the same name
     }
@@ -297,7 +299,7 @@ function renderHostsTable() {
     tr.innerHTML = `
       <td class="td-check"><input type="checkbox" class="host-checkbox" data-ip="${escHtml(h.ip)}" style="accent-color:var(--accent)" data-stop data-change="hostsUpdateBulkBtn"></td>
       <td class="td-ip mono" style="color:var(--accent)">${dot}${displayIp}${aliasToggle}</td>
-      <td class="td-host col-host"><span${netNameAttr(h)}>${textCell(h, 'hostname', h.hostname)}</span></td>
+      <td class="td-host col-host"><span${netNameAttr(h)}>${textCell(h, 'hostname', hostName(h))}</span></td>
       <td class="col-mac mono" style="color:var(--text-3)">${h.mac ? escHtml(h.mac) : '<span style="color:var(--text-3)">—</span>'}${macPencil(h.ip)}</td>
       <td class="col-vendor" style="color:var(--text-2);font-size:11px">${textCell(h, 'vendor', h.vendor)}</td>
       <td class="td-type col-type"><span class="tag tag-${escHtml(dt)}">${escHtml(dt)}</span>${manualBadge}${clsBadge}${dhcpWarn}${typePencil(h.ip)}</td>
@@ -344,7 +346,7 @@ function hostsUpdateBulkBtn() {
 async function hostsDeleteSelected() {
   const ips = Array.from(document.querySelectorAll(".host-checkbox:checked")).map(cb => cb.dataset.ip);
   if (!ips.length) return showToast("Nothing selected");
-  if (!confirm(`Delete ${ips.length} host${ips.length > 1 ? "s" : ""}? This can't be undone.`)) return;
+  if (!await askConfirm(`Delete ${ips.length} host${ips.length > 1 ? "s" : ""}?`, { text: "This can't be undone.", button: "Delete", danger: true })) return;
   await api("DELETE", "/api/hosts", { ips });
   await loadHosts(); renderHostsTable(); await loadGraph();
   showToast(`Deleted ${ips.length} host${ips.length > 1 ? "s" : ""}`);
@@ -430,13 +432,13 @@ function buildLinksTab(ip, myTier) {
   const links = getHostLinks(ip);
   const hostSelect = allHosts
     .filter(h => h.ip !== ip)
-    .map(h => `<option value="${escHtml(h.ip)}">${h.ip.startsWith("node-") ? "" : escHtml(h.ip) + " — "}${escHtml(h.hostname || h.device_type || "unknown")}</option>`)
+    .map(h => `<option value="${escHtml(h.ip)}">${h.ip.startsWith("node-") ? "" : escHtml(h.ip) + " — "}${escHtml(hostName(h) || h.device_type || "unknown")}</option>`)
     .join("");
 
   const rows = links.map(e => {
     const peerIp  = e.data.source === ip ? e.data.target : e.data.source;
     const peer    = allHosts.find(h => h.ip === peerIp);
-    const peerLabel = peer ? (peer.hostname || peerIp) : peerIp;
+    const peerLabel = peer ? (hostName(peer) || peerIp) : peerIp;
     const peerDt  = peer?.device_type || "unknown";
     const peerTier = peer?.tier ?? null;
 
@@ -492,17 +494,19 @@ async function addLinkFromDetail(ip) {
   if (!peer) return;
   try {
     await api("POST", "/api/connections", { src_ip: ip, dst_ip: peer, type, speed: speed || null });
-    await loadGraph();
-    // Refresh just the links list in-place
-    const listEl = document.getElementById(`dtab-links-list-${ip.replace(/\./g,'_')}`);
-    const host = allHosts.find(h => h.ip === ip);
-    if (listEl) {
-      const fresh = buildLinksTab(ip, host?.tier);
-      const tmp = document.createElement("div");
-      tmp.innerHTML = fresh;
-      const newList = tmp.querySelector(`#dtab-links-list-${ip.replace(/\./g,'_')}`);
-      if (newList) listEl.replaceWith(newList);
-    }
+    await refreshAfterSave(async () => {
+      await loadGraph();
+      // Refresh just the links list in-place
+      const listEl = document.getElementById(`dtab-links-list-${ip.replace(/\./g,'_')}`);
+      const host = allHosts.find(h => h.ip === ip);
+      if (listEl) {
+        const fresh = buildLinksTab(ip, host?.tier);
+        const tmp = document.createElement("div");
+        tmp.innerHTML = fresh;
+        const newList = tmp.querySelector(`#dtab-links-list-${ip.replace(/\./g,'_')}`);
+        if (newList) listEl.replaceWith(newList);
+      }
+    });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -581,7 +585,7 @@ function iphVisibleRows() {
   const q = (document.getElementById("iphFilter").value || "").trim().toLowerCase();
   let rows = data.ips.filter(r => _iphStatus === "all" ? r.status !== "never" : r.status === _iphStatus);
   if (q) rows = rows.filter(r =>
-    [r.ip, r.hostname, r.mac, r.vendor, r.alias_of].some(v => v && String(v).toLowerCase().includes(q)));
+    [r.ip, r.hostname, r.display_name, r.mac, r.vendor, r.alias_of].some(v => v && String(v).toLowerCase().includes(q)));
 
   const { key, dir } = _iphSort;
   rows.sort((a, b) => {
@@ -638,7 +642,7 @@ function renderIpHistory() {
       <td><span class="iph-badge ${st.cls}">${st.label}</span></td>
       <td class="td-ip">${escHtml(r.ip)}</td>
       <td>${seen}</td>
-      <td>${escHtml(r.hostname || "")}</td>
+      <td>${escHtml(r.display_name ?? r.hostname ?? "")}</td>
       <td class="td-mac">${escHtml(r.mac || "")}</td>
       <td>${escHtml(r.vendor || "")}</td>
       <td>${r.first_seen ? escHtml(fmtLocal(r.first_seen)) : ""}</td>

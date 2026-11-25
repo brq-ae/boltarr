@@ -26,8 +26,8 @@ async function showHostDetail(ip) {
   const panel = document.getElementById("hostDetail");
   const dt = host.device_type || "unknown";
 
-  const sheetLabel = (host.hostname && !host.ip.startsWith('node-'))
-    ? `${host.ip} · ${host.hostname}` : (host.ip.startsWith('node-') ? (host.hostname || '(no IP)') : host.ip);
+  const sheetLabel = (hostName(host) && !host.ip.startsWith('node-'))
+    ? `${host.ip} · ${hostName(host)}` : (host.ip.startsWith('node-') ? (hostName(host) || '(no IP)') : host.ip);
 
   panel.innerHTML = `
     <div class="panel-resize-grip" title="Drag to resize"></div>
@@ -41,7 +41,7 @@ async function showHostDetail(ip) {
     </div>
     <div class="detail-header">
       <div>
-        <div class="detail-ip">${escHtml(host.ip.startsWith("node-") ? (host.hostname || "(no IP)") : host.ip)}</div>
+        <div class="detail-ip">${escHtml(host.ip.startsWith("node-") ? (hostName(host) || "(no IP)") : host.ip)}</div>
         <div id="detailNameBox">${_detailNameHtml(host)}</div>
       </div>
       <span class="tag tag-${escHtml(dt)}" id="detailTypeTag" style="font-size:11px">${escHtml(dt)}</span>
@@ -76,7 +76,7 @@ async function showHostDetail(ip) {
           <div class="info-field"><label>IP Address</label><span class="mono">${escHtml(host.ip)}</span></div>
           <div class="info-field"><label>MAC Address</label><span class="mono">${escHtml(host.mac||"—")}</span></div>
           <div class="info-field"><label>Vendor</label><span>${escHtml(host.vendor||"—")}</span></div>
-          <div class="info-field"><label>Hostname</label><span id="detailNameField"${netNameAttr(host)}>${escHtml(host.hostname||"—")}</span></div>
+          <div class="info-field"><label>Hostname</label><span id="detailNameField"${netNameAttr(host, host.hostname)}>${escHtml(host.hostname||"—")}</span></div>
           <div class="info-field"><label>OS / Firmware</label><span>${escHtml(host.os_guess||"—")}</span></div>
           <div class="info-field"><label>Device Type</label><span id="detailTypeField">${escHtml(host.device_type||"unknown")}</span></div>
           <div class="info-field"><label>First Seen</label><span class="mono">${escHtml(fmtLocalStamp(host.first_seen) || "—")}</span></div>
@@ -400,9 +400,7 @@ async function saveAddHost() {
   try {
     await api("POST", "/api/hosts", payload);
     closeAddHost();
-    await loadHosts();
-    renderHostsTable();
-    await loadGraph();
+    await refreshAfterSave(async () => { await loadHosts(); renderHostsTable(); await loadGraph(); });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -471,11 +469,11 @@ function onEditPublicToggle() {
 }
 async function deleteHost(ip) {
   const label = ip.startsWith("node-") ? "this device" : ip;
-  if (!confirm(`Delete ${label} and all its connections?`)) return;
+  if (!await askConfirm(`Delete ${label} and all its connections?`, { button: "Delete", danger: true })) return;
   try {
     await api("DELETE", `/api/hosts/${ip}`);
     hideHostDetail();
-    await loadHosts(); renderHostsTable(); await loadGraph();
+    await refreshAfterSave(async () => { await loadHosts(); renderHostsTable(); await loadGraph(); });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -484,12 +482,12 @@ function openMergeHost(ip) {
   if (!others.length) return alert("No other hosts to merge with.");
   const sel = document.getElementById("mergeTargetIp");
   sel.innerHTML = others.map(h =>
-    `<option value="${escHtml(h.ip)}">${h.ip.startsWith("node-") ? "" : escHtml(h.ip) + " — "}${escHtml(h.hostname || h.device_type || "unknown")}</option>`
+    `<option value="${escHtml(h.ip)}">${h.ip.startsWith("node-") ? "" : escHtml(h.ip) + " — "}${escHtml(hostName(h) || h.device_type || "unknown")}</option>`
   ).join("");
   document.getElementById("mergePrimaryIp").value = ip;
   const primaryLabel = document.getElementById("mergePrimaryLabel");
   const me = allHosts.find(h => h.ip === ip);
-  primaryLabel.textContent = (me?.hostname || ip) + (me?.hostname ? ` (${ip})` : "");
+  primaryLabel.textContent = (hostName(me) || ip) + (hostName(me) ? ` (${ip})` : "");
   document.getElementById("mergeModal").classList.add("open");
 }
 
@@ -500,21 +498,22 @@ function closeMergeHost() {
 async function saveMergeHost() {
   const ip      = document.getElementById("mergePrimaryIp").value;
   const mergeIp = document.getElementById("mergeTargetIp").value;
-  if (!confirm(`Merge ${mergeIp} into ${ip}?\n\nThe host at ${mergeIp} will be deleted. Its connections, ports, and services will transfer to ${ip}.`)) return;
+  if (!await askConfirm(`Merge ${mergeIp} into ${ip}?`, { text: `The host at ${mergeIp} will be deleted. Its connections, ports, and services will transfer to ${ip}.`, button: "Merge", danger: true })) return;
   try {
     const host = await api("POST", `/api/hosts/${ip}/merge`, { merge_ip: mergeIp });
     closeMergeHost();
-    await loadHosts(); renderHostsTable(); await loadGraph();
-    await showHostDetail(ip);
+    await refreshAfterSave(async () => {
+      await loadHosts(); renderHostsTable(); await loadGraph();
+      await showHostDetail(ip);
+    });
   } catch (e) { alert("Error: " + e.message); }
 }
 
 async function removeAlias(ip, aliasIp) {
-  if (!confirm(`Remove alias ${aliasIp} from ${ip}?\n\nFuture scans of ${aliasIp} will create a new host record.`)) return;
+  if (!await askConfirm(`Remove alias ${aliasIp} from ${ip}?`, { text: `Future scans of ${aliasIp} will create a new host record.`, button: "Remove", danger: true })) return;
   try {
     await api("DELETE", `/api/hosts/${ip}/aliases/${aliasIp}`);
-    await loadHosts(); renderHostsTable();
-    await showHostDetail(ip);
+    await refreshAfterSave(async () => { await loadHosts(); renderHostsTable(); await showHostDetail(ip); });
   } catch (e) { alert("Error: " + e.message); }
 }
 async function saveHostEdit() {
@@ -559,10 +558,10 @@ async function saveHostEdit() {
   try {
     await api("PUT", `/api/hosts/${ip}`, payload);
     closeEditHost();
-    await loadHosts();
-    renderHostsTable();
-    await loadGraph();
-    await showHostDetail(ip);
+    await refreshAfterSave(async () => {
+      await loadHosts(); renderHostsTable(); await loadGraph();
+      await showHostDetail(ip);
+    });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -576,14 +575,16 @@ async function addPort(ip) {
   if (!port || port < 1 || port > 65535) return alert("Enter a valid port (1–65535).");
   try {
     await api("POST", `/api/hosts/${ip}/ports`, { port, protocol: proto, service, version });
-    await loadHosts(); renderHostsTable();
-    await showHostDetail(ip);
-    switchDetailTab("ports");
+    await refreshAfterSave(async () => {
+      await loadHosts(); renderHostsTable();
+      await showHostDetail(ip);
+      switchDetailTab("ports");
+    });
   } catch (e) { alert("Error: " + e.message); }
 }
 
 async function deletePort(portId, ip) {
-  if (!confirm("Delete this port?")) return;
+  if (!await askConfirm("Delete this port?", { button: "Delete", danger: true })) return;
   await api("DELETE", `/api/ports/${portId}`);
   await loadHosts(); renderHostsTable();
   await showHostDetail(ip);
@@ -601,7 +602,7 @@ function _analysisHtml(a, earlier) {
 
 function _detailNameHtml(host) {
   if (host.ip.startsWith("node-")) return "";
-  return (host.hostname ? `<div class="detail-hostname"><span${netNameAttr(host)}>${escHtml(host.hostname)}</span></div>` : "")
+  return (hostName(host) ? `<div class="detail-hostname"><span${netNameAttr(host)}>${escHtml(hostName(host))}</span></div>` : "")
     + (netNameHint(host) ? `<div class="net-name-line">Network name: ${escHtml(netNameHint(host))}</div>` : "");
 }
 
@@ -612,7 +613,7 @@ function refreshDetailName(host) {
   const box = document.getElementById("detailNameBox");
   if (box) box.innerHTML = _detailNameHtml(host);
   const old = document.getElementById("detailNameField");
-  if (old) old.outerHTML = `<span id="detailNameField"${netNameAttr(host)}>${escHtml(host.hostname || "—")}</span>`;
+  if (old) old.outerHTML = `<span id="detailNameField"${netNameAttr(host, host.hostname)}>${escHtml(host.hostname || "—")}</span>`;
 }
 
 function _showDetailType(dt) {

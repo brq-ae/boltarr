@@ -18,6 +18,7 @@ _DEFAULTS: dict = {
     # fire times, quiet hours, the daily digest — and how times are displayed.
     "general": {
         "timezone": "",
+        "short_names": True,   # show "phone-1" for "phone-1.lan.example.com" (S-27)
     },
     "llm": {
         "provider": "none",   # none | ollama | openai | anthropic

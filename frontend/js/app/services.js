@@ -301,7 +301,7 @@ async function addServiceToHost(ip) {
 }
 
 async function deleteSvc(id, hostIp) {
-  if (!confirm("Delete this service?")) return;
+  if (!await askConfirm("Delete this service?", { button: "Delete", danger: true })) return;
   await api("DELETE", `/api/services/${id}`);
   allServices = allServices.filter(s => s.id !== id);
   document.getElementById(`svc-row-${id}`)?.remove();
@@ -314,7 +314,7 @@ function _fillHostSelect(sel, selectedIp) {
   if (!sel) return;
   const regularHosts   = allHosts.filter(h => h.device_type !== "container");
   const containerHosts = allHosts.filter(h => h.device_type === "container");
-  const hostOpts = host => `<option value="${escHtml(host.ip)}">${escHtml(host.ip)}${host.hostname ? " — " + escHtml(host.hostname) : ""}</option>`;
+  const hostOpts = host => `<option value="${escHtml(host.ip)}">${escHtml(host.ip)}${hostName(host) ? " — " + escHtml(hostName(host)) : ""}</option>`;
   sel.innerHTML =
     regularHosts.map(hostOpts).join("") +
     (containerHosts.length ? `<optgroup label="── Containers ──">${containerHosts.map(hostOpts).join("")}</optgroup>` : "");
@@ -448,8 +448,8 @@ function renderContainerPick() {
   }
   list.innerHTML = `<div class="container-pick-grid">` +
     containers.map(h => {
-      const label = h.hostname || h.ip;
-      const sub   = h.hostname ? h.ip : "";
+      const label = hostName(h) || h.ip;
+      const sub   = hostName(h) ? h.ip : "";
       return `<div class="container-chip" data-click="pickContainer" data-args="${dargs(h.ip, label)}">
         <span class="container-chip-name">${escHtml(label)}</span>
         ${sub ? `<span class="container-chip-ip">${escHtml(sub)}</span>` : ""}
@@ -541,7 +541,7 @@ async function saveServiceModal() {
 
 async function deleteServiceFromModal() {
   const editId = document.getElementById("svcEditId").value;
-  if (!editId || !confirm("Delete this service?")) return;
+  if (!editId || !await askConfirm("Delete this service?", { button: "Delete", danger: true })) return;
   await api("DELETE", `/api/services/${editId}`);
   allServices = allServices.filter(s => s.id !== parseInt(editId));
   document.getElementById(`svc-row-${editId}`)?.remove();
@@ -588,9 +588,9 @@ function populateSvcHostFilter() {
   if (!sel) return;
   const current = sel.value;
   const hosts = [...new Map(allServices.map(s => [s.ip, {ip: s.ip, hostname: s.hostname}])).values()]
-    .sort((a, b) => (a.hostname || a.ip).localeCompare(b.hostname || b.ip));
+    .sort((a, b) => (hostName(a) || a.ip).localeCompare(hostName(b) || b.ip));
   sel.innerHTML = `<option value="">All hosts</option>` +
-    hosts.map(h => `<option value="${escHtml(h.ip)}"${h.ip === current ? " selected" : ""}>${escHtml(h.hostname || h.ip)}</option>`).join("");
+    hosts.map(h => `<option value="${escHtml(h.ip)}"${h.ip === current ? " selected" : ""}>${escHtml(hostName(h) || h.ip)}</option>`).join("");
 }
 
 async function loadServicesTab() {
@@ -635,7 +635,7 @@ function renderServicesTable() {
       </td>
       <td class="svc-host-cell col-svc-host">
         <span class="svc-host-ip">${livenessDot(s.host_online)}${escHtml(s.ip)}</span>
-        ${s.hostname ? `<span class="svc-host-name">${escHtml(s.hostname)}</span>` : ""}
+        ${svcHostName(s) ? `<span class="svc-host-name">${escHtml(svcHostName(s))}</span>` : ""}
       </td>
       <td class="col-svc-ps">
         <div class="svc-port-status">
@@ -763,7 +763,7 @@ function svcUpdateBulkBtn() {
 async function svcDeleteSelected() {
   const ids = Array.from(document.querySelectorAll(".svc-checkbox:checked")).map(cb => parseInt(cb.dataset.id));
   if (!ids.length) return showToast("Nothing selected");
-  if (!confirm(`Delete ${ids.length} service${ids.length > 1 ? "s" : ""}?`)) return;
+  if (!await askConfirm(`Delete ${ids.length} service${ids.length > 1 ? "s" : ""}?`, { button: "Delete", danger: true })) return;
   await api("DELETE", "/api/services", { ids });
   allServices = allServices.filter(s => !ids.includes(s.id));
   renderServicesTable();

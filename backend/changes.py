@@ -14,7 +14,7 @@ from typing import Optional
 
 from .config import get_change_tracking_config, get_change_alerts_config, get_config, save_config, local_now, get_timezone
 from .database import get_conn
-from . import notify, dhcp_check
+from . import notify, dhcp_check, host_fields
 
 
 def classify_host(ip_str: str, subnets: list[dict], override: Optional[str]) -> str:
@@ -390,13 +390,14 @@ def alert_transition(conn, ip: str, event_type: str) -> str:
     if not is_alert_worthy(conn, {"type": event_type, "ip": ip}, subnets):
         return "skipped"
     icon, sing, _ = _LABEL.get(event_type, ("•", event_type, ""))
-    host = conn.execute("SELECT hostname, mac FROM hosts WHERE ip=?", (ip,)).fetchone()
-    label = ip + (f" ({host['hostname']})" if host and host["hostname"] else "")
+    host = conn.execute("SELECT hostname, hostname_set, mac FROM hosts WHERE ip=?", (ip,)).fetchone()
+    name = host_fields.display_name(host["hostname"], host["hostname_set"]) if host else ""   # short names (S-27)
+    label = ip + (f" ({name})" if name else "")
     if not host:   # alias IP: name the host it belongs to
-        host = conn.execute("SELECT h.ip, h.hostname, h.mac FROM hosts h JOIN host_aliases a "
+        host = conn.execute("SELECT h.ip, h.hostname, h.hostname_set, h.mac FROM hosts h JOIN host_aliases a "
                             "ON a.host_id = h.id WHERE a.ip=?", (ip,)).fetchone()
         if host:
-            label = f"{ip} (alias of {host['hostname'] or host['ip']})"
+            label = f"{ip} (alias of {host_fields.display_name(host['hostname'], host['hostname_set']) or host['ip']})"
     from . import monitor          # monitor imports changes; import here, not at the top
     if not notify.is_on():
         return "off"
@@ -432,10 +433,10 @@ def service_lines() -> list[str]:
     lines = []
     with get_conn() as conn:
         svcs = [dict(r) for r in conn.execute(
-            "SELECT s.id, s.name, s.monitor_status, h.ip, h.hostname FROM services s "
+            "SELECT s.id, s.name, s.monitor_status, h.ip, h.hostname, h.hostname_set FROM services s "
             "JOIN hosts h ON h.id = s.host_id WHERE s.monitored = 1 ORDER BY s.name")]
     for s in svcs:
-        where = f"{s['name']} on {s['hostname'] or s['ip']}"
+        where = f"{s['name']} on {host_fields.display_name(s['hostname'], s['hostname_set']) or s['ip']}"
         outs = monitor.outages(s["id"], 86400, limit=5)
         for o in outs:
             if o.get("end"):

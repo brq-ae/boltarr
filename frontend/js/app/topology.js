@@ -58,7 +58,7 @@ function hierNodeHTML(ip, childrenMap, hostMap, tiers, connEdge, depth) {
       <span class="hier-tier-badge">${tierBadge}</span>
       <span class="hier-dot" style="background:${color}"></span>
       <span class="hier-ip mono">${escHtml(ip)}</span>
-      <span class="hier-hostname">${host.hostname ? escHtml(host.hostname) : '<span style="color:var(--text-3)">—</span>'}</span>
+      <span class="hier-hostname">${hostName(host) ? escHtml(hostName(host)) : '<span style="color:var(--text-3)">—</span>'}</span>
       <span class="tag tag-${escHtml(dt)}" style="font-size:9px;padding:1px 5px;line-height:1.6">${escHtml(dt)}</span>
       ${pill}
       <span class="hier-node-actions">
@@ -221,12 +221,12 @@ async function saveEditVlan() {
     allVlans.sort((a, b) => a.tag - b.tag);
     cancelEditVlan();
     renderVlans();
-    await loadGraph();
+    await refreshAfterSave(loadGraph);
   } catch (e) { alert("Error: " + e.message); }
 }
 
 async function deleteVlan(id) {
-  if (!confirm("Delete this VLAN? It will be removed from all connections.")) return;
+  if (!await askConfirm("Delete this VLAN?", { text: "It will be removed from all connections.", button: "Delete", danger: true })) return;
   await api("DELETE", `/api/vlans/${id}`);
   allVlans = allVlans.filter(v => v.id !== id);
   renderVlans();

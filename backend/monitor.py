@@ -35,6 +35,7 @@ import httpx
 from .database import get_conn
 from .config import get_monitoring_config, get_statuspage_config, get_check_seconds, local_now, get_timezone
 from . import notify
+from . import host_fields
 from . import maintenance
 from . import planned
 
@@ -54,7 +55,7 @@ _SELECT = """
     SELECT s.id, s.name, s.url, s.port, s.monitor_status,
            s.monitor_fail_since, s.monitor_alerted, s.container_ip, s.check_type,
            s.accepted_codes, s.monitored,
-           h.ip, h.hostname, h.online, h.offline_alerted
+           h.ip, h.hostname, h.hostname_set, h.online, h.offline_alerted
     FROM services s JOIN hosts h ON s.host_id = h.id
 """
 # What a probe depends on: a result is dropped if any of these changed meanwhile (F-30).
@@ -454,7 +455,7 @@ def _send_alert(conn, svc: dict, r: dict) -> None:
 
 
 def _where(svc: dict) -> str:
-    return svc.get("hostname") or svc.get("ip") or "?"
+    return host_fields.display_name(svc.get("hostname"), svc.get("hostname_set")) or svc.get("ip") or "?"
 
 
 def _alert_down(svc: dict) -> str:

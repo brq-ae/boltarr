@@ -243,7 +243,7 @@ const click = el => el.dispatchEvent(new w.MouseEvent("click", { bubbles: true }
   check(hints.length === 2, "a 'hints' link next to both Accepted replies boxes");
   click(hints[0]); await sleep(10);
   check($("codesHelpModal").classList.contains("open") && /502, 503/.test($("codesHelpModal").textContent), "hints popup opens and explains the numbers");
-  check([...d.querySelectorAll(".modal-overlay")].pop() === $("codesHelpModal"), "popup sits above the edit dialog");
+  check([...d.querySelectorAll(".modal-overlay:not(.ask-overlay)")].pop() === $("codesHelpModal"), "popup sits above the edit dialog");
   click($("codesHelpModal").querySelector(".codes-table")); await sleep(10);
   check($("codesHelpModal").classList.contains("open"), "clicking inside the popup keeps it open");
   click($("codesHelpModal")); await sleep(10);

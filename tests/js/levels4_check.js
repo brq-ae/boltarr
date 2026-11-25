@@ -112,9 +112,10 @@ const moreOf = (w, sel) => w.document.querySelector(sel).parentElement.querySele
   hp.querySelector(".more-btn").click();
   const del = hp.querySelector(".more-wrap .col-menu button");
   check(del && del.textContent === "Delete host" && del.classList.contains("more-danger"), "Basic host panel: Delete host is in ⋯ (in red)");
-  let asked = null; w.confirm = m => { asked = m; return false; };
   del.click(); await sleep(10);
-  check(asked !== null, "⋯ → Delete host runs the real Delete (asks first)");
+  check(d.getElementById("askModal").classList.contains("open") && /^Delete /.test(d.getElementById("askTitle").textContent),
+    "⋯ → Delete host runs the real Delete (asks first)");
+  d.getElementById("askCancel").click(); await sleep(10);
   w.setViewLevel("intermediate");
   check(!hidden(hp.querySelector('[data-click="probeHost"]')) && hidden(hp.querySelector('[data-click="openMergeHost"]')), "Intermediate host panel: Probe shows, Merge hidden");
 

@@ -406,6 +406,7 @@ const LEVEL_FEATURES = [
   { name: "SSH access for a device", words: "ssh access user key", lvl: "a", dev: ip => { _found(document.querySelector('#hostDetail .detail-tab[data-tab="ssh"]')); switchDetailTab("ssh"); loadHostSshSection(ip); } },
   { name: "Reset uptime", words: "uptime reset start again", lvl: "i", dev: () => _found(document.querySelector("#hostDetail .uptime-reset")) },
   // Settings
+  { name: "Short device names", words: "names domain full hostname long lan", at: "#setNamesCard", go: () => _goSetting("#setNamesCard") },
   { name: "IP History settings", words: "dhcp leases keep days", at: "#setIphCard", go: () => _goSetting("#setIphCard") },
   { name: "Login service in front", words: "proxy authelia authentik sso trusted", at: "#loginProxyPart", go: () => _goSetting("#loginProxyPart") },
   { name: "Allowed dashboards", words: "frame embed iframe homepage dashboard", at: "#setSecuritySection", go: () => _goSetting("#setSecuritySection") },

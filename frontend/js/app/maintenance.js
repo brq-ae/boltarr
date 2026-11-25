@@ -139,12 +139,12 @@ function renderMaintPick(kind, locked = maintEditing && maintEditing.state === "
   allServices.forEach(s => { perHost[s.host_id] = (perHost[s.host_id] || 0) + 1; });
   const items = kind === "host"
     ? allHosts.filter(h => !String(h.ip).startsWith("node-")).sort((a, b) => cmpIp(a.ip, b.ip)).map(h => ({
-        id: h.id, text: `${h.hostname || h.ip} ${h.ip}`,
-        html: `${escHtml(h.hostname || h.ip)} <span class="maint-dim mono">${escHtml(h.ip)}</span>` +
+        id: h.id, text: `${hostName(h) || h.ip} ${h.hostname || ""} ${h.ip}`,
+        html: `${escHtml(hostName(h) || h.ip)} <span class="maint-dim mono">${escHtml(h.ip)}</span>` +
               (perHost[h.id] ? ` <span class="maint-dim">· ${perHost[h.id]} service${perHost[h.id] === 1 ? "" : "s"}</span>` : "") }))
     : [...allServices].sort((a, b) => a.name.localeCompare(b.name)).map(s => ({
         id: s.id, text: `${s.name} ${s.hostname || ""} ${s.ip}`,
-        html: `${escHtml(s.name)} <span class="maint-dim">on ${escHtml(s.hostname || s.ip)}</span>` }));
+        html: `${escHtml(s.name)} <span class="maint-dim">on ${escHtml(svcHostName(s) || s.ip)}</span>` }));
   const set = maintPicked[kind];
   // picked ones first, so they stay in view
   const shown = items.filter(i => set.has(i.id) || !q || i.text.toLowerCase().includes(q))
@@ -200,9 +200,9 @@ function maintExtend(id, minutes) {
 function maintDone(id) {
   _maintAct(api("POST", `/api/maintenance-windows/${id}/done`), "Maintenance ended — monitoring resumes");
 }
-function maintDelete(id) {
+async function maintDelete(id) {
   const w = maintWindows.find(x => x.id === id);
-  if (w && w.state === "planned" && !confirm(`Delete the planned maintenance "${w.title}"?`)) return;
+  if (w && w.state === "planned" && !await askConfirm(`Delete the planned maintenance "${w.title}"?`, { button: "Delete", danger: true })) return;
   _maintAct(api("DELETE", `/api/maintenance-windows/${id}`), w && w.state === "planned" ? "Deleted" : "");
 }
 

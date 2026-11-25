@@ -74,7 +74,7 @@ async function loadChanges() {
 }
 
 async function clearChanges() {
-  if (!confirm("Clear the entire change log?")) return;
+  if (!await askConfirm("Clear the entire change log?", { button: "Clear", danger: true })) return;
   await api("DELETE", "/api/change-events");
   loadChanges();
 }
@@ -193,14 +193,16 @@ function applyScanProfile() {
 }
 
 async function saveScanProfile() {
-  const name = prompt("Save these settings as a profile named:");
+  const name = await askText("Name this scan profile", { button: "Save", input: { placeholder: "e.g. Quick ports" } });
   if (!name || !name.trim()) return;
   try {
     const p = await api("POST", "/api/scan-profiles", { name: name.trim(), options: _scanOptsFromFields() });
-    await loadScanProfiles();
-    document.getElementById("scanProfile").value = String(p.id);
-    applyScanProfile();
-    showToast("Profile saved");
+    await refreshAfterSave(async () => {
+      await loadScanProfiles();
+      document.getElementById("scanProfile").value = String(p.id);
+      applyScanProfile();
+      showToast("Profile saved");
+    });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -208,11 +210,10 @@ async function deleteScanProfile() {
   const sel = document.getElementById("scanProfile");
   const p = scanProfiles.find(x => String(x.id) === sel.value);
   if (!p || p.builtin) return;
-  if (!confirm(`Delete profile "${p.name}"?`)) return;
+  if (!await askConfirm(`Delete profile "${p.name}"?`, { button: "Delete", danger: true })) return;
   try {
     await api("DELETE", `/api/scan-profiles/${p.id}`);
-    await loadScanProfiles();
-    applyScanProfile();
+    await refreshAfterSave(async () => { await loadScanProfiles(); applyScanProfile(); });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -224,8 +225,7 @@ async function runScanFromBuilder() {
     activeRunId = run_id;
     startPolling(id);
     setScanTab("history");
-    await loadScans();
-    showToast("Scan started");
+    await refreshAfterSave(async () => { await loadScans(); showToast("Scan started"); });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -415,7 +415,7 @@ function scansUpdateBulkBtn() {
 }
 
 async function deleteScanRun(id) {
-  if (!confirm("Delete this scan/probe record?")) return;
+  if (!await askConfirm("Delete this scan/probe record?", { button: "Delete", danger: true })) return;
   try { await api("DELETE", `/api/scans/${id}`); }
   catch (e) { showToast(e.message); return loadScans(); }
   document.getElementById(`scan-card-${id}`)?.remove();
@@ -425,7 +425,7 @@ async function deleteScanRun(id) {
 async function scansDeleteSelected() {
   const ids = Array.from(document.querySelectorAll(".scan-checkbox:checked")).map(cb => parseInt(cb.dataset.id));
   if (!ids.length) return showToast("Nothing selected");
-  if (!confirm(`Delete ${ids.length} record${ids.length > 1 ? "s" : ""}?`)) return;
+  if (!await askConfirm(`Delete ${ids.length} record${ids.length > 1 ? "s" : ""}?`, { button: "Delete", danger: true })) return;
   const r = await api("DELETE", "/api/scans", { ids });
   if (r && r.kept_running) showToast(`${r.kept_running} running scan${r.kept_running > 1 ? "s were" : " was"} kept — stop ${r.kept_running > 1 ? "them" : "it"} first`);
   await loadScans();
@@ -576,8 +576,7 @@ async function saveSchedule() {
     if (id) await api("PUT", `/api/scan-schedules/${id}`, payload);
     else    await api("POST", "/api/scan-schedules", payload);
     closeScheduleEditor();
-    await loadSchedules();
-    showToast(id ? "Schedule saved" : "Schedule created");
+    await refreshAfterSave(async () => { await loadSchedules(); showToast(id ? "Schedule saved" : "Schedule created"); });
   } catch (e) { showToast("Failed: " + e.message); }
 }
 
@@ -590,7 +589,7 @@ async function toggleSchedule(id, enabled) {
 }
 
 async function deleteSchedule(id) {
-  if (!confirm("Delete this schedule?")) return;
+  if (!await askConfirm("Delete this schedule?", { button: "Delete", danger: true })) return;
   await api("DELETE", `/api/scan-schedules/${id}`);
   await loadSchedules();
 }
@@ -607,9 +606,9 @@ async function runScheduleNow(id) {
     showToast(parts.length ? parts.join(", ") + (started || queued ? " — see Scan Log" : "") : "Nothing to run");
     if (started || queued) {
       setScanTab("history");     // jump to Scan Log so progress is visible
-      await loadScans();
+      await refreshAfterSave(loadScans);
     } else {
-      await loadSchedules();
+      await refreshAfterSave(loadSchedules);
     }
   } catch (e) { showToast("Failed: " + e.message); }
 }

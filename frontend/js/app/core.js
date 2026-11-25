@@ -43,14 +43,19 @@ const ACTIONS = Object.create(null);
 function registerActions(map) { Object.assign(ACTIONS, map); }
 function dargs(...a) { return escHtml(JSON.stringify(a)); }   // for data-args="…"
 
+// The name to show for a device: the server works it out (short names, S-27, set in
+// Settings → General), so the app, the map and the alerts always agree. Export keeps h.hostname.
+function hostName(h) { return (h && (h.display_name ?? h.hostname)) || ""; }
+function svcHostName(s) { return (s && (s.host_display_name ?? s.hostname)) || ""; }
+
 // F-20: the name the network reports for a host, when it differs from the name
-// it was given (shown as a hover hint; "" when there's nothing different to show)
-function netNameHint(h) {
+// shown (a hover hint; "" when there's nothing different to show)
+function netNameHint(h, shown = hostName(h)) {
   const n = (h && h.net_hostname) || "";
-  return n && n !== (h.hostname || "") ? n : "";
+  return n && n !== shown ? n : "";
 }
-function netNameAttr(h) {
-  const n = netNameHint(h);
+function netNameAttr(h, shown) {
+  const n = netNameHint(h, shown);
   return n ? ` title="Network name: ${escHtml(n)}" class="has-net-name"` : "";
 }
 
@@ -82,6 +87,64 @@ document.addEventListener("keydown", e => {
   e.preventDefault();
   close.click();
 });
+
+// Tab stays inside the window on top that is marked aria-modal, like the browser's own popups (S-34)
+document.addEventListener("keydown", e => {
+  if (e.key !== "Tab") return;
+  const open = document.querySelectorAll('.modal-overlay.open [aria-modal="true"]');
+  const top = open[open.length - 1];
+  if (!top) return;
+  const f = [...top.querySelectorAll("button, input, select, textarea, a[href]")].filter(x => !x.disabled && !x.closest("[hidden]"));
+  if (!f.length) return;
+  const i = f.indexOf(document.activeElement);
+  const next = e.shiftKey ? (i <= 0 ? f[f.length - 1] : null) : (i === -1 || i === f.length - 1 ? f[0] : null);
+  if (next) { e.preventDefault(); next.focus(); }
+});
+
+// A window opens with focus inside it, and gives focus back to where you were when it closes (S-34)
+function dialogOpen(overlay, focusEl) {
+  overlay._back = document.activeElement;
+  overlay.classList.add("open");
+  focusEl.focus();
+}
+function dialogClose(overlay) {
+  overlay.classList.remove("open");
+  const back = overlay._back; overlay._back = null;
+  if (back && back.isConnected && back.focus) back.focus();
+}
+
+// ── Ask window (S-34) ─────────────────────────────────────────────────────────
+// Boltarr's own "Are you sure?" instead of the browser's confirm()/prompt(): it matches
+// the app, and the browser's "don't allow this page to create dialogs" can't silently
+// turn every answer into No. askConfirm resolves true/false, askText the text or null.
+
+let _ask = null;   // { resolve, input } while the window is open
+
+function _askOpen(title, { text = "", button = "OK", danger = false, input = null } = {}) {
+  if (_ask) _askDone(null);   // a new question replaces one still open
+  const $ = id => document.getElementById(id);
+  $("askTitle").textContent = title;
+  $("askText").textContent = text;
+  const box = $("askInput"), ok = $("askOk");
+  box.hidden = !input; box.value = (input && input.value) || ""; box.placeholder = (input && input.placeholder) || "";
+  ok.textContent = button;
+  ok.className = "btn " + (danger ? "btn-danger" : "btn-primary");
+  return new Promise(resolve => {
+    _ask = { resolve, input: !!input };
+    dialogOpen($("askModal"), input ? box : danger ? $("askCancel") : ok);   // a delete starts on Cancel
+  });
+}
+function _askDone(answer) {
+  if (!_ask) return;
+  const { resolve } = _ask; _ask = null;
+  dialogClose(document.getElementById("askModal"));
+  resolve(answer);
+}
+function askConfirm(title, opts) { return _askOpen(title, opts).then(a => a === true); }
+function askText(title, opts = {}) { return _askOpen(title, { ...opts, input: opts.input || {} }).then(a => typeof a === "string" ? a : null); }
+function askOk() { _askDone(_ask && _ask.input ? document.getElementById("askInput").value : true); }
+function closeAsk() { _askDone(null); }
+document.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.id === "askInput") { e.preventDefault(); askOk(); } });
 
 // ── API ───────────────────────────────────────────────────────────────────────
 
@@ -116,6 +179,14 @@ async function api(method, path, body) {
   if (!r.ok) throw new Error(apiErrorText(await r.text()));
   const text = await r.text();          // 204 "done" answers have no body
   return text ? JSON.parse(text) : null;
+}
+
+// Refresh the screen after a change that worked. If only this refresh fails, say so:
+// the change was made, so it must not look like an error (F-45). Keep the change itself
+// outside, so a failed change still shows its own error.
+async function refreshAfterSave(fn) {
+  try { await fn(); }
+  catch (_) { showToast("Done, but couldn't refresh the page. Refresh to see the change.", 10000); }
 }
 
 // FastAPI errors arrive as {"detail": "..."} or a list of field errors — show
@@ -195,14 +266,60 @@ function toggleSubnetVisibility(subnetId) {
   api("PUT", `/api/subnets/${subnetId}`, { map_hidden: hide }).catch(() => {});   // remembered after a reload
 }
 
+// Delete subnet window (S-33). Its devices stay unless you tick the box; the server
+// lists only devices in no other subnet, so a device another subnet still covers stays.
+let _delSubnet = null;   // { id, ips } of the subnet the window is open for
+
 async function deleteSubnet(id, name) {
   const n = (subnetSummary[id] || {}).schedules || 0;
   const scheds = n ? ` and its ${n} scan schedule${n === 1 ? "" : "s"}` : "";
-  if (!confirm(`Delete subnet "${name}"?\n\nIts hosts stay in Boltarr. The subnet entry, its scan history${scheds} are deleted.`)) return;
-  await api("DELETE", `/api/subnets/${id}`);
+  _delSubnet = { id, ips: [] };
+  document.getElementById("delSubnetTitle").textContent = `Delete subnet "${name}"?`;
+  document.getElementById("delSubnetText").textContent =
+    `The subnet entry, its scan history${scheds} are deleted. Its devices stay in Boltarr unless you tick the box below.`;
+  const row = document.getElementById("delSubnetHostsRow"), box = document.getElementById("delSubnetHosts");
+  row.hidden = true; box.checked = false;
+  _delSubnetBtnText();
+  document.getElementById("delSubnetBtn").disabled = false;
+  const win = document.getElementById("delSubnetModal");
+  dialogOpen(win, win.querySelector('[data-click="closeDeleteSubnet"]'));
+  try {
+    const { ips } = await api("GET", `/api/subnets/${id}/own-hosts`);
+    if (!_delSubnet || _delSubnet.id !== id || !ips.length) return;   // closed, or nothing to offer
+    _delSubnet.ips = ips;
+    document.getElementById("delSubnetHostsLabel").textContent =
+      `Also delete the ${ips.length} device${ips.length === 1 ? "" : "s"} only in this subnet, with their ports, links, services and notes. This can't be undone.`;
+    row.hidden = false;
+  } catch (_) { /* no tick box: the subnet can still be deleted on its own */ }
+}
+
+function _delSubnetBtnText() {
+  const n = document.getElementById("delSubnetHosts").checked ? _delSubnet.ips.length : 0;
+  document.getElementById("delSubnetBtn").textContent =
+    n ? `Delete subnet and ${n} device${n === 1 ? "" : "s"}` : "Delete subnet";
+}
+
+function closeDeleteSubnet() {
+  dialogClose(document.getElementById("delSubnetModal"));
+  _delSubnet = null;
+}
+
+async function confirmDeleteSubnet() {
+  const { id, ips: own } = _delSubnet;
+  const ips = document.getElementById("delSubnetHosts").checked ? own : [];
+  const btn = document.getElementById("delSubnetBtn");
+  btn.disabled = true;
+  try { await api("DELETE", `/api/subnets/${id}`); }
+  catch (e) { btn.disabled = false; return alert("Error: " + e.message); }
+  closeDeleteSubnet();
   subnets = subnets.filter(s => s.id !== id);
   hiddenSubnets.delete(id);
   renderSubnetList();
+  if (!ips.length) return;
+  try { await api("DELETE", "/api/hosts", { ips }); }
+  catch (e) { return alert("The subnet was deleted, but its devices couldn't be: " + e.message); }
+  await refreshAfterSave(async () => { await loadHosts(); renderHostsTable(); await loadGraph(); });
+  showToast(`Deleted the subnet and ${ips.length} device${ips.length === 1 ? "" : "s"}`);
 }
 
 function _subnetFields(s) {
@@ -249,8 +366,10 @@ async function saveSubnet() {
       await api("POST", "/api/subnets", { name, cidr, description: desc, dhcp_start, dhcp_end });
     }
     closeAddSubnet();
-    await loadSubnets();
-    await loadHosts(); renderHostsTable();   // classification may have changed
+    await refreshAfterSave(async () => {
+      await loadSubnets();
+      await loadHosts(); renderHostsTable();   // classification may have changed
+    });
   } catch (e) { alert("Error: " + e.message); }
 }
 
@@ -298,7 +417,7 @@ async function probeHost(ip) {
     const { run_id } = await api("POST", `/api/hosts/${ip}/probe`, opts);
     showToast(`Probing ${ip}…`);
     startProbePolling(run_id, ip);
-    loadScans();   // show the probe in Scan Log live (like a scan), not only when done
+    refreshAfterSave(loadScans);   // show the probe in Scan Log live (like a scan), not only when done
   } catch (e) {
     alert("Probe error: " + e.message);
   }
@@ -435,7 +554,7 @@ function openTopology() {
 }
 
 function setTab(name) {
-  if (name !== "settings" && !settingsLeaveOk()) return;   // unsaved Settings changes: ask first
+  if (name !== "settings" && !settingsLeaveOk(() => setTab(name))) return;   // unsaved Settings changes: ask first
   const wasOn = document.getElementById("panel-" + name)?.classList.contains("active");
   if (!wasOn) window.endLevelFound?.();   // a feature opened from search shows only for that visit
   if (name === "topology" || name === "hierarchy") lastTopoView = name;
@@ -481,6 +600,7 @@ function toggleLegend() {
 registerActions({
   openTopology, setTab, toggleSidebar, closeSidebar, toggleChat, toggleLegend, stopScan, stopProbe,
   openAddSubnet, closeAddSubnet, saveSubnet, toggleSubnetVisibility,
+  closeDeleteSubnet, confirmDeleteSubnet, delSubnetTick: _delSubnetBtnText, askOk, closeAsk,
   openEditSubnet, triggerScan,
   printPage: () => window.print(),
 });

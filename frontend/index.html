@@ -515,6 +515,15 @@
               Boltarr uses this for schedule times, quiet hours, the digest, and how times are shown. <span id="setTzPreview" style="color:var(--text-2)"></span>
             </p>
           </section>
+          <section class="set-card" id="setNamesCard" data-lvl="a">
+            <h3 class="set-card-title">🏷️ Device names</h3>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+              <input type="checkbox" id="setShortNames"> Short names
+            </label>
+            <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">
+              Shows <span class="mono">phone-1</span> for <span class="mono">phone-1.lan.example.com</span>, in the app and in alerts.
+              The full name is kept, shown in the device panel, and found by search. Names you set yourself are always shown as you typed them.</p>
+          </section>
           <section class="set-card" data-nosave>
             <h3 class="set-card-title">👁 View level</h3>
             <p class="text-3" style="font-size:11px;line-height:1.5;margin:0">How much Boltarr shows on screen. It only changes what you see: everything keeps working the same.
@@ -1278,6 +1287,22 @@
     <div class="modal-actions">
       <button class="btn" data-click="closeAddSubnet">Cancel</button>
       <button class="btn btn-primary" id="subnetSaveBtn" data-click="saveSubnet">Add Subnet</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete subnet (S-33): its devices stay unless you tick the box -->
+<div class="modal-overlay" id="delSubnetModal">
+  <div class="modal" style="width:420px" role="dialog" aria-modal="true" aria-labelledby="delSubnetTitle">
+    <div class="modal-title" id="delSubnetTitle">Delete subnet</div>
+    <p id="delSubnetText" style="font-size:13px;color:var(--text-2);margin:0 0 14px"></p>
+    <label id="delSubnetHostsRow" style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:0 0 14px;cursor:pointer">
+      <input type="checkbox" id="delSubnetHosts" data-change="delSubnetTick" style="margin-top:2px">
+      <span id="delSubnetHostsLabel"></span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn" data-click="closeDeleteSubnet">Cancel</button>
+      <button class="btn btn-danger" id="delSubnetBtn" data-click="confirmDeleteSubnet">Delete</button>
     </div>
   </div>
 </div>
@@ -2080,6 +2105,20 @@
     <p class="settings-hint">Only used by the HTTP(S) check — TCP and Ping checks ignore it.</p>
     <div class="modal-actions">
       <button class="btn btn-primary" data-click="closeCodesHelp">Got it</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ask window (S-34): Boltarr's own "Are you sure?" / name box, instead of the browser's popups.
+     Last of the windows, so it sits on top of one that asked. -->
+<div class="modal-overlay ask-overlay" id="askModal">
+  <div class="modal" style="width:420px" role="alertdialog" aria-modal="true" aria-labelledby="askTitle" aria-describedby="askText">
+    <div class="modal-title" id="askTitle"></div>
+    <p id="askText" class="ask-text"></p>
+    <input type="text" id="askInput" maxlength="100" hidden aria-labelledby="askTitle" style="width:100%;margin:0 0 14px">
+    <div class="modal-actions">
+      <button class="btn" id="askCancel" data-click="closeAsk">Cancel</button>
+      <button class="btn btn-primary" id="askOk" data-click="askOk">OK</button>
     </div>
   </div>
 </div>

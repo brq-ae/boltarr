@@ -24,7 +24,7 @@ function renderSvcTopology() {
   services.forEach(s => {
     if (!hostMap.has(s.ip)) {
       const h = allHosts.find(h => h.ip === s.ip);
-      hostMap.set(s.ip, { label: s.hostname || s.ip, device_type: h?.device_type || "unknown" });
+      hostMap.set(s.ip, { label: svcHostName(s) || s.ip, device_type: h?.device_type || "unknown" });
     }
   });
 
@@ -181,7 +181,7 @@ function toggleLinkHostsForm() {
     const ips = [...new Set(allServices.map(s => s.ip))];
     const opts = ips.map(ip => {
       const h = allHosts.find(h => h.ip === ip);
-      return `<option value="${escHtml(ip)}">${escHtml(ip)}${h?.hostname ? " — " + escHtml(h.hostname) : ""}</option>`;
+      return `<option value="${escHtml(ip)}">${escHtml(ip)}${hostName(h) ? " — " + escHtml(hostName(h)) : ""}</option>`;
     }).join("");
     document.getElementById("linkSrc").innerHTML = opts;
     document.getElementById("linkDst").innerHTML = opts;
@@ -194,16 +194,14 @@ async function saveHostLink() {
   if (!src || !dst || src === dst) return alert("Pick two different hosts.");
   try {
     await api("POST", "/api/connections", { src_ip: src, dst_ip: dst, type: "host-link" });
-    await loadGraph();
-    toggleLinkHostsForm();
-    renderSvcTopology();
+    await refreshAfterSave(async () => { await loadGraph(); toggleLinkHostsForm(); renderSvcTopology(); });
   } catch (e) { alert("Error: " + e.message); }
 }
 
 async function deleteSelectedHostLink() {
   const actions = document.getElementById("svcTopoEdgeActions");
   const connId  = actions.dataset.connId;
-  if (!connId || !confirm("Remove this host link?")) return;
+  if (!connId || !await askConfirm("Remove this host link?", { button: "Remove", danger: true })) return;
   await api("DELETE", `/api/connections/${connId}`);
   await loadGraph();
   actions.style.display = "none";
@@ -238,7 +236,7 @@ function renderDepsModal(svcId) {
       const t = allServices.find(s => s.id === d.to_service_id);
       return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
         <span style="flex:1;font-size:12px">${t ? escHtml(t.name) : `#${d.to_service_id}`}
-          ${t ? `<span style="font-size:10px;color:var(--text-3)"> — ${escHtml(t.hostname || t.ip)}</span>` : ""}
+          ${t ? `<span style="font-size:10px;color:var(--text-3)"> — ${escHtml(svcHostName(t) || t.ip)}</span>` : ""}
         </span>
         <button class="btn-ghost btn-danger" style="font-size:11px;padding:2px 6px" data-click="removeSvcDep" data-args="[${d.id},${id}]">✕</button>
       </div>`;
@@ -251,7 +249,7 @@ function renderDepsModal(svcId) {
   sel.innerHTML   = available.length === 0
     ? `<option value="">No other services</option>`
     : `<option value="">Pick a service…</option>` +
-      available.map(s => `<option value="${s.id}">${escHtml(s.name)} (${escHtml(s.hostname || s.ip)})</option>`).join("");
+      available.map(s => `<option value="${s.id}">${escHtml(s.name)} (${escHtml(svcHostName(s) || s.ip)})</option>`).join("");
 }
 
 // The service panel lists dependencies too: redraw it if it's open
@@ -368,17 +366,17 @@ async function loadSvcUptime(id, monitored) {
 }
 
 async function resetSvcUptime(id) {
-  if (!confirm("Reset uptime history for this service? Clears its outages and restarts the % from now.")) return;
-  try { await api("POST", `/api/services/${id}/uptime/reset`); await loadSvcUptime(id, true); }
+  if (!await askConfirm("Reset uptime history for this service?", { text: "Clears its outages and restarts the % from now.", button: "Reset", danger: true })) return;
+  try { await api("POST", `/api/services/${id}/uptime/reset`); await refreshAfterSave(() => loadSvcUptime(id, true)); }
   catch (e) { alert("Error: " + (e.message || e)); }
 }
 async function resetHostUptime(ip) {
-  if (!confirm("Reset uptime history for this host? Clears its outages and restarts the % from now.")) return;
-  try { await api("POST", `/api/hosts/${ip}/uptime/reset`); await loadHostUptime(ip); }
+  if (!await askConfirm("Reset uptime history for this host?", { text: "Clears its outages and restarts the % from now.", button: "Reset", danger: true })) return;
+  try { await api("POST", `/api/hosts/${ip}/uptime/reset`); await refreshAfterSave(() => loadHostUptime(ip)); }
   catch (e) { alert("Error: " + (e.message || e)); }
 }
 async function resetAllUptime() {
-  if (!confirm("Reset uptime history for ALL services and hosts? Clears every outage record and restarts all percentages from now. This can't be undone.")) return;
+  if (!await askConfirm("Reset uptime history for ALL services and hosts?", { text: "Clears every outage record and restarts all percentages from now. This can't be undone.", button: "Reset all", danger: true })) return;
   try { await api("POST", "/api/uptime/reset-all"); alert("Uptime history reset for all services and hosts."); }
   catch (e) { alert("Error: " + (e.message || e)); }
 }
@@ -502,7 +500,7 @@ async function saveSvcDetail() {
 
 async function deleteSvcDetail() {
   if (!svcDetailId) return;
-  if (!confirm("Delete this service?")) return;
+  if (!await askConfirm("Delete this service?", { button: "Delete", danger: true })) return;
   try {
     await api("DELETE", `/api/services/${svcDetailId}`);
     allServices = allServices.filter(s => s.id !== svcDetailId);
@@ -552,8 +550,8 @@ function openBulkAddContainers() {
   bulkSelectedIps = new Map();
   const grid = document.getElementById("bulkContainerGrid");
   grid.innerHTML = containers.map(h => {
-    const label = h.hostname || h.ip;
-    const sub   = h.hostname ? h.ip : "";
+    const label = hostName(h) || h.ip;
+    const sub   = hostName(h) ? h.ip : "";
     return `<div class="container-chip" id="bulk-chip-${h.ip.replace(/\./g,'_')}" data-click="toggleBulkChip" data-args="${dargs(h.ip, label)}">
       <span class="container-chip-name">${escHtml(label)}</span>
       ${sub ? `<span class="container-chip-ip">${escHtml(sub)}</span>` : ""}
@@ -562,7 +560,7 @@ function openBulkAddContainers() {
   const sel = document.getElementById("bulkHostIp");
   const regularH   = allHosts.filter(h => h.device_type !== "container");
   const containerH = allHosts.filter(h => h.device_type === "container");
-  const bulkOpt = h => `<option value="${escHtml(h.ip)}">${escHtml(h.ip)}${h.hostname ? " — " + escHtml(h.hostname) : ""}</option>`;
+  const bulkOpt = h => `<option value="${escHtml(h.ip)}">${escHtml(h.ip)}${hostName(h) ? " — " + escHtml(hostName(h)) : ""}</option>`;
   sel.innerHTML = regularH.map(bulkOpt).join("") +
     (containerH.length ? `<optgroup label="── Containers ──">${containerH.map(bulkOpt).join("")}</optgroup>` : "");
   const last = localStorage.getItem("boltarr_last_svc_host");
@@ -580,7 +578,7 @@ function toggleBulkChip(ip, name) {
 
 function bulkSelectAll() {
   _unusedContainerIps().forEach(h => {
-    bulkSelectedIps.set(h.ip, h.hostname || h.ip);
+    bulkSelectedIps.set(h.ip, hostName(h) || h.ip);
     document.getElementById(`bulk-chip-${h.ip.replace(/\./g,'_')}`)?.classList.add("selected");
   });
   updateBulkAddBtn();
@@ -666,7 +664,7 @@ async function saveConnEdit() {
 async function deleteConnFromEdit() {
   const connId = document.getElementById("editConnId").value;
   const edgeId = document.getElementById("editConnEdgeId").value;
-  if (!confirm("Delete this link?")) return;
+  if (!await askConfirm("Delete this link?", { button: "Delete", danger: true })) return;
   await api("DELETE", `/api/connections/${connId}`);
   cy.edges(`[overlay_conn="${connId}"]`).remove();
   cy.remove(`#${edgeId}`);
