@@ -12,6 +12,7 @@ import socket
 import zipfile
 import copy
 import tempfile
+import math
 import sqlite3 as _sqlite3
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -22,6 +23,8 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from starlette.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .database import init_db, get_conn, MigrationError
@@ -51,6 +54,21 @@ from .llm import (
 APP_VERSION = (Path(__file__).parent.parent / "VERSION").read_text().strip()
 
 app = FastAPI(title="Boltarr", version=APP_VERSION)
+
+
+@app.exception_handler(RequestValidationError)
+async def _refused_input(request: Request, exc: RequestValidationError):
+    """FastAPI's usual 422, but a NaN or out-of-range number in what was sent is written
+    as text: JSON can't hold it, and echoing it back turned the 422 into a 500."""
+    def safe(v):
+        if isinstance(v, float) and not math.isfinite(v):
+            return str(v)
+        if isinstance(v, dict):
+            return {k: safe(x) for k, x in v.items()}
+        if isinstance(v, (list, tuple)):
+            return [safe(x) for x in v]
+        return v
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(safe(exc.errors()))})
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
@@ -2198,8 +2216,13 @@ def update_connection(conn_id: int, data: ConnectionUpdate):
 
 # ── Layout ────────────────────────────────────────────────────────────────────
 
+class MapSpot(BaseModel):
+    x: float = Field(allow_inf_nan=False)
+    y: float = Field(allow_inf_nan=False)
+
+
 class LayoutIn(BaseModel):
-    positions: dict  # {ip: {x: float, y: float}}
+    positions: dict[str, MapSpot] = Field(max_length=20000)  # {ip: {x, y}}; only the devices that moved
 
 
 @app.put("/api/layout")
@@ -2208,7 +2231,7 @@ def save_layout(data: LayoutIn):
         for ip, pos in data.positions.items():
             conn.execute(
                 "UPDATE hosts SET pos_x=?, pos_y=? WHERE ip=?",
-                (pos.get("x"), pos.get("y"), ip),
+                (pos.x, pos.y, ip),
             )
         conn.commit()
     return {"ok": True, "saved": len(data.positions)}

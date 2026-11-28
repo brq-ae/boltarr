@@ -44,7 +44,7 @@ const moreOf = (w, sel) => w.document.querySelector(sel).parentElement.querySele
 (async () => {
   let { w, d, D, hidden, $ } = await boot("basic");
   // Topology
-  check(!hidden($("#connectBtn")) && !hidden($("#saveLayoutBtn")), "Basic: ◎ Link and Save Layout show");
+  check(!hidden($("#connectBtn")) && !hidden($("#undoMoveBtn")), "Basic: ◎ Link and ↶ Undo show");
   check(hidden($("#multiConnBtn")) && hidden($("#vlanBtn")), "Basic: Multi-Link and VLANs hidden (no VLANs)");
   // Services
   check(hidden($("#svcMaintBtn")) && hidden($('[data-click="openBulkAddContainers"]')), "Basic: Maintenance (none planned) and Bulk hidden");

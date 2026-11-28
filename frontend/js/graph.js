@@ -540,6 +540,7 @@ function applySubnetVisibility() {
 function arrangeSelectedInGrid(spacing = 90) {
   const sel = cy.$(':selected').filter('node').not('[overlay_conn]');
   if (sel.length < 2) { alert("Select at least 2 nodes first."); return; }
+  const before = _spots();
   const n    = sel.length;
   const cols = Math.ceil(Math.sqrt(n));
   // Centroid of current positions
@@ -551,7 +552,7 @@ function arrangeSelectedInGrid(spacing = 90) {
   sel.forEach((node, i) => {
     node.position({ x: startX + (i % cols) * spacing, y: startY + Math.floor(i / cols) * spacing });
   });
-  saveLayoutLocally();
+  _recordMove(before);
 }
 
 // ── Context menu ──────────────────────────────────────────────────────────────
@@ -592,8 +593,8 @@ function hideCtxMenu() {
   if (_ctxMenu) _ctxMenu.style.display = "none";
 }
 
-const LAYOUT_KEY   = "boltarr:layout";
-const VIEWPORT_KEY = "boltarr:viewport";
+const LAYOUT_KEY   = "boltarr:layout";     // before F-46 the layout lived here; now only read once, see _offerOldLayout
+const VIEWPORT_KEY = "boltarr:viewport";   // zoom and scroll stay per browser
 
 let _vpTimer = null;
 function saveViewportLocally() {
@@ -604,37 +605,166 @@ function _scheduleVpSave() {
   _vpTimer = setTimeout(saveViewportLocally, 250);
 }
 
-function saveLayoutLocally() {
-  const positions = {};
-  cy.nodes().forEach(n => { positions[n.id()] = n.position(); });
-  localStorage.setItem(LAYOUT_KEY, JSON.stringify(positions));
-  saveViewportLocally();
-}
-
+// This browser's last view of the map. A browser that has none yet (new device, cleared
+// site data) sees the whole map, not a corner of it at 100%.
 function restoreViewport() {
   try {
     const vp = JSON.parse(localStorage.getItem(VIEWPORT_KEY) || "null");
     if (vp && vp.pan && vp.zoom) {
       cy.zoom(vp.zoom);
       cy.pan(vp.pan);
+      return;
     }
   } catch {}
+  if (cy.width() > 0 && cy.height() > 0) cy.fit(undefined, 40);   // only when the map is on screen
+}
+
+// ── Map positions (F-46) ──────────────────────────────────────────────────────
+// Every move is saved to Boltarr on its own, a moment after you let go, so every
+// browser, device and backup shows the same map. The last 20 moves can be undone
+// with ↶ Undo or Ctrl+Z (⌘Z); an undo is saved too.
+
+const UNDO_MAX = 20;
+let _undo = [];             // per move: { id: {x, y} } where the moved devices were before
+let _grabbed = null;        // every device's spot when a drag started
+let _freeTimer = null;
+let _pendingPos = {};       // moved, not saved yet
+let _saveTimer = null;
+let _saveFailing = false;
+
+function _spots() {
+  const p = {};
+  cy.nodes().forEach(n => { p[n.id()] = { ...n.position() }; });
+  return p;
+}
+
+// A move ended: remember where the moved devices were (for Undo) and save where they are now
+function _recordMove(before) {
+  const old = {}, now = {};
+  cy.nodes().forEach(n => {
+    const b = before[n.id()], p = n.position();
+    if (b && (Math.abs(b.x - p.x) > 0.5 || Math.abs(b.y - p.y) > 0.5)) { old[n.id()] = b; now[n.id()] = { ...p }; }
+  });
+  if (!Object.keys(old).length) return;
+  _undo.push(old);
+  if (_undo.length > UNDO_MAX) _undo.shift();
+  _updateUndoBtn();
+  _queueSave(now);
+}
+
+function _onGrab() { if (!_grabbed) _grabbed = _spots(); }
+// One drag of several selected devices frees each of them: count it as one move
+function _onFree() {
+  clearTimeout(_freeTimer);
+  _freeTimer = setTimeout(() => { if (_grabbed) { const b = _grabbed; _grabbed = null; _recordMove(b); } }, 0);
+}
+
+function undoMove() {
+  const old = _undo.pop();
+  if (!old) return;
+  const back = {};
+  Object.entries(old).forEach(([id, p]) => {
+    const n = cy.getElementById(id);
+    if (n.nonempty()) { n.position(p); back[id] = p; }   // a device deleted since is skipped
+  });
+  _updateUndoBtn();
+  _queueSave(back);
+}
+
+function _updateUndoBtn() {
+  const b = document.getElementById("undoMoveBtn");
+  if (b) b.disabled = !_undo.length;
+}
+
+// Ctrl+Z / ⌘Z on the map. Typing in a box or an open window keeps its own undo.
+document.addEventListener("keydown", e => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || (e.key || "").toLowerCase() !== "z") return;
+  if (!document.getElementById("panel-topology")?.classList.contains("active")) return;
+  if (document.querySelector(".modal-overlay.open")) return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (!_undo.length) return;
+  e.preventDefault();
+  undoMove();
+});
+
+function _queueSave(positions) {
+  Object.assign(_pendingPos, positions);
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(_flushSave, 800);
+}
+
+async function _flushSave() {
+  clearTimeout(_saveTimer);
+  const positions = _pendingPos;
+  if (!Object.keys(positions).length) return;
+  _pendingPos = {};
+  try {
+    const r = await fetch("/api/layout", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ positions }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (_saveFailing) { _saveFailing = false; showToast("Map layout saved."); }
+  } catch {
+    _pendingPos = { ...positions, ..._pendingPos };   // newer moves win; try again shortly
+    if (!_saveFailing) {
+      _saveFailing = true;
+      showToast("Couldn't save the map layout. Boltarr keeps trying; check the connection.", 10000);
+    }
+    _saveTimer = setTimeout(_flushSave, 15000);
+  }
+}
+
+// Leaving the page just after a move: still send it
+window.addEventListener("pagehide", () => {
+  if (!Object.keys(_pendingPos).length) return;
+  fetch("/api/layout", { method: "PUT", keepalive: true, headers: { "Content-Type": "application/json" },
+                         body: JSON.stringify({ positions: _pendingPos }) }).catch(() => {});
+});
+
+// Before F-46 a layout stayed in the browser until Save Layout. If this browser still
+// holds spots Boltarr doesn't have, ask once. Never overwrite quietly: an old browser's
+// copy could undo a newer layout saved from somewhere else.
+function _offerOldLayout(dbPos) {
+  let local = null;
+  try { local = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "null"); } catch {}
+  if (!local || typeof local !== "object") return;
+  const forget = () => { try { localStorage.removeItem(LAYOUT_KEY); } catch {} };
+  const differ = Object.entries(local).filter(([id, p]) =>
+    p && Number.isFinite(p.x) && Number.isFinite(p.y) && cy.getElementById(id).nonempty() &&
+    (!dbPos[id] || Math.abs(dbPos[id].x - p.x) > 1 || Math.abs(dbPos[id].y - p.y) > 1));
+  if (!differ.length) { forget(); return; }
+  askConfirm("Save this browser's map layout?", {
+    text: "This browser has a map layout that isn't saved in Boltarr. Save it, so every browser, device and backup shows it?\n\nCancel keeps the layout Boltarr already has.",
+    button: "Save it",
+  }).then(ok => {
+    forget();
+    if (!ok) return;
+    const before = _spots();
+    differ.forEach(([id, p]) => cy.getElementById(id).position({ x: p.x, y: p.y }));
+    _recordMove(before);   // can be undone like any move
+  });
+}
+
+function _dbSpots(nodes) {
+  const dbPos = {};
+  (nodes || []).forEach(n => {
+    if (n.data.pos_x != null && n.data.pos_y != null)
+      dbPos[n.data.id] = { x: n.data.pos_x, y: n.data.pos_y };
+  });
+  return dbPos;
 }
 
 function restoreLayout(dbNodes) {
   try {
-    // This browser's layout first, the saved (Save Layout) one for anything it lacks
-    let local = {};
-    try { local = JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {}; } catch {}
-    const dbPos = {};
-    (dbNodes || []).forEach(n => {
-      if (n.data.pos_x != null && n.data.pos_y != null)
-        dbPos[n.data.id] = { x: n.data.pos_x, y: n.data.pos_y };
-    });
-    if (!Object.keys(local).length && !Object.keys(dbPos).length) return false;
+    const dbPos = _dbSpots(dbNodes);
+    _offerOldLayout(dbPos);
+    if (!Object.keys(dbPos).length) return false;
     const unplaced = [];
     cy.nodes().forEach(n => {
-      const p = local[n.id()] || dbPos[n.id()];
+      const p = dbPos[n.id()];
       if (p) n.position(p); else unplaced.push(n);
     });
     placeUnpositioned(unplaced);
@@ -665,29 +795,9 @@ function placeUnpositioned(nodes) {
   });
   const cols = Math.max(4, Math.ceil(Math.sqrt(rest.length)));
   rest.forEach((n, i) => n.position({ x: bb.x1 + (i % cols) * 110, y: bb.y2 + 110 + Math.floor(i / cols) * 100 }));
-}
-
-async function saveLayoutToDb() {
-  const positions = {};
-  cy.nodes().forEach(n => { positions[n.id()] = n.position(); });
-  const btn = document.getElementById("saveLayoutBtn");
-  try {
-    btn.disabled = true;
-    btn.textContent = "Saving…";
-    const r = await fetch("/api/layout", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ positions }),
-    });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);       // F-42: a refused save isn't "Saved"
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(positions));
-    saveViewportLocally();
-    btn.textContent = "✓ Saved";
-    setTimeout(() => { btn.textContent = "⊙ Save Layout"; btn.disabled = false; }, 1800);
-  } catch (e) {
-    btn.textContent = "Error";
-    btn.disabled = false;
-  }
+  const picked = {};
+  nodes.forEach(n => { picked[n.id()] = { ...n.position() }; });
+  _queueSave(picked);      // saved (not an undo step), so every browser puts them in the same spot
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -726,9 +836,8 @@ function renderGraph(nodes, edges) {
 
   if (!wasEmpty && added.length) {
     // found by a scan while the map was open: give them a spot, not the corner
-    const saved = (() => { try { return JSON.parse(localStorage.getItem(LAYOUT_KEY) || "{}") || {}; } catch { return {}; } })();
     placeUnpositioned(added.filter(n => {
-      const p = saved[n.id()] || (n.data("pos_x") != null && n.data("pos_y") != null ? { x: n.data("pos_x"), y: n.data("pos_y") } : null);
+      const p = n.data("pos_x") != null && n.data("pos_y") != null ? { x: n.data("pos_x"), y: n.data("pos_y") } : null;
       if (p) n.position(p);
       return !p;
     }));
@@ -737,6 +846,7 @@ function renderGraph(nodes, edges) {
   if (wasEmpty) {
     const hadSaved = restoreLayout(nodes);
     if (!hadSaved) {
+      cy.one("layoutstop", () => _queueSave(_spots()));   // the first layout is saved, so every browser shows the same one
       cy.layout({
         name:             "cose",
         animate:          true,
@@ -748,7 +858,8 @@ function renderGraph(nodes, edges) {
     }
   }
 
-  cy.off("dragfree").on("dragfree", "node", saveLayoutLocally);
+  cy.off("grab").on("grab", "node", _onGrab);
+  cy.off("free").on("free", "node", _onFree);
   cy.off("viewport").on("viewport", _scheduleVpSave);
 
   applySubnetVisibility();

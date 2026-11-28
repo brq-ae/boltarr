@@ -243,6 +243,18 @@ def test_layout_saves_positions(client, tidy):
         assert tuple(conn.execute("SELECT pos_x, pos_y FROM hosts WHERE ip=?", (f"{NET}.10.1",)).fetchone()) == (12.5, -40)
 
 
+def test_layout_refuses_bad_spots(client, tidy):
+    """F-46: moves save on their own now, so a bad spot is refused, never stored."""
+    _host(client, f"{NET}.10.1")
+    for bad in ({"x": "left", "y": 1}, {"x": 1}, {"x": 1e400, "y": 1}, "here"):
+        assert client.put("/api/layout", json={"positions": {f"{NET}.10.1": bad}}).status_code == 422, bad
+    r = client.put("/api/layout", content='{"positions": {"%s.10.1": {"x": NaN, "y": 1}}}' % NET,
+                   headers={"content-type": "application/json"})
+    assert r.status_code == 422
+    with get_conn() as conn:
+        assert tuple(conn.execute("SELECT pos_x, pos_y FROM hosts WHERE ip=?", (f"{NET}.10.1",)).fetchone()) == (None, None)
+
+
 # ── Login, scans, maintenance, SSH ────────────────────────────────────────────
 
 def test_logout_clears_the_cookie(client):

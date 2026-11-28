@@ -289,5 +289,5 @@ registerActions({
 });
 // graph.js functions, looked up when clicked (graph.js loads before registerActions exists)
 registerActions(Object.fromEntries(["toggleConnectMode", "toggleMultiConnectMode", "openMultiConnModal",
-  "saveLayoutToDb", "closeConnModal", "saveConnection", "closeMultiConnModal", "saveMultiConnections"]
+  "undoMove", "closeConnModal", "saveConnection", "closeMultiConnModal", "saveMultiConnections"]
   .map(n => [n, function (...a) { return window[n].apply(this, a); }])));

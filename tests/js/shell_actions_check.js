@@ -103,7 +103,7 @@ const w = dom.window, d = w.document;
 
   // Topology toolbar
   spyClick('#panel-topology [data-click="openNetworkAnalysis"]', "openNetworkAnalysis");
-  for (const n of ["toggleConnectMode", "toggleMultiConnectMode", "openMultiConnModal", "saveLayoutToDb"]) {
+  for (const n of ["toggleConnectMode", "toggleMultiConnectMode", "openMultiConnModal", "undoMove"]) {
     w.eval(`var __g_${n} = ${n}; ${n} = function () { window.__hit = "${n}" }`);
     w.__hit = null; clickEl(q(`#panel-topology [data-click="${n}"]`));
     check(w.__hit === n, `toolbar ${n} reaches graph.js`);
